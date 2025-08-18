@@ -1,0 +1,172 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      SA_PASSWORD: "YourStrong@Passw0rd"
+      ACCEPT_EULA: "Y"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - ecommerce-network
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ecommerce-network
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - ecommerce-network
+
+  eventstore:
+    image: eventstore/eventstore:latest
+    ports:
+      - "2113:2113"
+      - "1113:1113"
+    environment:
+      EVENTSTORE_CLUSTER_SIZE: 1
+      EVENTSTORE_RUN_PROJECTIONS: All
+      EVENTSTORE_START_STANDARD_PROJECTIONS: true
+      EVENTSTORE_INSECURE: true
+    volumes:
+      - eventstore_data:/var/lib/eventstore
+    networks:
+      - ecommerce-network
+
+  # Microservices
+  identity-service:
+    build:
+      context: .
+      dockerfile: src/Services/Identity/ECommerce.Services.Identity/Dockerfile
+    ports:
+      - "7000:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=ECommerceIdentity;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
+    depends_on:
+      - sqlserver
+    networks:
+      - ecommerce-network
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: src/Services/Catalog/ECommerce.Services.Catalog/Dockerfile
+    ports:
+      - "7001:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      CatalogDatabase__ConnectionString: "mongodb://mongodb:27017"
+      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+    depends_on:
+      - mongodb
+      - rabbitmq
+    networks:
+      - ecommerce-network
+
+  basket-service:
+    build:
+      context: .
+      dockerfile: src/Services/Basket/ECommerce.Services.Basket/Dockerfile
+    ports:
+      - "7002:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Redis: "redis:6379"
+      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+      Services__Catalog: "http://catalog-service:80"
+    depends_on:
+      - redis
+      - rabbitmq
+      - catalog-service
+    networks:
+      - ecommerce-network
+
+  ordering-service:
+    build:
+      context: .
+      dockerfile: src/Services/Ordering/ECommerce.Services.Ordering/Dockerfile
+    ports:
+      - "7003:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=ECommerceOrdering;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
+      ConnectionStrings__EventStore: "esdb://eventstore:2113?tls=false"
+      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+    depends_on:
+      - sqlserver
+      - eventstore
+      - rabbitmq
+    networks:
+      - ecommerce-network
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: src/Services/Payment/ECommerce.Services.Payment/Dockerfile
+    ports:
+      - "7004:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=ECommercePayment;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
+      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+    depends_on:
+      - sqlserver
+      - rabbitmq
+    networks:
+      - ecommerce-network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/ApiGateway/ECommerce.ApiGateway/Dockerfile
+    ports:
+      - "7100:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    depends_on:
+      - identity-service
+      - catalog-service
+      - basket-service
+      - ordering-service
+      - payment-service
+    networks:
+      - ecommerce-network
+
+volumes:
+  sqlserver_data:
+  mongodb_data:
+  redis_data:
+  rabbitmq_data:
+  eventstore_data:
+
+networks:
+  ecommerce-network:
+    driver: bridge

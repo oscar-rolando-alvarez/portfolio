@@ -1,0 +1,246 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+  compression:
+    enabled: true
+  http2:
+    enabled: true
+
+spring:
+  application:
+    name: crypto-trading-platform
+  
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/crypto_trading}
+    username: ${DB_USERNAME:crypto_user}
+    password: ${DB_PASSWORD:crypto_password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        use_sql_comments: true
+        jdbc:
+          batch_size: 25
+        order_inserts: true
+        order_updates: true
+        cache:
+          use_second_level_cache: true
+          use_query_cache: true
+          region:
+            factory_class: org.hibernate.cache.jcache.JCacheRegionFactory
+  
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.xml
+    contexts: ${LIQUIBASE_CONTEXTS:dev}
+  
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 8
+          min-idle: 2
+  
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      batch-size: 16384
+      linger-ms: 5
+      buffer-memory: 33554432
+    consumer:
+      group-id: crypto-trading-platform
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "com.cryptotrading.*"
+    listener:
+      ack-mode: manual_immediate
+      concurrency: 3
+  
+  security:
+    jwt:
+      secret: ${JWT_SECRET:mySecretKey123456789012345678901234567890}
+      expiration: ${JWT_EXPIRATION:86400000} # 24 hours in milliseconds
+      refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000} # 7 days in milliseconds
+
+# Hazelcast Configuration
+hazelcast:
+  cluster-name: crypto-trading-cluster
+  network:
+    port: 5701
+    port-auto-increment: true
+    join:
+      multicast:
+        enabled: false
+      tcp-ip:
+        enabled: true
+        members: ${HAZELCAST_MEMBERS:127.0.0.1}
+
+# Exchange API Configuration
+exchanges:
+  binance:
+    api-url: https://api.binance.com
+    ws-url: wss://stream.binance.com:9443/ws
+    api-key: ${BINANCE_API_KEY:}
+    secret-key: ${BINANCE_SECRET_KEY:}
+    enabled: true
+    rate-limit:
+      requests-per-minute: 1200
+      weight-per-minute: 6000
+  
+  coinbase:
+    api-url: https://api.exchange.coinbase.com
+    ws-url: wss://ws-feed.exchange.coinbase.com
+    api-key: ${COINBASE_API_KEY:}
+    secret-key: ${COINBASE_SECRET_KEY:}
+    passphrase: ${COINBASE_PASSPHRASE:}
+    enabled: true
+    rate-limit:
+      requests-per-second: 10
+  
+  kraken:
+    api-url: https://api.kraken.com
+    ws-url: wss://ws.kraken.com
+    api-key: ${KRAKEN_API_KEY:}
+    secret-key: ${KRAKEN_SECRET_KEY:}
+    enabled: true
+    rate-limit:
+      requests-per-minute: 60
+
+# Trading Engine Configuration
+trading:
+  engine:
+    matching:
+      max-orders-per-book: 10000
+      price-precision: 8
+      quantity-precision: 8
+    risk:
+      max-position-size: 1000000
+      max-daily-loss: 100000
+      max-drawdown: 0.2
+      margin-requirement: 0.1
+    arbitrage:
+      min-profit-threshold: 0.001
+      max-exposure: 50000
+      enabled: true
+
+# WebSocket Configuration
+websocket:
+  path: /ws
+  allowed-origins: "*"
+  max-text-message-size: 8192
+  max-binary-message-size: 8192
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# Logging Configuration
+logging:
+  level:
+    com.cryptotrading: ${LOG_LEVEL:INFO}
+    org.springframework.security: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:WARN}
+    org.hibernate.type.descriptor.sql.BasicBinder: ${SQL_PARAM_LOG_LEVEL:WARN}
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/crypto-trading.log
+    max-size: 100MB
+    max-history: 30
+
+---
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+  
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+logging:
+  level:
+    com.cryptotrading: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+exchanges:
+  binance:
+    enabled: false
+  coinbase:
+    enabled: false
+  kraken:
+    enabled: false
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+  
+  jpa:
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+logging:
+  level:
+    com.cryptotrading: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+
+server:
+  shutdown: graceful
+  servlet:
+    session:
+      timeout: 30m
+
+management:
+  endpoint:
+    health:
+      show-details: never

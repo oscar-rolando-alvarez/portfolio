@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <include file="db/changelog/001-create-users-table.xml"/>
+    <include file="db/changelog/002-create-trading-pairs-table.xml"/>
+    <include file="db/changelog/003-create-accounts-table.xml"/>
+    <include file="db/changelog/004-create-balances-table.xml"/>
+    <include file="db/changelog/005-create-orders-table.xml"/>
+    <include file="db/changelog/006-create-trades-table.xml"/>
+    <include file="db/changelog/007-create-positions-table.xml"/>
+    <include file="db/changelog/008-create-transactions-table.xml"/>
+    <include file="db/changelog/009-create-portfolios-table.xml"/>
+    <include file="db/changelog/010-create-portfolio-snapshots-table.xml"/>
+    <include file="db/changelog/011-create-market-data-table.xml"/>
+    <include file="db/changelog/012-create-sequences.xml"/>
+    <include file="db/changelog/013-create-indexes.xml"/>
+    <include file="db/changelog/014-insert-default-data.xml"/>
+
+</databaseChangeLog>

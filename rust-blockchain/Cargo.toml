@@ -1,0 +1,107 @@
+[package]
+name = "rust-blockchain"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A functional blockchain implementation in Rust"
+license = "MIT"
+repository = "https://github.com/your-username/rust-blockchain"
+
+[dependencies]
+# Serialization and deserialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Cryptography
+sha2 = "0.10"
+secp256k1 = { version = "0.27", features = ["rand", "recovery", "global-context"] }
+ring = "0.16"
+hex = "0.4"
+base58 = "0.2"
+rand = "0.8"
+
+# Networking
+libp2p = { version = "0.52", features = [
+    "tcp",
+    "mdns",
+    "noise",
+    "yamux",
+    "gossipsub",
+    "identify",
+    "kad",
+    "request-response",
+    "ping",
+    "floodsub",
+    "autonat",
+    "relay",
+    "dcutr"
+] }
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+
+# Web framework
+actix-web = "4.0"
+actix-cors = "0.6"
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+colored = "2.0"
+
+# Database and persistence
+sled = "0.34"
+rocksdb = "0.21"
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.10"
+thiserror = "1.0"
+anyhow = "1.0"
+
+# BIP39 for mnemonic phrases
+bip39 = "2.0"
+
+# Smart contract VM
+wasmtime = "12.0"
+
+# Testing
+mockall = "0.11"
+num_cpus = "1.0"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[dev-dependencies]
+tempfile = "3.0"
+proptest = "1.0"
+
+[[bin]]
+name = "blockchain-cli"
+path = "src/bin/cli.rs"
+
+[[bin]]
+name = "blockchain-node"
+path = "src/bin/node.rs"
+
+[[bin]]
+name = "blockchain-miner"
+path = "src/bin/miner.rs"
+
+[[benchmark]]
+name = "blockchain_bench"
+harness = false
+
+[lib]
+name = "rust_blockchain"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+debug = true

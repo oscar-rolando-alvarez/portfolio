@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # Development environment
+  app-dev:
+    build:
+      context: .
+      target: development
+    container_name: collaboration-canvas-dev
+    ports:
+      - "3000:3000"   # Vite dev server
+      - "3001:3001"   # Socket.io server
+      - "5173:5173"   # Vite HMR
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_SERVER_URL=http://localhost:3001
+    command: npm run dev
+    profiles:
+      - dev
+
+  # Production environment
+  app-prod:
+    build:
+      context: .
+      target: production
+    container_name: collaboration-canvas-prod
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - CLIENT_URL=http://localhost:3000
+    restart: unless-stopped
+    profiles:
+      - prod
+
+  # Redis for session management and real-time features
+  redis:
+    image: redis:7-alpine
+    container_name: collaboration-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    profiles:
+      - prod
+      - dev
+
+  # Nginx reverse proxy (production only)
+  nginx:
+    image: nginx:alpine
+    container_name: collaboration-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app-prod
+    restart: unless-stopped
+    profiles:
+      - prod
+
+  # MongoDB for persistent data storage (optional)
+  mongodb:
+    image: mongo:5
+    container_name: collaboration-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password123
+      - MONGO_INITDB_DATABASE=collaboration
+    restart: unless-stopped
+    profiles:
+      - prod
+
+volumes:
+  redis_data:
+    driver: local
+  mongo_data:
+    driver: local
+
+networks:
+  default:
+    name: collaboration-network

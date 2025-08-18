@@ -1,0 +1,125 @@
+[package]
+name = "rust-web-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "High-performance web server using Rust and Actix-Web"
+license = "MIT"
+
+[dependencies]
+# Core web framework
+actix-web = "4.4"
+actix-web-actors = "4.3"
+actix-cors = "0.7"
+actix-files = "0.6"
+actix-multipart = "0.6"
+actix-http = "3.4"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+futures = "0.3"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "macros"] }
+deadpool-postgres = "0.12"
+
+# Redis
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+deadpool-redis = "0.14"
+
+# Authentication & Security
+jsonwebtoken = "9.2"
+argon2 = "0.5"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+sha2 = "0.10"
+num_cpus = "1.16"
+lazy_static = "1.4"
+tokio-stream = "0.1"
+
+# Rate limiting
+governor = "0.6"
+nonzero_ext = "0.3"
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
+# Metrics & Monitoring
+prometheus = "0.13"
+metrics = "0.22"
+metrics-prometheus = "0.6"
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-actix-web = "0.7"
+log = "0.4"
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# GraphQL
+async-graphql = "7.0"
+async-graphql-actix-web = "7.0"
+
+# Validation
+validator = { version = "0.16", features = ["derive"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Compression
+flate2 = "1.0"
+brotli = "3.4"
+
+# OpenAPI documentation
+utoipa = { version = "4.2", features = ["actix_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "6.0", features = ["actix-web"] }
+
+# Background tasks
+tokio-cron-scheduler = "0.9"
+
+# Health checks
+actix-web-httpauth = "0.8"
+
+[dev-dependencies]
+# Testing
+actix-rt = "2.9"
+actix-test = "0.1"
+tokio-test = "0.4"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Load testing
+artillery = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+
+[profile.bench]
+debug = true
+
+[[bench]]
+name = "server_benchmark"
+harness = false
+
+[features]
+default = ["postgres", "redis"]
+postgres = []
+redis = []
+graphql = ["async-graphql", "async-graphql-actix-web"]

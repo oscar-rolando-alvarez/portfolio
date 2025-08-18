@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-service-account
+  namespace: recommendation-system
+  labels:
+    app: graphql-recommendation-api
+    component: api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-role
+  namespace: recommendation-system
+  labels:
+    app: graphql-recommendation-api
+    component: api
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-role-binding
+  namespace: recommendation-system
+  labels:
+    app: graphql-recommendation-api
+    component: api
+subjects:
+- kind: ServiceAccount
+  name: api-service-account
+  namespace: recommendation-system
+roleRef:
+  kind: Role
+  name: api-role
+  apiGroup: rbac.authorization.k8s.io

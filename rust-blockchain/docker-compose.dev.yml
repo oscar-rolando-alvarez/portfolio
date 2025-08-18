@@ -1,0 +1,73 @@
+version: '3.8'
+
+# Development environment with hot reloading and debugging
+services:
+  blockchain-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:8080"    # API port
+      - "8333:8333"    # P2P port
+      - "9229:9229"    # Debug port
+    volumes:
+      - .:/app
+      - dev_target:/app/target
+      - dev_data:/data
+      - ./logs:/logs
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      - BLOCKCHAIN_NETWORK=development
+    command: >
+      cargo watch -x "run --bin blockchain-node --
+      --data-dir /data
+      --api-host 0.0.0.0
+      --api-port 8080
+      --p2p-port 8333
+      --network development"
+    working_dir: /app
+
+  # Development database for testing
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=blockchain_dev
+      - POSTGRES_USER=blockchain
+      - POSTGRES_PASSWORD=dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # Redis for caching during development
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  # Development tools container
+  tools:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    volumes:
+      - .:/app
+      - dev_target:/app/target
+    working_dir: /app
+    profiles:
+      - tools
+
+volumes:
+  dev_target:
+    driver: local
+  dev_data:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

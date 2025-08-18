@@ -1,0 +1,42 @@
+# Docker Compose override for development
+version: '3.8'
+
+services:
+  api:
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    command: |
+      sh -c "
+        echo 'Starting in development mode...'
+        python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Development tools
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Redis Insight for Redis management
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: redis-insight
+    ports:
+      - "8001:8001"
+    volumes:
+      - redis_insight_data:/db
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+volumes:
+  redis_insight_data:

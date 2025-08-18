@@ -1,0 +1,43 @@
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx==0.25.2
+fakeredis==2.20.1
+
+# Code Quality
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+mypy==1.7.1
+bandit==1.7.5
+
+# Security
+safety==2.3.5
+
+# Development Tools
+pre-commit==3.6.0
+ipython==8.18.1
+jupyter==1.0.0
+jupyterlab==4.0.9
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.4.8
+mkdocs-mermaid2-plugin==1.1.1
+
+# Profiling & Monitoring
+py-spy==0.3.14
+memory-profiler==0.61.0
+
+# API Testing
+locust==2.17.0
+
+# Database Testing
+pytest-postgresql==5.0.0
+pytest-redis==3.0.2
+
+# Type Checking
+types-redis==4.6.0.11
+types-requests==2.31.0.10

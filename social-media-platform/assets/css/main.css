@@ -1,0 +1,269 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+
+  * {
+    @apply border-gray-200;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+  }
+
+  .btn-secondary {
+    @apply btn bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+  }
+
+  .input {
+    @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm;
+  }
+
+  .textarea {
+    @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm;
+  }
+
+  .nav-link {
+    @apply flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors;
+  }
+
+  .nav-link-active {
+    @apply nav-link bg-primary-100 text-primary-700;
+  }
+
+  .nav-link-inactive {
+    @apply nav-link text-gray-600 hover:text-gray-900 hover:bg-gray-50;
+  }
+
+  .post-content {
+    @apply prose prose-sm max-w-none;
+  }
+
+  .post-content p {
+    @apply mb-3;
+  }
+
+  .post-content a {
+    @apply text-primary-600 hover:text-primary-500;
+  }
+
+  .story-ring {
+    @apply ring-2 ring-primary-500 ring-offset-2;
+  }
+
+  .story-viewed {
+    @apply ring-gray-300;
+  }
+
+  .message-bubble {
+    @apply max-w-xs lg:max-w-md px-4 py-2 rounded-lg;
+  }
+
+  .message-sent {
+    @apply message-bubble bg-primary-600 text-white ml-auto;
+  }
+
+  .message-received {
+    @apply message-bubble bg-gray-200 text-gray-900;
+  }
+
+  .loading-spinner {
+    @apply animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600;
+  }
+
+  .skeleton {
+    @apply animate-pulse bg-gray-200 rounded;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-600 to-purple-600 bg-clip-text text-transparent;
+  }
+
+  .shadow-float {
+    box-shadow: 0 4px 14px 0 rgba(0, 0, 0, 0.1);
+  }
+
+  .border-gradient {
+    border-image: linear-gradient(45deg, #3b82f6, #8b5cf6) 1;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+  .dark {
+    @apply bg-gray-900 text-gray-100;
+  }
+
+  .dark .card {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .dark .input,
+  .dark .textarea {
+    @apply bg-gray-800 border-gray-600 text-gray-100;
+  }
+
+  .dark .nav-link-inactive {
+    @apply text-gray-300 hover:text-gray-100 hover:bg-gray-800;
+  }
+
+  .dark .message-received {
+    @apply bg-gray-700 text-gray-100;
+  }
+
+  .dark .skeleton {
+    @apply bg-gray-700;
+  }
+}
+
+/* Custom scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Story viewer */
+.story-viewer {
+  @apply fixed inset-0 z-50 bg-black;
+}
+
+.story-progress {
+  @apply absolute top-0 left-0 right-0 flex space-x-1 p-4;
+}
+
+.story-progress-bar {
+  @apply flex-1 h-1 bg-gray-600 rounded-full overflow-hidden;
+}
+
+.story-progress-fill {
+  @apply h-full bg-white transition-all duration-300 ease-linear;
+}
+
+/* Message status indicators */
+.message-status {
+  @apply text-xs text-gray-500 mt-1;
+}
+
+.message-status.delivered {
+  @apply text-blue-500;
+}
+
+.message-status.read {
+  @apply text-green-500;
+}
+
+/* Notification badge */
+.notification-badge {
+  @apply absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center;
+}
+
+/* Infinite scroll loading */
+.infinite-scroll-loading {
+  @apply flex items-center justify-center py-4;
+}
+
+/* Video controls */
+.video-controls {
+  @apply absolute bottom-4 left-4 right-4 flex items-center space-x-2 bg-black bg-opacity-50 rounded-lg p-2;
+}
+
+/* Image compression indicator */
+.compression-indicator {
+  @apply absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded;
+}
+
+/* Analytics dashboard */
+.analytics-card {
+  @apply card p-4;
+}
+
+.analytics-metric {
+  @apply text-2xl font-bold text-gray-900;
+}
+
+.analytics-label {
+  @apply text-sm text-gray-500;
+}
+
+/* Privacy settings */
+.privacy-toggle {
+  @apply relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+}
+
+.privacy-toggle.enabled {
+  @apply bg-primary-600;
+}
+
+.privacy-toggle.disabled {
+  @apply bg-gray-200;
+}
+
+.privacy-toggle-switch {
+  @apply inline-block h-4 w-4 transform rounded-full bg-white transition-transform;
+}
+
+.privacy-toggle.enabled .privacy-toggle-switch {
+  @apply translate-x-6;
+}
+
+.privacy-toggle.disabled .privacy-toggle-switch {
+  @apply translate-x-1;
+}

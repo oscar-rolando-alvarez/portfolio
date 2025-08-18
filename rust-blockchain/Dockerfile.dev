@@ -1,0 +1,43 @@
+# Development Dockerfile with hot reloading
+FROM rust:1.75-bullseye
+
+# Install development dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    cmake \
+    clang \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-watch for hot reloading
+RUN cargo install cargo-watch
+
+# Install additional development tools
+RUN cargo install cargo-audit cargo-outdated cargo-tree
+
+# Create app directory
+WORKDIR /app
+
+# Copy manifests first for better layer caching
+COPY Cargo.toml Cargo.lock ./
+
+# Create dummy main.rs to build dependencies
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies
+RUN cargo build
+
+# Remove dummy file
+RUN rm src/main.rs
+
+# Set environment for development
+ENV RUST_LOG=debug
+ENV RUST_BACKTRACE=1
+
+# Expose ports for debugging
+EXPOSE 8080 8333 9229
+
+# Default command for development
+CMD ["cargo", "watch", "-x", "run"]

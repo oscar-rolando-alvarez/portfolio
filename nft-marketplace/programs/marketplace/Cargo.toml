@@ -1,0 +1,33 @@
+[package]
+name = "marketplace"
+version = "0.1.0"
+description = "Advanced NFT Marketplace with comprehensive trading features"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "marketplace"
+
+[[bin]]
+name = "marketplace"
+path = "src/bin/cli.rs"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-program = { workspace = true }
+mpl-token-metadata = { workspace = true }
+spl-token = { workspace = true }
+spl-associated-token-account = { workspace = true }
+borsh = { workspace = true }
+thiserror = { workspace = true }
+num-derive = { workspace = true }
+num-traits = { workspace = true }
+arrayref = { workspace = true }

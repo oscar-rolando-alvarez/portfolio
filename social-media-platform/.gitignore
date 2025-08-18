@@ -1,0 +1,112 @@
+# Nuxt dev/build outputs
+.output
+.nuxt
+.nitro
+.cache
+dist
+
+# Node dependencies
+node_modules
+
+# Logs
+*.log*
+lerna-debug.log*
+
+# Misc
+.DS_Store
+.fleet
+.idea
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# Uploads and media files
+uploads/
+media/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Test coverage
+coverage/
+*.lcov
+
+# Prisma
+prisma/migrations/
+!prisma/migrations/.gitkeep
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# SSL certificates
+ssl/
+*.pem
+*.key
+*.crt
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# PWA files
+sw.js
+workbox-*.js
+precache-manifest.*.js
+
+# Build artifacts
+.output/
+.nuxt/
+.vercel/
+.netlify/
+
+# Package manager lock files (keep only one)
+# yarn.lock
+# pnpm-lock.yaml
+
+# Environment-specific files
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Analytics and monitoring
+.next/
+.vercel/
+
+# Sentry
+.sentryclirc
+
+# Docker
+.dockerignore

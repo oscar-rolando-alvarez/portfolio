@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: socialconnect-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: socialconnect
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - socialconnect-network
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: socialconnect-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - socialconnect-network
+
+  # Main application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: socialconnect-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/socialconnect
+      
+      # JWT & Auth
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      
+      # Redis
+      REDIS_URL: redis://redis:6379
+      
+      # File Upload (configure based on your cloud provider)
+      CLOUDINARY_CLOUD_NAME: your-cloudinary-cloud-name
+      CLOUDINARY_API_KEY: your-cloudinary-api-key
+      CLOUDINARY_API_SECRET: your-cloudinary-api-secret
+      
+      # Firebase (for push notifications)
+      FIREBASE_PROJECT_ID: your-firebase-project-id
+      FIREBASE_PRIVATE_KEY: your-firebase-private-key
+      FIREBASE_CLIENT_EMAIL: your-firebase-client-email
+      
+      # VAPID Keys for web push
+      VAPID_PUBLIC_KEY: your-vapid-public-key
+      VAPID_PRIVATE_KEY: your-vapid-private-key
+      
+      # App Configuration
+      APP_URL: http://localhost:3000
+      NODE_ENV: production
+    depends_on:
+      - db
+      - redis
+    networks:
+      - socialconnect-network
+    volumes:
+      - ./uploads:/app/uploads
+
+  # Nginx reverse proxy (optional, for production)
+  nginx:
+    image: nginx:alpine
+    container_name: socialconnect-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+    networks:
+      - socialconnect-network
+
+networks:
+  socialconnect-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

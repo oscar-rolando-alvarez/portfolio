@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # Development override for API service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: financial_api_dev
+    environment:
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: financial_analysis_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/financial_analysis_dev
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      
+      # Celery
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      
+      # JWT
+      JWT_SECRET_KEY: dev-jwt-secret-key
+      
+      # CORS
+      ALLOWED_ORIGINS: "*"
+      ALLOWED_HOSTS: "*"
+      
+      # Application
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - .:/app
+      - /app/.venv  # Exclude virtual environment
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+
+  # Development database with different name
+  postgres:
+    environment:
+      POSTGRES_DB: financial_analysis_dev
+
+  # Development Celery worker
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: financial_celery_worker_dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: financial_analysis_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/financial_analysis_dev
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - .:/app
+    command: celery -A src.infrastructure.messaging.celery_app worker --loglevel=debug --concurrency=2
+
+  # Development Celery beat
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: financial_celery_beat_dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: financial_analysis_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/financial_analysis_dev
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - .:/app
+    command: celery -A src.infrastructure.messaging.celery_app beat --loglevel=debug
+
+  # Jupyter Lab for ML experimentation
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: financial_jupyter
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: financial_analysis_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/financial_analysis_dev
+      REDIS_URL: redis://redis:6379/0
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/app
+      - ./notebooks:/app/notebooks
+    networks:
+      - financial_network
+    depends_on:
+      - postgres
+      - redis
+
+  # pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: financial_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@financial.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - financial_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  pgadmin_data:

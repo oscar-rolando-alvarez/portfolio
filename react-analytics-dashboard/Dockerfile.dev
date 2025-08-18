@@ -1,0 +1,26 @@
+# Development Dockerfile with hot reload
+FROM node:18-alpine
+
+# Install dependencies for development
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Expose ports for Next.js and Storybook
+EXPOSE 3000 6006
+
+# Create a script to run both Next.js and Storybook
+RUN echo '#!/bin/sh\nnpm run dev &\nnpm run storybook &\nwait' > /start.sh
+RUN chmod +x /start.sh
+
+# Start development server
+CMD ["/start.sh"]

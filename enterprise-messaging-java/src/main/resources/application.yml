@@ -1,0 +1,161 @@
+spring:
+  application:
+    name: enterprise-messaging-system
+  
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/messaging_db}
+    username: ${DATABASE_USERNAME:messaging_user}
+    password: ${DATABASE_PASSWORD:messaging_pass}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+    open-in-view: false
+  
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.xml
+    contexts: ${LIQUIBASE_CONTEXTS:dev}
+  
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: ${REDIS_DATABASE:0}
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 20
+        max-wait: -1ms
+        max-idle: 10
+        min-idle: 5
+  
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      retries: 3
+      batch-size: 16384
+      linger-ms: 1
+      buffer-memory: 33554432
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: messaging-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.enterprise.messaging.event"
+  
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+  http2:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.enterprise.messaging: ${LOG_LEVEL:INFO}
+    org.springframework.security: ${SECURITY_LOG_LEVEL:WARN}
+    org.springframework.kafka: ${KAFKA_LOG_LEVEL:WARN}
+  pattern:
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"
+
+messaging:
+  jwt:
+    secret: ${JWT_SECRET:mySecretKey}
+    expiration: ${JWT_EXPIRATION:86400000} # 24 hours
+  
+  encryption:
+    enabled: ${ENCRYPTION_ENABLED:false}
+    algorithm: AES
+    key: ${ENCRYPTION_KEY:}
+  
+  kafka:
+    consumer-group-id: ${KAFKA_CONSUMER_GROUP:messaging-service}
+  
+  file-upload:
+    max-size: ${FILE_UPLOAD_MAX_SIZE:50MB}
+    allowed-types: image/jpeg,image/png,image/gif,video/mp4,audio/mpeg,application/pdf
+    storage-path: ${FILE_STORAGE_PATH:/tmp/messaging-uploads}
+  
+  websocket:
+    message-size-limit: ${WEBSOCKET_MESSAGE_SIZE:131072} # 128KB
+    buffer-size-limit: ${WEBSOCKET_BUFFER_SIZE:524288} # 512KB
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: create-drop
+
+logging:
+  level:
+    com.enterprise.messaging: DEBUG
+    org.springframework.security: DEBUG
+
+messaging:
+  encryption:
+    enabled: false
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+logging:
+  level:
+    com.enterprise.messaging: INFO
+    org.springframework.security: WARN
+
+messaging:
+  encryption:
+    enabled: true

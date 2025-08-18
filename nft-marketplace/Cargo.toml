@@ -1,0 +1,38 @@
+[workspace]
+members = [
+    "programs/marketplace",
+    "programs/nft-minting",
+    "programs/auction-system", 
+    "programs/royalty-distribution",
+    "programs/collection-manager",
+    "programs/escrow-system"
+]
+resolver = "2"
+
+[workspace.dependencies]
+anchor-lang = "0.29.0"
+anchor-spl = "0.29.0"
+solana-program = "~1.16.0"
+mpl-token-metadata = "3.2.1"
+mpl-candy-machine = "6.0.1"
+spl-token = "4.0.0"
+spl-associated-token-account = "2.2.0"
+spl-token-2022 = "1.0.0"
+arrayref = "0.3.7"
+borsh = { version = "0.10.3", features = ["derive"] }
+thiserror = "1.0.50"
+num-derive = "0.4.1"
+num-traits = "0.2.17"
+hex = "0.4.3"
+sha2 = "0.10.8"
+bs58 = "0.5.0"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1

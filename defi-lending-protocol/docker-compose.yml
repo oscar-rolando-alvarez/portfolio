@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # Main application
+  defi-lending:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com
+      - NEXT_PUBLIC_NETWORK=devnet
+    volumes:
+      - ./scripts:/app/scripts
+      - solana-data:/root/.local/share/solana
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  # PostgreSQL for analytics and indexing
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: defi_lending
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+
+  # Solana test validator (for local development)
+  solana-validator:
+    image: solanalabs/solana:v1.17.0
+    command: >
+      solana-test-validator
+      --ledger /solana-ledger
+      --bind-address 0.0.0.0
+      --rpc-bind-address 0.0.0.0
+      --faucet-sol 1000000
+      --reset
+    ports:
+      - "8899:8899"
+      - "8900:8900"
+      - "9900:9900"
+    volumes:
+      - solana-ledger:/solana-ledger
+    profiles:
+      - local
+    restart: unless-stopped
+
+  # Price oracle simulator (for testing)
+  oracle-simulator:
+    build:
+      context: .
+      dockerfile: oracle/Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=http://solana-validator:8899
+    depends_on:
+      - redis
+      - solana-validator
+    profiles:
+      - local
+    restart: unless-stopped
+
+  # Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - defi-lending
+    profiles:
+      - production
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:
+  solana-data:
+  solana-ledger:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: defi-lending-network

@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # Frontend Application
+  frontend:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_SOLANA_NETWORK=devnet
+      - NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
+      - NEXT_PUBLIC_WEBSOCKET_URL=ws://websocket:3001
+    depends_on:
+      - websocket
+      - redis
+    volumes:
+      - ./app:/app
+      - /app/node_modules
+    networks:
+      - nft-marketplace
+
+  # WebSocket Server for Real-time Features
+  websocket:
+    build:
+      context: ./websocket-server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+    depends_on:
+      - redis
+    volumes:
+      - ./websocket-server:/app
+      - /app/node_modules
+    networks:
+      - nft-marketplace
+
+  # Redis for Caching and Real-time Data
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - nft-marketplace
+
+  # PostgreSQL for Analytics and Metadata
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=nft_marketplace
+      - POSTGRES_USER=marketplace_user
+      - POSTGRES_PASSWORD=marketplace_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - nft-marketplace
+
+  # Analytics API
+  analytics-api:
+    build:
+      context: ./analytics-api
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://marketplace_user:marketplace_password@postgres:5432/nft_marketplace
+      - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./analytics-api:/app
+      - /app/node_modules
+    networks:
+      - nft-marketplace
+
+  # IPFS Node for Metadata Storage
+  ipfs:
+    image: ipfs/kubo:latest
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8080:8080"
+    volumes:
+      - ipfs_data:/data/ipfs
+    networks:
+      - nft-marketplace
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - websocket
+      - analytics-api
+    networks:
+      - nft-marketplace
+
+  # Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    networks:
+      - nft-marketplace
+
+  # Grafana for Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3003:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - nft-marketplace
+
+volumes:
+  redis_data:
+  postgres_data:
+  ipfs_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  nft-marketplace:
+    driver: bridge

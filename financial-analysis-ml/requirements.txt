@@ -1,0 +1,50 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
+psycopg2-binary==2.9.9
+
+# Cache
+redis==5.0.1
+
+# Message Queue
+celery==5.3.4
+kombu==5.3.4
+
+# Authentication & Security
+PyJWT==2.8.0
+bcrypt==4.1.2
+passlib[bcrypt]==1.7.4
+
+# Machine Learning
+scikit-learn==1.3.2
+tensorflow==2.15.0
+numpy==1.24.3
+pandas==2.1.4
+joblib==1.3.2
+
+# HTTP Clients
+httpx==0.25.2
+aiohttp==3.9.1
+
+# Data Validation
+email-validator==2.1.0
+
+# Configuration
+python-dotenv==1.0.0
+
+# Logging
+python-json-logger==2.0.7
+
+# Date/Time
+python-dateutil==2.8.2
+
+# Utilities
+python-multipart==0.0.6
+jinja2==3.1.2

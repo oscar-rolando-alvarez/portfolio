@@ -1,0 +1,180 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crypto-trading-app
+  labels:
+    app: crypto-trading-app
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: crypto-trading-app
+  template:
+    metadata:
+      labels:
+        app: crypto-trading-app
+        version: v1
+    spec:
+      containers:
+      - name: crypto-trading-app
+        image: crypto-trading-platform:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "prod"
+        - name: DB_URL
+          valueFrom:
+            configMapKeyRef:
+              name: crypto-trading-config
+              key: db.url
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: crypto-trading-secrets
+              key: db.username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: crypto-trading-secrets
+              key: db.password
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: crypto-trading-config
+              key: redis.host
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: crypto-trading-config
+              key: kafka.bootstrap.servers
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: crypto-trading-secrets
+              key: jwt.secret
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/actuator/health/liveness
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/actuator/health/readiness
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: app-logs
+          mountPath: /app/logs
+      volumes:
+      - name: app-logs
+        emptyDir: {}
+      imagePullSecrets:
+      - name: registry-secret
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crypto-trading-service
+  labels:
+    app: crypto-trading-app
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: crypto-trading-app
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crypto-trading-config
+data:
+  db.url: "jdbc:postgresql://postgres-service:5432/crypto_trading"
+  redis.host: "redis-service"
+  redis.port: "6379"
+  kafka.bootstrap.servers: "kafka-service:9092"
+  log.level: "INFO"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: crypto-trading-secrets
+type: Opaque
+data:
+  db.username: Y3J5cHRvX3VzZXI= # crypto_user
+  db.password: Y3J5cHRvX3Bhc3N3b3Jk # crypto_password
+  jwt.secret: bXlTZWNyZXRLZXkxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTA= # base64 encoded JWT secret
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crypto-trading-ingress
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - api.cryptotrading.com
+    secretName: crypto-trading-tls
+  rules:
+  - host: api.cryptotrading.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: crypto-trading-service
+            port:
+              number: 80
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: crypto-trading-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: crypto-trading-app
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

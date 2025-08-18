@@ -1,0 +1,21 @@
+[package]
+name = "auction-system"
+version = "0.1.0"
+description = "Advanced auction system with real-time bidding"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "auction_system"
+
+[features]
+no-entrypoint = []
+no-idl = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-program = { workspace = true }
+borsh = { workspace = true }

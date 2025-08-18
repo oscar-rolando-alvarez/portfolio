@@ -1,0 +1,251 @@
+version: '3.8'
+
+services:
+  # Main API service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: graphql-recommendation-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/recommendation_db
+      - REDIS_NODES=redis://redis-node-1:7000,redis://redis-node-2:7001,redis://redis-node-3:7002
+      - VECTOR_DB_PROVIDER=qdrant
+      - QDRANT_URL=http://qdrant:6333
+      - SECRET_KEY=your-secret-key-change-in-production
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - qdrant
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      - POSTGRES_DB=recommendation_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Redis Cluster Node 1
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: redis-node-1
+    ports:
+      - "7000:7000"
+      - "17000:17000"
+    command: redis-server --port 7000 --cluster-enabled yes --cluster-config-file nodes-7000.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7000.aof --dbfilename dump-7000.rdb --logfile /var/log/redis/redis-7000.log --daemonize no
+    volumes:
+      - redis_data_1:/data
+      - ./logs:/var/log/redis
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Redis Cluster Node 2
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: redis-node-2
+    ports:
+      - "7001:7001"
+      - "17001:17001"
+    command: redis-server --port 7001 --cluster-enabled yes --cluster-config-file nodes-7001.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7001.aof --dbfilename dump-7001.rdb --logfile /var/log/redis/redis-7001.log --daemonize no
+    volumes:
+      - redis_data_2:/data
+      - ./logs:/var/log/redis
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Redis Cluster Node 3
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: redis-node-3
+    ports:
+      - "7002:7002"
+      - "17002:17002"
+    command: redis-server --port 7002 --cluster-enabled yes --cluster-config-file nodes-7002.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-7002.aof --dbfilename dump-7002.rdb --logfile /var/log/redis/redis-7002.log --daemonize no
+    volumes:
+      - redis_data_3:/data
+      - ./logs:/var/log/redis
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Redis Cluster Setup
+  redis-cluster-setup:
+    image: redis:7-alpine
+    container_name: redis-cluster-setup
+    command: |
+      sh -c "
+        echo 'Waiting for Redis nodes to start...'
+        sleep 10
+        echo 'yes' | redis-cli --cluster create redis-node-1:7000 redis-node-2:7001 redis-node-3:7002 --cluster-replicas 0
+      "
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+    networks:
+      - recommendation-network
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-vector-db
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Prometheus (monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Grafana (monitoring dashboard)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Jaeger (distributed tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    volumes:
+      - jaeger_data:/tmp
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Nginx (load balancer/reverse proxy)
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+    networks:
+      - recommendation-network
+    restart: unless-stopped
+
+  # Database migration service
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: db-migrate
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/recommendation_db
+    command: alembic upgrade head
+    depends_on:
+      - postgres
+    networks:
+      - recommendation-network
+    restart: "no"
+
+  # Test runner service
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: test-runner
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/recommendation_test_db
+      - REDIS_NODES=redis://redis-node-1:7000,redis://redis-node-2:7001,redis://redis-node-3:7002
+      - VECTOR_DB_PROVIDER=qdrant
+      - QDRANT_URL=http://qdrant:6333
+    command: |
+      sh -c "
+        echo 'Running tests...'
+        python -m pytest tests/ -v --cov=app --cov-report=html --cov-report=term
+      "
+    volumes:
+      - ./test-results:/app/htmlcov
+    depends_on:
+      - postgres
+      - redis-node-1
+      - qdrant
+    networks:
+      - recommendation-network
+    profiles:
+      - testing
+
+volumes:
+  postgres_data:
+  redis_data_1:
+  redis_data_2:
+  redis_data_3:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+  jaeger_data:
+
+networks:
+  recommendation-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

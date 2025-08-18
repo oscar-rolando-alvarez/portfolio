@@ -1,0 +1,85 @@
+# Core FastAPI and async framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+gunicorn==21.2.0
+
+# Image processing
+opencv-python==4.8.1.78
+Pillow==10.1.0
+numpy==1.24.3
+scikit-image==0.21.0
+
+# OCR capabilities
+pytesseract==0.3.10
+easyocr==1.7.0
+
+# Object detection
+torch==2.1.0
+torchvision==0.16.0
+ultralytics==8.0.196
+transformers==4.35.0
+
+# Message queue
+aio-pika==9.3.1
+aiokafka==0.8.11
+celery==5.3.4
+
+# Cloud storage
+boto3==1.29.7
+aioboto3==12.0.0
+
+# Rate limiting
+slowapi==0.1.9
+redis==5.0.1
+aioredis==2.0.1
+
+# Monitoring and metrics
+prometheus-client==0.19.0
+prometheus-fastapi-instrumentator==6.1.0
+
+# Circuit breaker
+pybreaker==1.0.1
+
+# Database and caching
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.23
+alembic==1.12.1
+
+# HTTP client with circuit breaker
+httpx==0.25.2
+aiohttp==3.9.1
+
+# Validation and serialization
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Logging and tracing
+structlog==23.2.0
+python-json-logger==2.0.7
+opentelemetry-api==1.21.0
+opentelemetry-sdk==1.21.0
+opentelemetry-instrumentation-fastapi==0.42b0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+httpx==0.25.2
+faker==20.1.0
+
+# Development tools
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+pre-commit==3.6.0
+
+# Security
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Utilities
+python-dotenv==1.0.0
+click==8.1.7
+rich==13.7.0
+typer==0.9.0

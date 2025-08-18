@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-processing-config
+  namespace: image-processing
+data:
+  # Application configuration
+  APP_NAME: "Image Processing Service"
+  VERSION: "1.0.0"
+  DEBUG: "false"
+  API_V1_STR: "/api/v1"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  WORKERS: "4"
+  
+  # Logging
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+  ENABLE_CORRELATION_ID: "true"
+  
+  # Rate limiting
+  RATE_LIMIT_PER_MINUTE: "60"
+  RATE_LIMIT_BURST: "10"
+  
+  # Image processing
+  MAX_IMAGE_SIZE_MB: "50"
+  MAX_WORKERS: "4"
+  PROCESSING_TIMEOUT: "300"
+  
+  # OCR
+  OCR_LANGUAGES: "eng,spa,fra,deu"
+  
+  # Object detection
+  YOLO_MODEL_PATH: "yolov8n.pt"
+  DETECTION_CONFIDENCE: "0.5"
+  
+  # Monitoring
+  PROMETHEUS_METRICS_PATH: "/metrics"
+  ENABLE_METRICS: "true"
+  
+  # Circuit breaker
+  CIRCUIT_BREAKER_FAILURE_THRESHOLD: "5"
+  CIRCUIT_BREAKER_RECOVERY_TIMEOUT: "60"
+  
+  # Health check
+  HEALTH_CHECK_INTERVAL: "30"
+  
+  # S3 configuration
+  S3_BUCKET_NAME: "image-processing"
+  S3_REGION: "us-east-1"
+  
+  # Kafka configuration
+  KAFKA_TOPIC_PREFIX: "image-processing"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: image-processing-secrets
+  namespace: image-processing
+type: Opaque
+data:
+  # Base64 encoded secrets
+  SECRET_KEY: eW91ci1zZWNyZXQta2V5LWNoYW5nZS1pbi1wcm9kdWN0aW9u # your-secret-key-change-in-production
+  DATABASE_URL: cG9zdGdyZXNxbCthc3luY3BnOi8vdXNlcjpwYXNzd29yZEBwb3N0Z3JlczozNTQzMi9pbWFnZXByb2Nlc3Npbmc= # postgresql+asyncpg://user:password@postgres:35432/imageprocessing
+  REDIS_URL: cmVkaXM6Ly9yZWRpczozNjM3OQ== # redis://redis:36379
+  REDIS_PASSWORD: "" # Empty password
+  RABBITMQ_URL: YW1xcDovL2d1ZXN0Omd1ZXN0QHJhYmJpdG1xOjM1NjcyLw== # amqp://guest:guest@rabbitmq:35672/
+  KAFKA_BOOTSTRAP_SERVERS: a2Fma2E6MzkwOTI= # kafka:39092
+  S3_ENDPOINT_URL: aHR0cDovL21pbmlvOjM5MDAwIA== # http://minio:39000
+  S3_ACCESS_KEY_ID: bWluaW9hZG1pbg== # minioadmin
+  S3_SECRET_ACCESS_KEY: bWluaW9hZG1pbg== # minioadmin
