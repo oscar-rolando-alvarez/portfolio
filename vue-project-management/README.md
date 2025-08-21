@@ -327,9 +327,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Heroicons](https://heroicons.com/) - Beautiful hand-crafted SVG icons
 - [Chart.js](https://www.chartjs.org/) - Simple yet flexible JavaScript charting
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
-- 📧 Email: support@vue-pm.com
 - 💬 Discord: [Join our community](https://discord.gg/vue-pm)
 - 📖 Documentation: [docs.vue-pm.com](https://docs.vue-pm.com)
 - 🐛 Issues: [GitHub Issues](https://github.com/your-username/vue-project-management/issues)

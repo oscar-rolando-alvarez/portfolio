@@ -584,12 +584,18 @@ This is an educational/demonstration blockchain with several limitations:
 - [Practical Cryptography](https://cryptopals.com/)
 - [Cryptography Engineering](https://www.schneier.com/books/cryptography_engineering/)
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 🤝 Support
 
 - 📚 [Documentation](./docs/)
 - 🐛 [Issue Tracker](https://github.com/your-username/rust-blockchain/issues)
 - 💬 [Discussions](https://github.com/your-username/rust-blockchain/discussions)
-- 📧 [Email Support](mailto:support@example.com)
 
 ## 📄 License
 

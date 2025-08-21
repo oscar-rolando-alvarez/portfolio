@@ -377,9 +377,16 @@ The application uses structured logging with configurable levels:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## Support
 
-For support and questions:
+For technical support and questions:
 
 - **Issues**: GitHub Issues
 - **Documentation**: `/docs` endpoint when running the application

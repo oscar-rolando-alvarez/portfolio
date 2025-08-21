@@ -574,12 +574,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Video.js team for the video player
 - All contributors and community members
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
 - **Documentation**: [https://docs.eduplatform.com](https://docs.eduplatform.com)
 - **Community Forum**: [https://community.eduplatform.com](https://community.eduplatform.com)
 - **Issues**: [GitHub Issues](https://github.com/your-org/angular-lms-platform/issues)
-- **Email**: support@eduplatform.com
 - **Discord**: [Join our Discord](https://discord.gg/eduplatform)
 
 ## 📊 Project Stats

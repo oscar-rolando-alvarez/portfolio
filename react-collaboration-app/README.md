@@ -378,9 +378,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Tailwind CSS](https://tailwindcss.com/) for styling
 - [Lucide](https://lucide.dev/) for icons
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
-For support and questions:
+For technical support and questions:
 - Create an issue on GitHub
 - Check the documentation
 - Review existing issues and discussions

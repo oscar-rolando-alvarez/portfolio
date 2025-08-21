@@ -409,9 +409,16 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Redis](https://redis.io/) - In-memory data structure store
 - [Prometheus](https://prometheus.io/) - Monitoring system
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
-For support and questions:
+For technical support and questions:
 - Create an issue on GitHub
 - Check the documentation
 - Review the examples in the codebase

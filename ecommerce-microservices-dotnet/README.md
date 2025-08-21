@@ -312,9 +312,16 @@ ecommerce-microservices-dotnet/
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## Support
 
-For questions and support, please open an issue in the repository.
+For technical questions and support, please open an issue in the repository.
 
 ---
 

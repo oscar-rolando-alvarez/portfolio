@@ -443,12 +443,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Pyth Network** for price oracle services
 - **Switchboard** for additional oracle functionality
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
 - **Documentation**: [Link to docs]
 - **Discord**: [Discord invite]
 - **Twitter**: [@DefiLendingProtocol]
-- **Email**: support@defilending.io
 
 ## 🗺️ Roadmap
 

@@ -343,9 +343,16 @@ The application can be deployed to various platforms:
 - Custom analytics dashboard
 - A/B testing capabilities
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 🆘 Support
 
-For support and questions:
+For technical support and questions:
 
 - Create an issue on GitHub
 - Check the documentation

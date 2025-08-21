@@ -370,12 +370,18 @@ Structured logging with the following levels:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 🆘 Support
 
 - **Documentation**: [Wiki](https://github.com/your-repo/crypto-trading-java/wiki)
 - **Issues**: [GitHub Issues](https://github.com/your-repo/crypto-trading-java/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-repo/crypto-trading-java/discussions)
-- **Email Support**: support@cryptotrading.com
 
 ## 🔗 Related Projects
 

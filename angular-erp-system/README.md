@@ -368,14 +368,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - NgRx team for state management
 - Open source community for the ecosystem
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
-For support and questions:
+For technical support and questions:
 
 - **Documentation**: Check the `/docs` folder
 - **Issues**: Create an issue on GitHub
 - **Discussions**: Use GitHub Discussions
-- **Email**: contact@yourcompany.com
 
 ---
 

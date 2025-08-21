@@ -377,12 +377,18 @@ Please read [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for detailed contribution 
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 🆘 Support
 
 - **Documentation**: Check the docs/ directory
 - **Issues**: Create an issue on GitHub
 - **Discord**: Join our community Discord
-- **Email**: contact@nftmarketplace.dev
 
 ## 🙏 Acknowledgments
 

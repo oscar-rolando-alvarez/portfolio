@@ -316,9 +316,16 @@ mvn clean package
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## Support
 
-For support and questions:
+For technical support and questions:
 - Create an issue in the repository
 - Check the documentation at `/swagger-ui.html`
 - Review the application logs for debugging

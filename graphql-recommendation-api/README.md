@@ -478,6 +478,13 @@ pytest
 - **Training**: Team training and workshops
 - **24/7 Support**: Production support packages
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

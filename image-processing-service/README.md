@@ -395,6 +395,13 @@ pytest-watch
 make pre-commit
 ```
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## License
 
 MIT License - see LICENSE file for details.

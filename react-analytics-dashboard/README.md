@@ -455,9 +455,15 @@ This project is licensed under the MIT License - see the [LICENSE](./LICENSE) fi
 - [Zustand](https://github.com/pmndrs/zustand) for simple state management
 - [TanStack Query](https://tanstack.com/query) for excellent server state management
 
+## 📞 Business Contact
+
+For business inquiries and professional services:
+
+- **Name**: Oscar Alvarez
+- **Email**: oralvarez@gmail.com
+
 ## 📞 Support
 
-- 📧 Email: support@analytics-dashboard.com
 - 💬 Discord: [Join our community](https://discord.gg/analytics-dashboard)
 - 📖 Documentation: [docs.analytics-dashboard.com](https://docs.analytics-dashboard.com)
 - 🐛 Issues: [GitHub Issues](https://github.com/yourusername/react-analytics-dashboard/issues)
