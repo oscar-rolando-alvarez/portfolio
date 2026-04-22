@@ -11,6 +11,133 @@ This portfolio demonstrates proficiency in:
 - **Cloud & DevOps**: Docker, Kubernetes, CI/CD, Cloud-native applications
 - **Modern Frameworks**: Angular, React, Vue, Spring Boot, .NET Core, FastAPI, Actix-Web
 
+## Architecture
+
+This monorepo groups 18 independent projects, each self-contained with its own build, tests and deployment. Projects are organised by tier (frontend, backend, JVM, .NET, Rust, Web3) and share a common set of conventions: Docker for packaging, environment-based configuration, automated tests, and Kubernetes manifests where applicable. Every subfolder is a standalone project; there are no runtime cross-dependencies between them.
+
+### Portfolio map
+
+```mermaid
+flowchart TB
+    Portfolio[portfolio/]
+
+    subgraph Frontend
+        A1[angular-erp-system]
+        A2[angular-lms-platform]
+        R1[react-analytics-dashboard]
+        R2[react-collaboration-app]
+        V1[vue-project-management]
+        S1[social-media-platform]
+    end
+
+    subgraph Backend_APIs [Backend APIs and ML]
+        G1[graphql-recommendation-api]
+        I1[image-processing-service]
+        F1[financial-analysis-ml]
+    end
+
+    subgraph JVM
+        J1[crypto-trading-java]
+        J2[enterprise-messaging-java]
+    end
+
+    subgraph DotNet [.NET]
+        D1[document-management-dotnet]
+        D2[ecommerce-microservices-dotnet]
+    end
+
+    subgraph Rust
+        RS1[rust-blockchain]
+        RS2[rust-web-server]
+    end
+
+    subgraph Web3
+        W1[defi-lending-protocol]
+        W2[nft-marketplace]
+        W3[nft-minting]
+    end
+
+    Portfolio --> Frontend
+    Portfolio --> Backend_APIs
+    Portfolio --> JVM
+    Portfolio --> DotNet
+    Portfolio --> Rust
+    Portfolio --> Web3
+```
+
+### Technology stack per project
+
+```mermaid
+flowchart LR
+    subgraph Languages
+        TS[TypeScript]
+        Py[Python]
+        Java[Java 17]
+        CS[C# / .NET 8]
+        Rs[Rust]
+        Sol[Solidity / Anchor]
+    end
+
+    subgraph Frameworks
+        Ang[Angular 17]
+        React[React 18 / Next.js 14]
+        Vue[Vue 3 / Nuxt 3]
+        Fast[FastAPI]
+        Spring[Spring Boot 3]
+        Dotnet[ASP.NET Core]
+        Actix[Actix-Web]
+    end
+
+    subgraph Data
+        PG[(PostgreSQL)]
+        Redis[(Redis)]
+        Mongo[(MongoDB)]
+        Qdrant[(Qdrant)]
+        Kafka[[Kafka]]
+        Rabbit[[RabbitMQ]]
+    end
+
+    TS --> Ang
+    TS --> React
+    TS --> Vue
+    Py --> Fast
+    Java --> Spring
+    CS --> Dotnet
+    Rs --> Actix
+
+    Fast --> PG
+    Fast --> Redis
+    Fast --> Qdrant
+    Spring --> Kafka
+    Dotnet --> Rabbit
+    Ang --> PG
+    React --> Redis
+    Vue --> PG
+```
+
+### Cross-cutting patterns
+
+```mermaid
+flowchart TD
+    Patterns[Architecture Patterns in this portfolio]
+
+    Patterns --> MS[Microservices - ecommerce-microservices-dotnet]
+    Patterns --> CA[Clean Architecture + DDD - document-management-dotnet, financial-analysis-ml]
+    Patterns --> CQRS[CQRS - document-management-dotnet]
+    Patterns --> EDA[Event-Driven - crypto-trading-java, enterprise-messaging-java]
+    Patterns --> RT[Real-time - react-collaboration-app, vue-project-management, social-media-platform]
+    Patterns --> P2P[P2P consensus - rust-blockchain]
+    Patterns --> OnChain[On-chain programs - defi-lending-protocol, nft-marketplace]
+
+    MS --> Ocelot[Ocelot API Gateway]
+    MS --> RMQ[RabbitMQ async]
+    MS --> gRPC[gRPC sync]
+    EDA --> KafkaBus[Kafka bus]
+    RT --> WS[WebSocket]
+    RT --> WebRTC[WebRTC]
+    RT --> OT[Operational Transformation]
+```
+
 ## 📁 Projects Directory
 
 ### 🔷 Frontend Applications
