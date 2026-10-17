@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   Bars3Icon,
   BellIcon,
@@ -20,14 +19,13 @@ import { NotificationPanel } from './NotificationPanel';
 import { UserMenu } from './UserMenu';
 
 export function Navigation() {
-  const router = useRouter();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   
   const { theme, toggleTheme } = useThemeStore();
   const { unreadCount } = useNotificationStore();
-  const { user, isAuthenticated } = useUserStore();
+  const { user } = useUserStore();
 
   const themeIcon = {
     light: SunIcon,

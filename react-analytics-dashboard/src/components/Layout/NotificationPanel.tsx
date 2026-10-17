@@ -109,7 +109,7 @@ export function NotificationPanel({ isOpen, onClose }: NotificationPanelProps) {
           <div className="p-8 text-center text-gray-500 dark:text-gray-400">
             <InformationCircleIcon className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
             <p>No notifications</p>
-            <p className="text-sm mt-1">You're all caught up!</p>
+            <p className="text-sm mt-1">You&apos;re all caught up!</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-200 dark:divide-gray-700">

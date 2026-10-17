@@ -24,9 +24,9 @@ export const metadata: Metadata = {
     default: 'Analytics Dashboard',
     template: '%s | Analytics Dashboard',
   },
-  description: 'Advanced React 18 + Next.js 14 Analytics Dashboard with real-time data visualization',
+  description: 'Real-time analytics dashboard built with React 19 and Next.js 16',
   keywords: ['analytics', 'dashboard', 'react', 'nextjs', 'data visualization', 'charts'],
-  authors: [{ name: 'Analytics Team' }],
+  authors: [{ name: 'Oscar Alvarez' }],
   creator: 'Analytics Dashboard',
   publisher: 'Analytics Dashboard',
   formatDetection: {
@@ -34,19 +34,19 @@ export const metadata: Metadata = {
     address: false,
     telephone: false,
   },
-  metadataBase: new URL('http://localhost:3000'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'http://localhost:3000',
+    url: '/',
     title: 'Analytics Dashboard',
-    description: 'Advanced React 18 + Next.js 14 Analytics Dashboard with real-time data visualization',
+    description: 'Real-time analytics dashboard built with React 19 and Next.js 16',
     siteName: 'Analytics Dashboard',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Analytics Dashboard',
-    description: 'Advanced React 18 + Next.js 14 Analytics Dashboard with real-time data visualization',
+    description: 'Real-time analytics dashboard built with React 19 and Next.js 16',
   },
   robots: {
     index: true,
@@ -59,12 +59,6 @@ export const metadata: Metadata = {
       'max-snippet': -1,
     },
   },
-  manifest: '/manifest.json',
-  icons: {
-    icon: '/favicon.ico',
-    shortcut: '/favicon-16x16.png',
-    apple: '/apple-touch-icon.png',
-  },
 };
 
 export const viewport: Viewport = {
@@ -74,8 +68,6 @@ export const viewport: Viewport = {
   ],
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({

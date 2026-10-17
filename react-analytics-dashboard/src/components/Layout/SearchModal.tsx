@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   MagnifyingGlassIcon,
@@ -34,40 +34,39 @@ const recentSearches = [
 ];
 
 export function SearchModal({ isOpen, onClose }: SearchModalProps) {
+  // Mounting the content only while open gives every session fresh state.
+  if (!isOpen) return null;
+  return <SearchModalContent onClose={onClose} />;
+}
+
+function SearchModalContent({ onClose }: Omit<SearchModalProps, 'isOpen'>) {
   const router = useRouter();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { dashboards } = useDashboardStore();
+  const dashboards = useDashboardStore((s) => s.dashboards);
 
   useEffect(() => {
-    if (isOpen) {
-      // Focus input when modal opens
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-    } else {
-      // Reset state when modal closes
-      setQuery('');
-      setResults([]);
-      setSelectedIndex(0);
-    }
-  }, [isOpen]);
+    const timer = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
+  }, []);
 
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    setSelectedIndex(0);
+  };
 
-    // Search through dashboards
+  const results = useMemo<SearchResult[]>(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+
     const dashboardResults: SearchResult[] = dashboards
-      .filter(dashboard =>
-        dashboard.name.toLowerCase().includes(query.toLowerCase()) ||
-        dashboard.description?.toLowerCase().includes(query.toLowerCase())
+      .filter(
+        (dashboard) =>
+          dashboard.name.toLowerCase().includes(q) ||
+          dashboard.description?.toLowerCase().includes(q)
       )
-      .map(dashboard => ({
+      .map((dashboard) => ({
         id: dashboard.id,
         title: dashboard.name,
         type: 'dashboard' as const,
@@ -76,8 +75,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         icon: ChartBarIcon,
       }));
 
-    // Mock additional search results
-    const mockResults: SearchResult[] = [
+    const catalog: SearchResult[] = [
       {
         id: 'reports-1',
         title: 'Monthly Revenue Report',
@@ -94,13 +92,12 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         url: '/team/marketing',
         icon: UserGroupIcon,
       },
-    ].filter(item =>
-      item.title.toLowerCase().includes(query.toLowerCase()) ||
-      item.description?.toLowerCase().includes(query.toLowerCase())
+    ];
+    const catalogResults = catalog.filter(
+      (item) => item.title.toLowerCase().includes(q) || item.description?.toLowerCase().includes(q)
     );
 
-    setResults([...dashboardResults, ...mockResults]);
-    setSelectedIndex(0);
+    return [...dashboardResults, ...catalogResults];
   }, [query, dashboards]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -131,8 +128,6 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
     onClose();
   };
 
-  if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-screen items-start justify-center p-4 text-center sm:block sm:p-0">
@@ -151,7 +146,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => updateQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Search dashboards, reports, and more..."
               className="flex-1 bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
@@ -168,7 +163,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
           <div className="max-h-96 overflow-y-auto">
             {query && results.length === 0 && (
               <div className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
-                No results found for "{query}"
+                No results found for &ldquo;{query}&rdquo;
               </div>
             )}
 
@@ -211,10 +206,10 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                 <div className="px-4 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Recent Searches
                 </div>
-                {recentSearches.map((search, index) => (
+                {recentSearches.map((search) => (
                   <button
                     key={search}
-                    onClick={() => setQuery(search)}
+                    onClick={() => updateQuery(search)}
                     className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                   >
                     <div className="flex items-center">

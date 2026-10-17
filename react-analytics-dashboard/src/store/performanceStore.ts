@@ -15,7 +15,7 @@ const initialMetrics: PerformanceMetrics = {
 
 export const usePerformanceStore = create<PerformanceState>()(
   devtools(
-    immer((set, get) => ({
+    immer((set) => ({
       metrics: initialMetrics,
       isMonitoring: false,
       history: [],

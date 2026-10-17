@@ -16,7 +16,7 @@ interface DashboardOverviewProps {
 }
 
 // Mock data fetching function
-async function fetchDashboardOverview(dateRange: DateRange) {
+async function fetchDashboardOverview(_dateRange: DateRange) {
   // Simulate API call
   await new Promise(resolve => setTimeout(resolve, 1000));
   
@@ -42,12 +42,17 @@ async function fetchDashboardOverview(dateRange: DateRange) {
   };
 }
 
-export function DashboardOverview({ className }: DashboardOverviewProps) {
-  const [dateRange] = useState<DateRange>({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-    end: new Date(),
+function createLast30DaysRange(): DateRange {
+  const end = new Date();
+  return {
+    start: new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000),
+    end,
     preset: 'last30days',
-  });
+  };
+}
+
+export function DashboardOverview({ className }: DashboardOverviewProps) {
+  const [dateRange] = useState<DateRange>(createLast30DaysRange);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboard-overview', dateRange],
