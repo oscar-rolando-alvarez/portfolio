@@ -16,7 +16,7 @@ litesvm = "0.18.0"
 solana-keypair = "3"
 solana-signer = "3"
 solana-transaction = "4"
-solana-account = "4"
+solana-account = "5"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
