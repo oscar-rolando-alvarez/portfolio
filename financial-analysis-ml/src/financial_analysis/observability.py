@@ -40,6 +40,13 @@ def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
+    # Route uvicorn through the same renderer; HTTP access logs come from our middleware.
+    for name in ("uvicorn", "uvicorn.error"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = True
+    logging.getLogger("uvicorn.access").disabled = True
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def configure_tracing(app: FastAPI, service_name: str) -> bool:
