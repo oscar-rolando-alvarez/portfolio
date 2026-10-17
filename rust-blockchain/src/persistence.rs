@@ -1,348 +1,328 @@
+//! Embedded, pure-Rust persistence backed by `redb`.
+
+use crate::codec;
 use crate::error::{BlockchainError, Result};
 use crate::utxo::UTXOSet;
 use crate::{Block, ChainState, Transaction};
+use redb::{
+    Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableHandle,
+};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-const BLOCKS_CF: &str = "blocks";
-const TRANSACTIONS_CF: &str = "transactions";
-const CHAIN_STATE_CF: &str = "chain_state";
-const UTXO_CF: &str = "utxo";
-const METADATA_CF: &str = "metadata";
+/// Block height -> encoded block.
+const BLOCKS: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks");
+/// Block hash -> block height.
+const BLOCK_HASHES: TableDefinition<&str, u64> = TableDefinition::new("block_hashes");
+/// Transaction id -> encoded transaction.
+const TRANSACTIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("transactions");
+/// Singleton key/value entries (chain state, UTXO set).
+const CHAIN_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("chain_state");
+/// Free-form metadata.
+const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata");
+
+const CHAIN_STATE_KEY: &str = "current_state";
+const UTXO_SET_KEY: &str = "utxo_set";
+
+fn db_err(e: impl std::fmt::Display) -> BlockchainError {
+    BlockchainError::PersistenceError(e.to_string())
+}
 
 #[derive(Debug)]
 pub struct BlockchainDB {
-    db: rocksdb::DB,
+    db: Database,
+    path: PathBuf,
 }
 
 impl BlockchainDB {
+    /// Open (or create) the database file at `path`.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut opts = rocksdb::Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
+        let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        let db = Database::create(&path).map_err(db_err)?;
 
-        let cf_descriptors = vec![
-            rocksdb::ColumnFamilyDescriptor::new(BLOCKS_CF, rocksdb::Options::default()),
-            rocksdb::ColumnFamilyDescriptor::new(TRANSACTIONS_CF, rocksdb::Options::default()),
-            rocksdb::ColumnFamilyDescriptor::new(CHAIN_STATE_CF, rocksdb::Options::default()),
-            rocksdb::ColumnFamilyDescriptor::new(UTXO_CF, rocksdb::Options::default()),
-            rocksdb::ColumnFamilyDescriptor::new(METADATA_CF, rocksdb::Options::default()),
-        ];
+        // Make sure every table exists so read transactions never fail on a fresh file.
+        let txn = db.begin_write().map_err(db_err)?;
+        txn.open_table(BLOCKS).map_err(db_err)?;
+        txn.open_table(BLOCK_HASHES).map_err(db_err)?;
+        txn.open_table(TRANSACTIONS).map_err(db_err)?;
+        txn.open_table(CHAIN_STATE).map_err(db_err)?;
+        txn.open_table(METADATA).map_err(db_err)?;
+        txn.commit().map_err(db_err)?;
 
-        let db = rocksdb::DB::open_cf_descriptors(&opts, path, cf_descriptors)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(Self { db })
+        Ok(Self { db, path })
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn put(&self, table: TableDefinition<&str, &[u8]>, key: &str, value: &[u8]) -> Result<()> {
+        let txn = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut t = txn.open_table(table).map_err(db_err)?;
+            t.insert(key, value).map_err(db_err)?;
+        }
+        txn.commit().map_err(db_err)
+    }
+
+    fn get(&self, table: TableDefinition<&str, &[u8]>, key: &str) -> Result<Option<Vec<u8>>> {
+        let txn = self.db.begin_read().map_err(db_err)?;
+        let t = txn.open_table(table).map_err(db_err)?;
+        Ok(t.get(key).map_err(db_err)?.map(|v| v.value().to_vec()))
+    }
+
+    /// Store a block, its hash index and all of its transactions atomically.
     pub fn store_block(&self, block: &Block) -> Result<()> {
-        let cf = self.get_cf(BLOCKS_CF)?;
-        let key = self.block_key(block.header.height);
-        let value = bincode::serialize(block)
-            .map_err(|e| BlockchainError::SerializationError(e.to_string()))?;
+        let encoded = codec::encode(block)?;
+        let height = block.header.height;
+        let hash = block.hash();
 
-        self.db
-            .put_cf(&cf, key, value)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
+        let txn = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut blocks = txn.open_table(BLOCKS).map_err(db_err)?;
+            blocks.insert(height, encoded.as_slice()).map_err(db_err)?;
 
-        // Also store by hash for quick lookups
-        let hash_key = self.block_hash_key(&self.calculate_block_hash(block));
-        let height_value = block.header.height.to_be_bytes();
-        
-        self.db
-            .put_cf(&cf, hash_key, height_value)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
+            let mut hashes = txn.open_table(BLOCK_HASHES).map_err(db_err)?;
+            hashes.insert(hash.as_str(), height).map_err(db_err)?;
 
-        // Store individual transactions
-        self.store_block_transactions(block)?;
-
-        Ok(())
+            let mut transactions = txn.open_table(TRANSACTIONS).map_err(db_err)?;
+            for tx in &block.transactions {
+                let tx_bytes = codec::encode(tx)?;
+                transactions
+                    .insert(tx.id.as_str(), tx_bytes.as_slice())
+                    .map_err(db_err)?;
+            }
+        }
+        txn.commit().map_err(db_err)
     }
 
     pub fn load_block(&self, height: u64) -> Result<Block> {
-        let cf = self.get_cf(BLOCKS_CF)?;
-        let key = self.block_key(height);
-
-        let value = self
-            .db
-            .get_cf(&cf, key)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?
+        let txn = self.db.begin_read().map_err(db_err)?;
+        let blocks = txn.open_table(BLOCKS).map_err(db_err)?;
+        let value = blocks
+            .get(height)
+            .map_err(db_err)?
             .ok_or_else(|| BlockchainError::BlockNotFound(height.to_string()))?;
-
-        bincode::deserialize(&value)
-            .map_err(|e| BlockchainError::SerializationError(e.to_string()))
+        codec::decode(value.value())
     }
 
     pub fn load_block_by_hash(&self, hash: &str) -> Result<Block> {
-        let cf = self.get_cf(BLOCKS_CF)?;
-        let hash_key = self.block_hash_key(hash);
-
-        let height_bytes = self
-            .db
-            .get_cf(&cf, hash_key)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?
-            .ok_or_else(|| BlockchainError::BlockNotFound(hash.to_string()))?;
-
-        let height = u64::from_be_bytes(
-            height_bytes
-                .try_into()
-                .map_err(|_| BlockchainError::PersistenceError("Invalid height data".to_string()))?
-        );
-
+        let height = {
+            let txn = self.db.begin_read().map_err(db_err)?;
+            let hashes = txn.open_table(BLOCK_HASHES).map_err(db_err)?;
+            hashes
+                .get(hash)
+                .map_err(db_err)?
+                .ok_or_else(|| BlockchainError::BlockNotFound(hash.to_string()))?
+                .value()
+        };
         self.load_block(height)
     }
 
+    /// All blocks ordered by height.
     pub fn load_all_blocks(&self) -> Result<Vec<Block>> {
-        let cf = self.get_cf(BLOCKS_CF)?;
-        let mut blocks = Vec::new();
-
-        let iter = self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start);
-        for item in iter {
-            let (key, value) = item
-                .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-            // Skip hash-based keys
-            if key.starts_with(b"hash_") {
-                continue;
-            }
-
-            let block: Block = bincode::deserialize(&value)
-                .map_err(|e| BlockchainError::SerializationError(e.to_string()))?;
-            blocks.push(block);
-        }
-
-        // Sort by height
-        blocks.sort_by_key(|block| block.header.height);
-        Ok(blocks)
+        let txn = self.db.begin_read().map_err(db_err)?;
+        let blocks = txn.open_table(BLOCKS).map_err(db_err)?;
+        blocks
+            .iter()
+            .map_err(db_err)?
+            .map(|entry| {
+                let (_, value) = entry.map_err(db_err)?;
+                codec::decode(value.value())
+            })
+            .collect()
     }
 
     pub fn store_transaction(&self, transaction: &Transaction) -> Result<()> {
-        let cf = self.get_cf(TRANSACTIONS_CF)?;
-        let key = transaction.id.as_bytes();
-        let value = bincode::serialize(transaction)
-            .map_err(|e| BlockchainError::SerializationError(e.to_string()))?;
-
-        self.db
-            .put_cf(&cf, key, value)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(())
+        self.put(TRANSACTIONS, &transaction.id, &codec::encode(transaction)?)
     }
 
     pub fn load_transaction(&self, tx_id: &str) -> Result<Transaction> {
-        let cf = self.get_cf(TRANSACTIONS_CF)?;
-        let key = tx_id.as_bytes();
-
-        let value = self
-            .db
-            .get_cf(&cf, key)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?
+        let bytes = self
+            .get(TRANSACTIONS, tx_id)?
             .ok_or_else(|| BlockchainError::TransactionNotFound(tx_id.to_string()))?;
-
-        bincode::deserialize(&value)
-            .map_err(|e| BlockchainError::SerializationError(e.to_string()))
+        codec::decode(&bytes)
     }
 
     pub fn store_chain_state(&self, state: &ChainState) -> Result<()> {
-        let cf = self.get_cf(CHAIN_STATE_CF)?;
-        let key = b"current_state";
-        let value = bincode::serialize(state)
-            .map_err(|e| BlockchainError::SerializationError(e.to_string()))?;
-
-        self.db
-            .put_cf(&cf, key, value)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(())
+        self.put(CHAIN_STATE, CHAIN_STATE_KEY, &codec::encode(state)?)
     }
 
     pub fn load_chain_state(&self) -> Result<ChainState> {
-        let cf = self.get_cf(CHAIN_STATE_CF)?;
-        let key = b"current_state";
-
-        let value = self
-            .db
-            .get_cf(&cf, key)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?
-            .ok_or_else(|| BlockchainError::PersistenceError("Chain state not found".to_string()))?;
-
-        bincode::deserialize(&value)
-            .map_err(|e| BlockchainError::SerializationError(e.to_string()))
+        let bytes = self.get(CHAIN_STATE, CHAIN_STATE_KEY)?.ok_or_else(|| {
+            BlockchainError::PersistenceError("Chain state not found".to_string())
+        })?;
+        codec::decode(&bytes)
     }
 
     pub fn store_utxo_set(&self, utxo_set: &UTXOSet) -> Result<()> {
-        let cf = self.get_cf(UTXO_CF)?;
-        let key = b"utxo_set";
-        let value = utxo_set.serialize()?;
-
-        self.db
-            .put_cf(&cf, key, value)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(())
+        self.put(CHAIN_STATE, UTXO_SET_KEY, &utxo_set.serialize()?)
     }
 
     pub fn load_utxo_set(&self) -> Result<UTXOSet> {
-        let cf = self.get_cf(UTXO_CF)?;
-        let key = b"utxo_set";
-
-        let value = self
-            .db
-            .get_cf(&cf, key)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?
+        let bytes = self
+            .get(CHAIN_STATE, UTXO_SET_KEY)?
             .ok_or_else(|| BlockchainError::PersistenceError("UTXO set not found".to_string()))?;
+        UTXOSet::deserialize(&bytes)
+    }
 
-        UTXOSet::deserialize(&value)
+    /// Persist a block together with the resulting chain state and UTXO set
+    /// in a single atomic transaction.
+    pub fn commit_block(
+        &self,
+        block: &Block,
+        state: &ChainState,
+        utxo_set: &UTXOSet,
+    ) -> Result<()> {
+        let block_bytes = codec::encode(block)?;
+        let state_bytes = codec::encode(state)?;
+        let utxo_bytes = utxo_set.serialize()?;
+        let hash = block.hash();
+
+        let txn = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut blocks = txn.open_table(BLOCKS).map_err(db_err)?;
+            blocks
+                .insert(block.header.height, block_bytes.as_slice())
+                .map_err(db_err)?;
+
+            let mut hashes = txn.open_table(BLOCK_HASHES).map_err(db_err)?;
+            hashes
+                .insert(hash.as_str(), block.header.height)
+                .map_err(db_err)?;
+
+            let mut transactions = txn.open_table(TRANSACTIONS).map_err(db_err)?;
+            for tx in &block.transactions {
+                let tx_bytes = codec::encode(tx)?;
+                transactions
+                    .insert(tx.id.as_str(), tx_bytes.as_slice())
+                    .map_err(db_err)?;
+            }
+
+            let mut chain = txn.open_table(CHAIN_STATE).map_err(db_err)?;
+            chain
+                .insert(CHAIN_STATE_KEY, state_bytes.as_slice())
+                .map_err(db_err)?;
+            chain
+                .insert(UTXO_SET_KEY, utxo_bytes.as_slice())
+                .map_err(db_err)?;
+        }
+        txn.commit().map_err(db_err)
     }
 
     pub fn store_metadata(&self, key: &str, value: &[u8]) -> Result<()> {
-        let cf = self.get_cf(METADATA_CF)?;
-        
-        self.db
-            .put_cf(&cf, key.as_bytes(), value)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(())
+        self.put(METADATA, key, value)
     }
 
     pub fn load_metadata(&self, key: &str) -> Result<Vec<u8>> {
-        let cf = self.get_cf(METADATA_CF)?;
-
-        self.db
-            .get_cf(&cf, key.as_bytes())
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?
-            .ok_or_else(|| BlockchainError::PersistenceError(format!("Metadata key '{}' not found", key)))
+        self.get(METADATA, key)?.ok_or_else(|| {
+            BlockchainError::PersistenceError(format!("Metadata key '{key}' not found"))
+        })
     }
 
     pub fn delete_block(&self, height: u64) -> Result<()> {
-        let cf = self.get_cf(BLOCKS_CF)?;
-        let key = self.block_key(height);
-
-        // First load the block to get its hash
-        if let Ok(block) = self.load_block(height) {
-            let hash_key = self.block_hash_key(&self.calculate_block_hash(&block));
-            self.db
-                .delete_cf(&cf, hash_key)
-                .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
+        let txn = self.db.begin_write().map_err(db_err)?;
+        {
+            let mut blocks = txn.open_table(BLOCKS).map_err(db_err)?;
+            let removed = blocks.remove(height).map_err(db_err)?;
+            if let Some(bytes) = removed {
+                let block: Block = codec::decode(bytes.value())?;
+                let mut hashes = txn.open_table(BLOCK_HASHES).map_err(db_err)?;
+                hashes.remove(block.hash().as_str()).map_err(db_err)?;
+            }
         }
-
-        self.db
-            .delete_cf(&cf, key)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(())
+        txn.commit().map_err(db_err)
     }
 
     pub fn get_block_count(&self) -> Result<u64> {
-        let cf = self.get_cf(BLOCKS_CF)?;
-        let mut count = 0;
+        let txn = self.db.begin_read().map_err(db_err)?;
+        let blocks = txn.open_table(BLOCKS).map_err(db_err)?;
+        blocks.len().map_err(db_err)
+    }
 
-        let iter = self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start);
-        for item in iter {
-            let (key, _) = item
-                .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-            
-            // Skip hash-based keys
-            if !key.starts_with(b"hash_") {
-                count += 1;
+    /// Reclaim free space in the database file.
+    pub fn compact(&mut self) -> Result<()> {
+        self.db.compact().map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Write a consistent snapshot of every table into a new database file.
+    pub fn backup<P: AsRef<Path>>(&self, backup_path: P) -> Result<()> {
+        let backup = BlockchainDB::new(backup_path)?;
+        let src = self.db.begin_read().map_err(db_err)?;
+        let dst = backup.db.begin_write().map_err(db_err)?;
+
+        {
+            let from = src.open_table(BLOCKS).map_err(db_err)?;
+            let mut to = dst.open_table(BLOCKS).map_err(db_err)?;
+            for entry in from.iter().map_err(db_err)? {
+                let (k, v) = entry.map_err(db_err)?;
+                to.insert(k.value(), v.value()).map_err(db_err)?;
+            }
+
+            let from = src.open_table(BLOCK_HASHES).map_err(db_err)?;
+            let mut to = dst.open_table(BLOCK_HASHES).map_err(db_err)?;
+            for entry in from.iter().map_err(db_err)? {
+                let (k, v) = entry.map_err(db_err)?;
+                to.insert(k.value(), v.value()).map_err(db_err)?;
+            }
+
+            for table in [TRANSACTIONS, CHAIN_STATE, METADATA] {
+                let from = src.open_table(table).map_err(db_err)?;
+                let mut to = dst.open_table(table).map_err(db_err)?;
+                for entry in from.iter().map_err(db_err)? {
+                    let (k, v) = entry.map_err(db_err)?;
+                    to.insert(k.value(), v.value()).map_err(db_err)?;
+                }
             }
         }
 
-        Ok(count)
+        dst.commit().map_err(db_err)
     }
 
-    pub fn compact(&self) -> Result<()> {
-        self.db
-            .compact_range::<&[u8], &[u8]>(None, None);
-        Ok(())
-    }
-
-    pub fn backup(&self, backup_path: &str) -> Result<()> {
-        // Create a backup engine
-        let backup_opts = rocksdb::BackupEngineOptions::default();
-        let mut backup_engine = rocksdb::BackupEngine::open(&backup_opts, backup_path)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        backup_engine
-            .create_new_backup(&self.db)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        Ok(())
-    }
-
-    pub fn restore_from_backup(backup_path: &str, db_path: &str) -> Result<()> {
-        let backup_opts = rocksdb::BackupEngineOptions::default();
-        let mut backup_engine = rocksdb::BackupEngine::open(&backup_opts, backup_path)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
-        let restore_opts = rocksdb::RestoreOptions::default();
-        backup_engine
-            .restore_from_latest_backup(db_path, db_path, &restore_opts)
-            .map_err(|e| BlockchainError::PersistenceError(e.to_string()))?;
-
+    /// Replace the database at `db_path` with a backup file. The target
+    /// database must not be open.
+    pub fn restore_from_backup<P: AsRef<Path>, Q: AsRef<Path>>(
+        backup_path: P,
+        db_path: Q,
+    ) -> Result<()> {
+        std::fs::copy(backup_path, db_path)?;
         Ok(())
     }
 
     pub fn get_stats(&self) -> Result<DBStats> {
-        let mut stats = DBStats::default();
-        
-        // Count blocks
-        if let Ok(cf) = self.get_cf(BLOCKS_CF) {
-            let iter = self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start);
-            for item in iter {
-                if let Ok((key, _)) = item {
-                    if !key.starts_with(b"hash_") {
-                        stats.block_count += 1;
-                    }
-                }
-            }
-        }
+        let txn = self.db.begin_read().map_err(db_err)?;
+        let block_count = txn
+            .open_table(BLOCKS)
+            .map_err(db_err)?
+            .len()
+            .map_err(db_err)?;
+        let transaction_count = txn
+            .open_table(TRANSACTIONS)
+            .map_err(db_err)?
+            .len()
+            .map_err(db_err)?;
+        let database_size = std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
 
-        // Count transactions
-        if let Ok(cf) = self.get_cf(TRANSACTIONS_CF) {
-            let iter = self.db.iterator_cf(&cf, rocksdb::IteratorMode::Start);
-            for item in iter {
-                if let Ok(_) = item {
-                    stats.transaction_count += 1;
-                }
-            }
-        }
-
-        // Get database size (approximate)
-        if let Some(size) = self.db.property_value("rocksdb.total-sst-files-size") {
-            if let Ok(size) = size.parse::<u64>() {
-                stats.database_size = size;
-            }
-        }
-
-        Ok(stats)
+        Ok(DBStats {
+            block_count,
+            transaction_count,
+            database_size,
+        })
     }
 
-    fn get_cf(&self, name: &str) -> Result<std::sync::Arc<rocksdb::BoundColumnFamily>> {
-        self.db
-            .cf_handle(name)
-            .ok_or_else(|| BlockchainError::PersistenceError(format!("Column family '{}' not found", name)))
-    }
-
-    fn block_key(&self, height: u64) -> Vec<u8> {
-        format!("block_{:016}", height).into_bytes()
-    }
-
-    fn block_hash_key(&self, hash: &str) -> Vec<u8> {
-        format!("hash_{}", hash).into_bytes()
-    }
-
-    fn store_block_transactions(&self, block: &Block) -> Result<()> {
-        for transaction in &block.transactions {
-            self.store_transaction(transaction)?;
-        }
-        Ok(())
-    }
-
-    fn calculate_block_hash(&self, block: &Block) -> String {
-        use crate::crypto::{sha256, hash_to_string};
-        let data = bincode::serialize(block).unwrap_or_default();
-        hash_to_string(&sha256(&data))
+    /// Names of the tables managed by this database.
+    pub fn table_names() -> Vec<&'static str> {
+        vec![
+            BLOCKS.name(),
+            BLOCK_HASHES.name(),
+            TRANSACTIONS.name(),
+            CHAIN_STATE.name(),
+            METADATA.name(),
+        ]
     }
 }
 
@@ -360,45 +340,46 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
 
-    fn create_test_block() -> Block {
-        let tx = Transaction::new_coinbase(5000000000, "test_address".to_string(), 1);
-        
+    fn create_test_block(height: u64) -> Block {
+        let tx = Transaction::new_coinbase(5_000_000_000, "test_address".to_string(), height);
+
         Block {
             header: BlockHeader {
                 version: 1,
                 previous_hash: "prev_hash".to_string(),
-                merkle_root: "merkle_root".to_string(),
+                merkle_root: tx.id.clone(),
                 timestamp: Utc::now(),
                 difficulty: 1,
                 nonce: 12345,
-                height: 1,
+                height,
             },
             transactions: vec![tx],
         }
     }
 
+    fn open() -> (TempDir, BlockchainDB) {
+        let temp_dir = TempDir::new().unwrap();
+        let db = BlockchainDB::new(temp_dir.path().join("test.db")).unwrap();
+        (temp_dir, db)
+    }
+
     #[test]
     fn test_store_and_load_block() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
-        let block = create_test_block();
-        
+        let (_dir, db) = open();
+        let block = create_test_block(1);
+
         db.store_block(&block).unwrap();
-        let loaded_block = db.load_block(1).unwrap();
-        
-        assert_eq!(block.header.height, loaded_block.header.height);
-        assert_eq!(block.header.nonce, loaded_block.header.nonce);
-        assert_eq!(block.transactions.len(), loaded_block.transactions.len());
+        assert_eq!(db.load_block(1).unwrap(), block);
+        assert_eq!(db.load_block_by_hash(&block.hash()).unwrap(), block);
+        assert!(db.load_block(2).is_err());
+        assert!(db.load_block_by_hash("missing").is_err());
     }
 
     #[test]
     fn test_store_and_load_chain_state() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
+        let (_dir, db) = open();
+        assert!(db.load_chain_state().is_err());
+
         let state = ChainState {
             height: 100,
             difficulty: 5,
@@ -406,10 +387,10 @@ mod tests {
             best_block_hash: "best_hash".to_string(),
             ..Default::default()
         };
-        
+
         db.store_chain_state(&state).unwrap();
         let loaded_state = db.load_chain_state().unwrap();
-        
+
         assert_eq!(state.height, loaded_state.height);
         assert_eq!(state.difficulty, loaded_state.difficulty);
         assert_eq!(state.best_block_hash, loaded_state.best_block_hash);
@@ -417,85 +398,123 @@ mod tests {
 
     #[test]
     fn test_store_and_load_transaction() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
-        let tx = Transaction::new_coinbase(5000000000, "test_address".to_string(), 1);
-        
+        let (_dir, db) = open();
+        let tx = Transaction::new_coinbase(5_000_000_000, "test_address".to_string(), 1);
+
         db.store_transaction(&tx).unwrap();
-        let loaded_tx = db.load_transaction(&tx.id).unwrap();
-        
-        assert_eq!(tx.id, loaded_tx.id);
-        assert_eq!(tx.outputs.len(), loaded_tx.outputs.len());
+        assert_eq!(db.load_transaction(&tx.id).unwrap(), tx);
+        assert!(db.load_transaction("missing").is_err());
     }
 
     #[test]
     fn test_load_all_blocks() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
-        
-        // Store multiple blocks
-        for i in 0..5 {
-            let mut block = create_test_block();
-            block.header.height = i;
-            db.store_block(&block).unwrap();
+        let (_dir, db) = open();
+
+        for i in (0..5).rev() {
+            db.store_block(&create_test_block(i)).unwrap();
         }
-        
+
         let blocks = db.load_all_blocks().unwrap();
         assert_eq!(blocks.len(), 5);
-        
-        // Should be sorted by height
         for (i, block) in blocks.iter().enumerate() {
             assert_eq!(block.header.height, i as u64);
         }
+        assert_eq!(db.get_block_count().unwrap(), 5);
+    }
+
+    #[test]
+    fn test_utxo_set_round_trip() {
+        let (_dir, db) = open();
+        let mut utxo_set = UTXOSet::new();
+        let tx = Transaction::new_coinbase(777, "addr".to_string(), 1);
+        utxo_set.apply_transaction(&tx, 1).unwrap();
+
+        db.store_utxo_set(&utxo_set).unwrap();
+        let loaded = db.load_utxo_set().unwrap();
+        assert_eq!(loaded.get_balance("addr"), 777);
+    }
+
+    #[test]
+    fn test_commit_block_is_atomic_unit() {
+        let (_dir, db) = open();
+        let block = create_test_block(0);
+        let mut utxo_set = UTXOSet::new();
+        utxo_set
+            .apply_transaction(&block.transactions[0], 0)
+            .unwrap();
+        let state = ChainState {
+            best_block_hash: block.hash(),
+            ..Default::default()
+        };
+
+        db.commit_block(&block, &state, &utxo_set).unwrap();
+        assert_eq!(db.load_block(0).unwrap(), block);
+        assert_eq!(db.load_chain_state().unwrap().best_block_hash, block.hash());
+        assert_eq!(db.load_utxo_set().unwrap().size(), 1);
     }
 
     #[test]
     fn test_metadata_storage() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
-        let key = "test_key";
-        let value = b"test_value";
-        
-        db.store_metadata(key, value).unwrap();
-        let loaded_value = db.load_metadata(key).unwrap();
-        
-        assert_eq!(value, loaded_value.as_slice());
+        let (_dir, db) = open();
+
+        db.store_metadata("test_key", b"test_value").unwrap();
+        assert_eq!(db.load_metadata("test_key").unwrap(), b"test_value");
+        assert!(db.load_metadata("other").is_err());
     }
 
     #[test]
     fn test_block_deletion() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
-        let block = create_test_block();
-        
+        let (_dir, db) = open();
+        let block = create_test_block(1);
+
         db.store_block(&block).unwrap();
-        assert!(db.load_block(1).is_ok());
-        
         db.delete_block(1).unwrap();
         assert!(db.load_block(1).is_err());
+        assert!(db.load_block_by_hash(&block.hash()).is_err());
     }
 
     #[test]
     fn test_database_stats() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-        
-        let db = BlockchainDB::new(&db_path).unwrap();
-        
-        // Store some test data
-        let block = create_test_block();
-        db.store_block(&block).unwrap();
-        
+        let (_dir, db) = open();
+        db.store_block(&create_test_block(1)).unwrap();
+
         let stats = db.get_stats().unwrap();
         assert_eq!(stats.block_count, 1);
-        assert_eq!(stats.transaction_count, 1); // Coinbase transaction
+        assert_eq!(stats.transaction_count, 1);
+        assert!(stats.database_size > 0);
+    }
+
+    #[test]
+    fn test_reopen_persists_data() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("test.db");
+        let block = create_test_block(3);
+        {
+            let db = BlockchainDB::new(&path).unwrap();
+            db.store_block(&block).unwrap();
+        }
+        let db = BlockchainDB::new(&path).unwrap();
+        assert_eq!(db.load_block(3).unwrap(), block);
+    }
+
+    #[test]
+    fn test_backup_and_restore() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("main.db");
+        let backup_path = temp_dir.path().join("backup.db");
+        let restored_path = temp_dir.path().join("restored.db");
+        let block = create_test_block(1);
+
+        let mut db = BlockchainDB::new(&path).unwrap();
+        db.store_block(&block).unwrap();
+        db.store_metadata("k", b"v").unwrap();
+        db.compact().unwrap();
+        db.backup(&backup_path).unwrap();
+
+        BlockchainDB::restore_from_backup(&backup_path, &restored_path).unwrap();
+        let restored = BlockchainDB::new(&restored_path).unwrap();
+        assert_eq!(restored.load_block(1).unwrap(), block);
+        assert_eq!(restored.load_metadata("k").unwrap(), b"v");
+        assert_eq!(BlockchainDB::table_names().len(), 5);
     }
 }

@@ -1,11 +1,15 @@
 use crate::error::{BlockchainError, Result};
-use sha2::{Digest, Sha256};
-use secp256k1::{ecdsa::Signature, Message, PublicKey, Secp256k1, SecretKey};
-use rand::rngs::OsRng;
+use rand::RngCore;
+use ripemd::Ripemd160;
+use secp256k1::{Message, PublicKey, SecretKey, ecdsa};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Version byte prepended to the public key hash when building addresses.
+pub const ADDRESS_VERSION: u8 = 0x00;
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeyPair {
     pub private_key: Vec<u8>,
     pub public_key: Vec<u8>,
@@ -13,93 +17,108 @@ pub struct KeyPair {
 
 impl KeyPair {
     pub fn new() -> Result<Self> {
-        let secp = Secp256k1::new();
-        let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
-        
+        let (secret_key, public_key) = secp256k1::generate_keypair(&mut rand::rng());
+
         Ok(KeyPair {
-            private_key: secret_key.secret_bytes().to_vec(),
+            private_key: secret_key.to_secret_bytes().to_vec(),
             public_key: public_key.serialize().to_vec(),
         })
     }
-    
+
     pub fn from_private_key(private_key: &[u8]) -> Result<Self> {
-        let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(private_key)
-            .map_err(|e| BlockchainError::CryptoError(e.to_string()))?;
-        let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        
+        let secret_key = secret_key_from_slice(private_key)?;
+        let public_key = PublicKey::from_secret_key(&secret_key);
+
         Ok(KeyPair {
             private_key: private_key.to_vec(),
             public_key: public_key.serialize().to_vec(),
         })
     }
-    
+
+    /// Sign the SHA-256 digest of `message` and return a 64 byte compact signature.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(&self.private_key)
-            .map_err(|e| BlockchainError::CryptoError(e.to_string()))?;
-        
-        let message_hash = sha256(message);
-        let message = Message::from_slice(&message_hash)
-            .map_err(|e| BlockchainError::CryptoError(e.to_string()))?;
-        
-        let signature = secp.sign_ecdsa(&message, &secret_key);
+        let secret_key = secret_key_from_slice(&self.private_key)?;
+        let digest = Message::from_digest(sha256_array(message));
+        let signature = ecdsa::sign(digest, &secret_key);
         Ok(signature.serialize_compact().to_vec())
     }
-    
+
+    /// RIPEMD-160 of the SHA-256 of the public key (Bitcoin `HASH160`).
     pub fn public_key_hash(&self) -> Vec<u8> {
-        let public_key_hash = sha256(&self.public_key);
-        ripemd160(&public_key_hash)
+        hash160(&self.public_key)
+    }
+
+    /// Base58Check address derived from the public key.
+    pub fn address(&self) -> String {
+        public_key_to_address(&self.public_key)
     }
 }
 
-impl Default for KeyPair {
-    fn default() -> Self {
-        Self::new().unwrap()
+impl fmt::Debug for KeyPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KeyPair")
+            .field("public_key", &hex::encode(&self.public_key))
+            .field("private_key", &"<redacted>")
+            .finish()
     }
 }
 
 impl fmt::Display for KeyPair {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "KeyPair {{ public_key: {} }}", hex::encode(&self.public_key))
+        write!(
+            f,
+            "KeyPair {{ public_key: {} }}",
+            hex::encode(&self.public_key)
+        )
     }
+}
+
+fn secret_key_from_slice(bytes: &[u8]) -> Result<SecretKey> {
+    let array: [u8; 32] = bytes.try_into().map_err(|_| {
+        BlockchainError::CryptoError(format!("private key must be 32 bytes, got {}", bytes.len()))
+    })?;
+    SecretKey::from_secret_bytes(array).map_err(|e| BlockchainError::CryptoError(e.to_string()))
+}
+
+fn sha256_array(data: &[u8]) -> [u8; 32] {
+    Sha256::digest(data).into()
 }
 
 pub fn sha256(data: &[u8]) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    hasher.finalize().to_vec()
+    sha256_array(data).to_vec()
 }
 
 pub fn double_sha256(data: &[u8]) -> Vec<u8> {
-    let first_hash = sha256(data);
-    sha256(&first_hash)
+    sha256(&sha256(data))
 }
 
 pub fn ripemd160(data: &[u8]) -> Vec<u8> {
-    use ring::digest;
-    // Note: ring doesn't have RIPEMD160, so we'll use SHA256 as a substitute
-    // In a real implementation, you'd use a proper RIPEMD160 implementation
-    sha256(data)
+    Ripemd160::digest(data).to_vec()
+}
+
+/// `RIPEMD160(SHA256(data))`.
+pub fn hash160(data: &[u8]) -> Vec<u8> {
+    ripemd160(&sha256(data))
+}
+
+/// Encode a public key as a Base58Check address (version byte + HASH160 + checksum).
+pub fn public_key_to_address(public_key: &[u8]) -> String {
+    let mut payload = Vec::with_capacity(25);
+    payload.push(ADDRESS_VERSION);
+    payload.extend_from_slice(&hash160(public_key));
+    let checksum = double_sha256(&payload);
+    payload.extend_from_slice(&checksum[..4]);
+    bs58::encode(payload).into_string()
 }
 
 pub fn verify_signature(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result<bool> {
-    let secp = Secp256k1::new();
-    
     let public_key = PublicKey::from_slice(public_key)
         .map_err(|e| BlockchainError::CryptoError(e.to_string()))?;
-    
-    let message_hash = sha256(message);
-    let message = Message::from_slice(&message_hash)
+    let signature = ecdsa::Signature::from_compact(signature)
         .map_err(|e| BlockchainError::CryptoError(e.to_string()))?;
-    
-    let signature = Signature::from_compact(signature)
-        .map_err(|e| BlockchainError::CryptoError(e.to_string()))?;
-    
-    match secp.verify_ecdsa(&message, &signature, &public_key) {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
+    let digest = Message::from_digest(sha256_array(message));
+
+    Ok(ecdsa::verify(&signature, digest, &public_key).is_ok())
 }
 
 pub fn hash_to_string(hash: &[u8]) -> String {
@@ -111,37 +130,28 @@ pub fn string_to_hash(s: &str) -> Result<Vec<u8>> {
 }
 
 pub fn generate_random_bytes(length: usize) -> Vec<u8> {
-    use rand::RngCore;
     let mut bytes = vec![0u8; length];
-    OsRng.fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     bytes
 }
 
+/// Number of leading zero bits in `hash`.
+pub fn leading_zero_bits(hash: &[u8]) -> u32 {
+    let mut bits = 0;
+    for byte in hash {
+        if *byte == 0 {
+            bits += 8;
+        } else {
+            bits += byte.leading_zeros();
+            break;
+        }
+    }
+    bits
+}
+
+/// Proof-of-work check: the hash must start with at least `difficulty` zero bits.
 pub fn hash_difficulty_check(hash: &[u8], difficulty: u32) -> bool {
-    let target = calculate_target(difficulty);
-    let hash_value = bytes_to_u256(hash);
-    hash_value < target
-}
-
-fn calculate_target(difficulty: u32) -> [u32; 8] {
-    // Simplified target calculation
-    // In Bitcoin, this is more complex with proper difficulty adjustment
-    let mut target = [0xFFFFFFFFu32; 8];
-    if difficulty > 0 {
-        target[7] = target[7] >> difficulty.min(32);
-    }
-    target
-}
-
-fn bytes_to_u256(bytes: &[u8]) -> [u32; 8] {
-    let mut result = [0u32; 8];
-    for (i, chunk) in bytes.chunks(4).enumerate() {
-        if i >= 8 { break; }
-        let mut word_bytes = [0u8; 4];
-        word_bytes[..chunk.len()].copy_from_slice(chunk);
-        result[i] = u32::from_be_bytes(word_bytes);
-    }
-    result
+    leading_zero_bits(hash) >= difficulty
 }
 
 #[cfg(test)]
@@ -156,24 +166,33 @@ mod tests {
     }
 
     #[test]
+    fn test_keypair_from_private_key_is_deterministic() {
+        let keypair = KeyPair::new().unwrap();
+        let restored = KeyPair::from_private_key(&keypair.private_key).unwrap();
+        assert_eq!(keypair, restored);
+        assert!(KeyPair::from_private_key(&[1, 2, 3]).is_err());
+        assert!(KeyPair::from_private_key(&[0u8; 32]).is_err());
+    }
+
+    #[test]
     fn test_signature_verification() {
         let keypair = KeyPair::new().unwrap();
         let message = b"Hello, blockchain!";
         let signature = keypair.sign(message).unwrap();
-        
+
         assert!(verify_signature(&keypair.public_key, message, &signature).unwrap());
         assert!(!verify_signature(&keypair.public_key, b"Different message", &signature).unwrap());
+
+        let other = KeyPair::new().unwrap();
+        assert!(!verify_signature(&other.public_key, message, &signature).unwrap());
     }
 
     #[test]
-    fn test_sha256() {
-        let data = b"test data";
-        let hash = sha256(data);
-        assert_eq!(hash.len(), 32);
-        
-        // Test deterministic
-        let hash2 = sha256(data);
-        assert_eq!(hash, hash2);
+    fn test_sha256_known_vector() {
+        assert_eq!(
+            hash_to_string(&sha256(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
@@ -181,19 +200,46 @@ mod tests {
         let data = b"test data";
         let hash = double_sha256(data);
         assert_eq!(hash.len(), 32);
-        
-        // Verify it's actually double hashing
-        let single_hash = sha256(data);
-        let manual_double = sha256(&single_hash);
-        assert_eq!(hash, manual_double);
+        assert_eq!(hash, sha256(&sha256(data)));
+    }
+
+    #[test]
+    fn test_ripemd160_known_vector() {
+        assert_eq!(
+            hash_to_string(&ripemd160(b"abc")),
+            "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc"
+        );
+    }
+
+    #[test]
+    fn test_address_from_known_public_key() {
+        // Public key of the private key 0x...01 (generator point, compressed).
+        let public_key =
+            hex::decode("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+                .unwrap();
+        assert_eq!(
+            public_key_to_address(&public_key),
+            "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"
+        );
     }
 
     #[test]
     fn test_difficulty_check() {
-        let easy_hash = vec![0x00, 0x00, 0x00, 0x00]; // Should pass low difficulty
-        let hard_hash = vec![0xFF, 0xFF, 0xFF, 0xFF]; // Should fail most difficulties
-        
+        let easy_hash = vec![0x00, 0x00, 0x00, 0x00];
+        let hard_hash = vec![0xFF, 0xFF, 0xFF, 0xFF];
+
         assert!(hash_difficulty_check(&easy_hash, 1));
+        assert!(hash_difficulty_check(&easy_hash, 32));
         assert!(!hash_difficulty_check(&hard_hash, 1));
+        assert!(hash_difficulty_check(&hard_hash, 0));
+        assert_eq!(leading_zero_bits(&[0x00, 0x0F]), 12);
+    }
+
+    #[test]
+    fn test_random_bytes() {
+        let a = generate_random_bytes(32);
+        let b = generate_random_bytes(32);
+        assert_eq!(a.len(), 32);
+        assert_ne!(a, b);
     }
 }
