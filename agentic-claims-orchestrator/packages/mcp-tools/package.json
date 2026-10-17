@@ -1,0 +1,17 @@
+{
+  "name": "@aco/mcp-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP tool servers (policy-lookup, claims-history, document-extract) and the governed MCP tool gateway.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aco/core": "0.1.0",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@opentelemetry/api": "1.9.1",
+    "zod": "4.6.7"
+  }
+}

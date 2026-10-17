@@ -1,0 +1,45 @@
+{
+  "name": "agentic-claims-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Governed multi-agent orchestration for insurance claims intake and triage (FNOL -> extraction -> coverage -> fraud risk -> decision) with durable checkpoints, MCP tools, policy guardrails and human-in-the-loop approvals.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "workspaces": [
+    "packages/core",
+    "packages/mcp-tools",
+    "packages/infra",
+    "apps/server"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:all": "vitest run",
+    "coverage": "vitest run --project unit --coverage",
+    "eval": "node apps/server/src/evals/run-evals.ts",
+    "demo": "node apps/server/src/cli.ts demo",
+    "start": "node apps/server/src/main.ts",
+    "db:generate": "drizzle-kit generate --config packages/infra/drizzle.config.ts",
+    "db:migrate": "node apps/server/src/cli.ts migrate"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@vitest/coverage-v8": "5.0.5",
+    "drizzle-kit": "0.31.11",
+    "eslint": "10.13.0",
+    "globals": "17.13.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.2",
+    "vitest": "5.0.5"
+  }
+}
