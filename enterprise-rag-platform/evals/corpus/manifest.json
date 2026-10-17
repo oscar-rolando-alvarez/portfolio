@@ -1,0 +1,13 @@
+{
+  "documents": [
+    {"file": "employee-handbook.md", "external_id": "employee-handbook", "acl_groups": ["*"]},
+    {"file": "expense-policy.md", "external_id": "expense-policy", "acl_groups": ["*"]},
+    {"file": "security-policy.html", "external_id": "security-policy", "acl_groups": ["*"]},
+    {"file": "it-support.md", "external_id": "it-support", "acl_groups": ["*"]},
+    {"file": "vendor-notes.md", "external_id": "vendor-notes", "acl_groups": ["*"]},
+    {"file": "oncall-runbook.md", "external_id": "oncall-runbook", "acl_groups": ["engineering"]},
+    {"file": "finance-q3-forecast.md", "external_id": "finance-q3-forecast", "acl_groups": ["finance"]},
+    {"file": "hr-contacts.txt", "external_id": "hr-contacts", "acl_groups": ["hr"]},
+    {"file": "other-tenant-forecast.md", "external_id": "other-tenant-forecast", "acl_groups": ["*"], "tenant": "other"}
+  ]
+}

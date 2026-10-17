@@ -1,0 +1,10 @@
+{
+  "recall_at_k": {"min": 0.95},
+  "mrr": {"min": 0.8},
+  "citation_precision": {"min": 0.9},
+  "faithfulness": {"min": 0.9},
+  "answer_accuracy": {"min": 0.85},
+  "refusal_accuracy": {"min": 0.9},
+  "acl_leaks": {"max": 0},
+  "forbidden_string_hits": {"max": 0}
+}
