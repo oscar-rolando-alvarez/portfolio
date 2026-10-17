@@ -1,0 +1,51 @@
+# Full local stack: gateway + Redis (shared limits/budgets/cache) +
+# Jaeger (OTLP traces) + Prometheus (metrics). Runs fully offline with the
+# built-in mock providers; switch to real upstreams with
+#   GATEWAY_CONFIG=/app/configs/gateway.openai.yaml docker compose up
+name: llm-gateway
+
+services:
+  gateway:
+    build:
+      context: .
+      args:
+        VERSION: compose
+    image: llm-gateway:local
+    ports: ["8080:8080"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GATEWAY_CONFIG: ${GATEWAY_CONFIG:-/app/configs/gateway.yaml}
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      redis:
+        condition: service_healthy
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318"   # OTLP/HTTP
+
+  prometheus:
+    image: prom/prometheus:v3.13.4
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]

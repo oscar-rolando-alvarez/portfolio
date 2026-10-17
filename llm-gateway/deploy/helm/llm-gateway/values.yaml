@@ -1,0 +1,146 @@
+# Default values for llm-gateway.
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/oscar-rolando-alvarez/llm-gateway
+  tag: "" # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+  # Pin by digest in production (takes precedence over tag).
+  digest: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {} # e.g. IRSA / Workload Identity bindings
+  automount: false
+
+podAnnotations: {}
+podLabels: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Shared state backend. Required for more than one replica so that rate
+# limits, budgets and the exact cache are consistent cluster-wide.
+redis:
+  # Name of an existing Secret with key `url` (redis:// or rediss://).
+  existingSecret: ""
+  existingSecretKey: url
+  # Plain URL (dev only; prefer existingSecret).
+  url: ""
+
+# Environment variables injected from an existing Secret (provider API keys,
+# admin key hash, tenant key hashes referenced by the config).
+existingSecret: ""
+
+# Extra plain environment variables.
+env:
+  GATEWAY_LOG_LEVEL: info
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
+# Gateway configuration (configs/gateway.yaml schema). Mounted as a
+# ConfigMap; the gateway hot-reloads it when the ConfigMap changes.
+config:
+  server:
+    listen_addr: ":8080"
+    request_timeout: 120s
+  admin:
+    api_key_sha256: ${GATEWAY_ADMIN_KEY_SHA256:-}
+  telemetry:
+    log_format: json
+    sample_ratio: 0.2
+  audit:
+    enabled: true
+  hot_reload:
+    enabled: true
+    interval: 10s
+  embeddings:
+    alias: embed-default
+  providers:
+    - name: primary
+      type: openai
+      base_url: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      api_key: ${LLM_API_KEY:-}
+      timeout: 60s
+    - name: fallback
+      type: mock
+  models:
+    - alias: chat-default
+      policy: priority
+      retry: { max_attempts: 2, base_backoff: 200ms, max_backoff: 2s }
+      circuit_breaker: { failure_threshold: 5, open_for: 30s }
+      targets:
+        - { provider: primary, model: "${LLM_CHAT_MODEL:-gpt-4o-mini}", input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+        - { provider: fallback, model: degraded-mode }
+    - alias: embed-default
+      kind: embedding
+      targets:
+        - { provider: primary, model: "${LLM_EMBED_MODEL:-text-embedding-3-small}", input_cost_per_mtok: 0.02 }
+  tenant_defaults:
+    rate_limit: { requests_per_minute: 300, tokens_per_minute: 200000 }
+    budget: { monthly_usd: 200, mode: hard, warn_ratio: 0.8 }
+    guardrails: { pii: redact, injection: block }
+    cache: { enabled: true, semantic: true, ttl: 1h, semantic_threshold: 0.95 }
+  tenants: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+terminationGracePeriodSeconds: 40
+# Give load balancers time to deregister the pod before SIGTERM.
+preStopSleepSeconds: 5
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+networkPolicy:
+  enabled: true
+  # Namespaces allowed to call the gateway (empty = same namespace only).
+  ingressNamespaceSelector: {}
+  # Egress is restricted to DNS, Redis and HTTPS upstreams.
+  redisPort: 6379
+  extraEgressCIDRs: ["0.0.0.0/0"]
+
+serviceMonitor:
+  enabled: false
+  interval: 15s
+  labels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
