@@ -14,7 +14,7 @@ anchor-lang = { version = "1.2.1", default-features = false, features = ["derive
 anchor-spl = { version = "1.2.1", default-features = false, features = ["token", "token_2022", "token_2022_extensions", "associated_token", "solana-v3"] }
 litesvm = "0.18.0"
 solana-keypair = "3"
-solana-signer = "3"
+solana-signer = "4"
 solana-transaction = "4"
 solana-account = "4"
 
