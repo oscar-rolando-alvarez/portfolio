@@ -96,20 +96,28 @@ jobs:
     name: Dependency audit (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Advisory only: remaining high findings are in Nuxt/Nitro build tooling with no patched release yet.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: npm audit (production dependencies)
+        id: audit
+        # Advisory only: remaining high findings are in Nuxt/Nitro build tooling with no patched release yet.
+        continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
+      - name: Report audit result
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning title=npm audit::High-severity advisories reported for production dependencies (see the audit step log)."
 
   docker:
     name: Docker images
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # Throwaway values for the CI-only Compose stack
+      NUXT_JWT_SECRET: ci-compose-secret-0123456789abcdef
+      NUXT_COOKIE_SECURE: "false"
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -133,9 +141,6 @@ jobs:
           tags: social-media-platform-migrate:local
           cache-from: type=gha,scope=social-media-platform
       - name: Compose stack health check
-        env:
-          NUXT_JWT_SECRET: ci-compose-secret-0123456789abcdef
-          NUXT_COOKIE_SECURE: "false"
         run: |
           docker compose up -d --wait --wait-timeout 120 db
           docker compose run --rm migrate

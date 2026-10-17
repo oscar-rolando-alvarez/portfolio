@@ -74,15 +74,19 @@ jobs:
     name: Dependency audit (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Advisory only: remaining high findings are in Nuxt/Nitro build tooling with no patched release yet.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: npm audit (production dependencies)
+        id: audit
+        # Advisory only: remaining high findings are in Nuxt/Nitro build tooling with no patched release yet.
+        continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
+      - name: Report audit result
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning title=npm audit::High-severity advisories reported for production dependencies (see the audit step log)."
 
   docker:
     name: Docker image
