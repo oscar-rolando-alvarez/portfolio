@@ -1,404 +1,217 @@
-# Financial Analysis ML API
+# Financial Analysis ML
 
-A comprehensive financial analysis system with machine learning capabilities built using FastAPI, PostgreSQL, Redis, and Celery. The system follows hexagonal architecture principles and includes features for portfolio management, financial instrument tracking, price data analysis, and ML-powered predictions.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/financial-analysis-ml.yml/badge.svg)
 
-## Features
+A portfolio analytics API built on clean architecture. You send holdings and their price history. The API computes **risk and return metrics deterministically** with NumPy and pandas, and can **narrate them with an LLM** through any OpenAI-compatible endpoint. The model is given only the computed numbers, and every narrative carries a "not financial advice" disclaimer.
 
-- **RESTful API** with OpenAPI documentation
-- **JWT Authentication** with secure user management
-- **Portfolio Management** with real-time position tracking
-- **Financial Instrument** data management and price tracking
-- **Machine Learning Models** for financial predictions (LSTM, Random Forest, etc.)
-- **Async Task Processing** with Celery for ML training and predictions
-- **Redis Caching** for improved performance
-- **Comprehensive Testing** with pytest
-- **Docker Support** for development and production
-- **CI/CD Pipeline** with GitHub Actions
-- **Monitoring** with Celery Flower and health checks
+> Problem: analysts and advisors spend time turning raw risk numbers into readable commentary. LLMs write well but are unreliable at arithmetic. This service keeps the math in tested Python code and uses the LLM only for wording, so every figure in a report can be traced back to code.
+
+## Key features
+
+- **Portfolio report**: `POST /api/v1/analysis/report` returns total and annualized return, annualized volatility, Sharpe ratio, maximum drawdown, one-day 95% historical VaR, best and worst day, concentration (Herfindahl index) and per-holding contribution.
+- **Optional GenAI narrative**: a provider-agnostic `PortfolioNarrator` port with three settings: `fake` (deterministic template, the default), `openai` (any OpenAI-compatible Chat Completions API) or `disabled`. If the provider fails, the endpoint still returns the metrics plus a `narrative_error` field instead of a 5xx.
+- **User accounts**: register, log in (JWT bearer), manage your profile and deactivate your account. Passwords are hashed with bcrypt and must meet a complexity policy.
+- **Clean architecture**: domain entities and value objects, application use cases, and infrastructure adapters (SQLAlchemy 2 async repositories).
+- **Operations**: structured JSON logs (structlog) with a request id on every log line, `/health` that checks the database (returns 503 when it is degraded), optional OpenTelemetry tracing, Alembic migrations, a multi-stage non-root Docker image.
+- **Optional LSTM forecasting module** (`infrastructure/ml`, TensorFlow). It is kept as an opt-in extra so the default install and CI stay lightweight.
+
+## Tech stack
+
+| Area | Technology | Version |
+|---|---|---|
+| Language | Python | 3.13 |
+| Packaging | uv + `pyproject.toml` (PEP 621), hatchling | uv 0.13 |
+| Web framework | FastAPI / Uvicorn | 0.143 / 0.54 |
+| Validation and settings | Pydantic / pydantic-settings | 2.14 / 2.16 |
+| Persistence | SQLAlchemy (async, typed ORM) + asyncpg / aiosqlite, Alembic | 2.1 / 1.20 |
+| Analytics | NumPy / pandas | 2.5 / 3.0 |
+| GenAI | `openai` SDK against any OpenAI-compatible endpoint | 3.33 |
+| Auth | PyJWT, bcrypt | 2.15 / 5.0 |
+| Observability | structlog, OpenTelemetry (optional `otel` extra) | 26.1 / 1.45 |
+| ML (optional `ml` extra) | TensorFlow, scikit-learn | 2.21 / 1.9 |
+| Quality | Ruff (lint and format), mypy, pytest + pytest-cov, pip-audit | 0.17 / 2.4 / 9.1 |
+| Runtime | Docker (`python:3.13.16-slim-trixie`), PostgreSQL 18 | |
 
 ## Architecture
 
-The application follows **Hexagonal Architecture** (Clean Architecture) principles:
+### Container view
 
+```mermaid
+flowchart LR
+    client["API client / Swagger UI"]
+    subgraph svc["financial-analysis-ml container"]
+        api["FastAPI routers<br/>auth, users, analysis"]
+        uc["Application layer<br/>use cases + AuthService"]
+        domain["Domain layer<br/>entities, value objects, ports"]
+        metrics["Analytics engine<br/>NumPy / pandas"]
+        narrator["PortfolioNarrator port<br/>fake, openai-compatible"]
+        repo["SQLAlchemy async repositories"]
+    end
+    db[("PostgreSQL 18<br/>or SQLite for dev")]
+    llm["OpenAI-compatible LLM endpoint<br/>OpenAI, Azure OpenAI, Ollama, vLLM, LiteLLM"]
+    otel["OTLP collector (optional)"]
+
+    client -->|"HTTPS JSON + JWT"| api
+    api --> uc --> domain
+    uc --> repo --> db
+    api --> metrics
+    api --> narrator
+    narrator -.->|"chat completions, only when LLM_PROVIDER=openai"| llm
+    api -.->|"traces"| otel
 ```
-src/
-├── domain/           # Core business logic
-│   ├── entities/     # Domain entities
-│   ├── value_objects/# Value objects
-│   ├── repositories/ # Repository interfaces
-│   ├── services/     # Domain services
-│   └── exceptions/   # Domain exceptions
-├── application/      # Application layer
-│   ├── use_cases/    # Business use cases
-│   ├── services/     # Application services
-│   └── dto/          # Data transfer objects
-├── infrastructure/   # Infrastructure layer
-│   ├── database/     # Database implementation
-│   ├── cache/        # Cache implementation
-│   ├── ml/           # ML models and services
-│   ├── messaging/    # Celery tasks
-│   └── external_apis/# External API clients
-└── api/              # API layer
-    ├── endpoints/    # FastAPI endpoints
-    ├── middleware/   # Middleware
-    ├── dependencies/ # Dependencies
-    └── schemas/      # Pydantic schemas
+
+### Report generation flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Client
+    participant A as POST /analysis/report
+    participant M as Analytics engine
+    participant N as PortfolioNarrator
+    participant L as LLM endpoint
+
+    C->>A: holdings with weights and aligned price series
+    A->>A: Pydantic validation, rejects duplicates and misaligned series
+    A->>M: compute_portfolio_metrics(prices, weights)
+    M-->>A: PortfolioMetrics (deterministic)
+    alt include_narrative and provider enabled
+        A->>N: narrate(metrics, portfolio_name)
+        N->>L: system prompt with grounding rules + metrics JSON
+        L-->>N: narrative text
+        N-->>A: Narrative(text, provider, model, disclaimer)
+    else provider disabled or failing
+        A->>A: set narrative_error and keep the metrics
+    end
+    A-->>C: 200 AnalysisReport
 ```
 
-## Technologies
+### Data model (persistence layer)
 
-- **Backend**: FastAPI, Python 3.11+
-- **Database**: PostgreSQL with SQLAlchemy (async)
-- **Cache**: Redis
-- **Message Queue**: Celery with Redis broker
-- **ML**: scikit-learn, TensorFlow, pandas, numpy
-- **Testing**: pytest, pytest-asyncio
-- **Containerization**: Docker, docker-compose
-- **CI/CD**: GitHub Actions
-- **Documentation**: OpenAPI/Swagger
+```mermaid
+erDiagram
+    USERS ||--o{ PORTFOLIOS : owns
+    USERS ||--o{ PREDICTIONS : requests
+    PORTFOLIOS ||--o{ PORTFOLIO_POSITIONS : contains
+    FINANCIAL_INSTRUMENTS ||--o{ PORTFOLIO_POSITIONS : "held in"
+    FINANCIAL_INSTRUMENTS ||--o{ PRICE_DATA : has
+    FINANCIAL_INSTRUMENTS ||--o{ PREDICTIONS : "subject of"
+    USERS {
+        uuid id PK
+        string email UK
+        string password_hash
+        bool is_active
+    }
+    PORTFOLIO_POSITIONS {
+        uuid id PK
+        decimal quantity
+        decimal average_cost
+    }
+    PRICE_DATA {
+        uuid id PK
+        datetime timestamp
+        decimal close_price
+        int volume
+    }
+```
 
-## Quick Start
+## Project structure
 
-### Prerequisites
+```text
+financial-analysis-ml/
+├── src/financial_analysis/
+│   ├── api/                 # FastAPI app factory, routers, schemas, middleware, deps
+│   ├── analysis/            # Deterministic portfolio metrics (NumPy/pandas)
+│   ├── genai/               # PortfolioNarrator port, fake + OpenAI-compatible adapters
+│   ├── application/         # Use cases, DTOs, AuthService (JWT)
+│   ├── domain/              # Entities, value objects, repository ports, exceptions
+│   ├── infrastructure/
+│   │   ├── database/        # SQLAlchemy 2 models, engine, repositories
+│   │   └── ml/              # Optional LSTM forecaster (TensorFlow, `ml` extra)
+│   ├── config.py            # pydantic-settings configuration
+│   └── observability.py     # structlog + optional OpenTelemetry
+├── alembic/                 # Database migrations
+├── tests/{unit,integration}
+├── Dockerfile               # Multi-stage, non-root, healthcheck
+├── docker-compose.yml       # API + PostgreSQL + one-shot migration job
+└── pyproject.toml / uv.lock
+```
 
-- Python 3.11+
-- Docker and Docker Compose
-- Git
+## Running locally
 
-### Development Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd financial-analysis-ml
-   ```
-
-2. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Run with Docker Compose (Recommended)**
-   ```bash
-   # Development environment
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-   
-   # Production environment
-   docker-compose up -d
-   ```
-
-4. **Alternative: Local development**
-   ```bash
-   # Create virtual environment
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   
-   # Install dependencies
-   pip install -r requirements.txt
-   pip install -r requirements-dev.txt
-   
-   # Set up database
-   docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15
-   docker run -d --name redis -p 6379:6379 redis:7
-   
-   # Run database migrations
-   alembic upgrade head
-   
-   # Start the application
-   uvicorn src.api.main:app --reload
-   ```
-
-### API Documentation
-
-Once the application is running, visit:
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **Health Check**: http://localhost:8000/health
-
-### Services
-
-- **API**: http://localhost:8000
-- **Celery Flower** (Task Monitoring): http://localhost:5555
-- **pgAdmin** (Development): http://localhost:5050
-- **Jupyter Lab** (Development): http://localhost:8888
-
-## API Usage
-
-### Authentication
-
-1. **Register a new user**
-   ```bash
-   curl -X POST "http://localhost:8000/api/v1/auth/register" \
-        -H "Content-Type: application/json" \
-        -d '{
-          "email": "user@example.com",
-          "password": "SecurePassword123!",
-          "first_name": "John",
-          "last_name": "Doe"
-        }'
-   ```
-
-2. **Login to get access token**
-   ```bash
-   curl -X POST "http://localhost:8000/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -d '{
-          "email": "user@example.com",
-          "password": "SecurePassword123!"
-        }'
-   ```
-
-3. **Use the token in subsequent requests**
-   ```bash
-   curl -X GET "http://localhost:8000/api/v1/users/me" \
-        -H "Authorization: Bearer <your-access-token>"
-   ```
-
-### Portfolio Management
-
-1. **Create a portfolio**
-   ```bash
-   curl -X POST "http://localhost:8000/api/v1/portfolios" \
-        -H "Authorization: Bearer <token>" \
-        -H "Content-Type: application/json" \
-        -d '{
-          "name": "My Portfolio",
-          "description": "Investment portfolio",
-          "base_currency": "USD"
-        }'
-   ```
-
-2. **Add positions to portfolio**
-   ```bash
-   curl -X POST "http://localhost:8000/api/v1/portfolios/{portfolio_id}/positions" \
-        -H "Authorization: Bearer <token>" \
-        -H "Content-Type: application/json" \
-        -d '{
-          "instrument_id": "<instrument-uuid>",
-          "quantity": "100.0",
-          "average_cost": "150.50"
-        }'
-   ```
-
-## Development
-
-### Running Tests
+### With uv (SQLite, zero setup)
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/unit/test_domain_entities.py
-
-# Run integration tests
-pytest tests/integration/
+cd financial-analysis-ml
+uv sync                      # add --extra ml for TensorFlow, --extra otel for tracing
+cp .env.example .env         # optional
+uv run uvicorn financial_analysis.api.main:app --reload
+# open http://localhost:8000/docs
 ```
 
-### Code Quality
+Try a report:
 
 ```bash
-# Format code
-black .
-
-# Sort imports
-isort .
-
-# Lint code
-flake8 src tests
-
-# Type checking
-mypy src
-
-# Security check
-bandit -r src/
-
-# Check dependencies for vulnerabilities
-safety check
+curl -s -X POST localhost:8000/api/v1/analysis/report \
+  -H 'content-type: application/json' \
+  -d '{"portfolio_name":"Core Tech","holdings":[
+        {"symbol":"AAPL","weight":0.6,"prices":[180,182,181,185,187]},
+        {"symbol":"MSFT","weight":0.4,"prices":[400,398,405,410,409]}]}'
 ```
 
-### Database Migrations
+### With Docker Compose (PostgreSQL)
 
 ```bash
-# Create new migration
-alembic revision --autogenerate -m "Description of changes"
-
-# Apply migrations
-alembic upgrade head
-
-# Downgrade migration
-alembic downgrade -1
+docker compose up --build     # runs `alembic upgrade head`, then starts the API on :8000
+docker compose down -v
 ```
 
-### Celery Tasks
+The image alone also works and falls back to SQLite inside the container: `docker build -t financial-analysis-ml . && docker run -p 8000:8000 financial-analysis-ml`.
+
+## Testing and quality
 
 ```bash
-# Start Celery worker
-celery -A src.infrastructure.messaging.celery_app worker --loglevel=info
-
-# Start Celery beat (scheduler)
-celery -A src.infrastructure.messaging.celery_app beat --loglevel=info
-
-# Monitor tasks with Flower
-celery -A src.infrastructure.messaging.celery_app flower
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pytest                 # unit + API tests with coverage (gate: 80%)
 ```
 
-## ML Models
+The tests use a temporary SQLite database and the deterministic fake narrator, so they need no network access or external services. CI (`.github/workflows/financial-analysis-ml.yml`) runs lint, format, type-check and tests on Python 3.13, then a Docker build with a container health smoke test. It also runs an **advisory** `pip-audit` job (`continue-on-error`), so a newly published CVE is reported without blocking unrelated PRs.
 
-The system supports various machine learning models for financial predictions:
+## Configuration
 
-### Supported Models
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `sqlite+aiosqlite:///./financial_analysis.db` | SQLAlchemy async URL. Use `postgresql+asyncpg://…` in production |
+| `JWT_SECRET_KEY` | `change-me-in-production` | HMAC secret for access tokens |
+| `JWT_ALGORITHM` / `ACCESS_TOKEN_EXPIRE_MINUTES` | `HS256` / `30` | Token settings |
+| `ALLOWED_ORIGINS` | `["http://localhost:3000"]` | CORS origins (JSON list) |
+| `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` | Logging level and JSON vs console rendering |
+| `LLM_PROVIDER` | `fake` | `fake`, `openai` (any OpenAI-compatible API) or `disabled` |
+| `LLM_BASE_URL` | unset (OpenAI default) | e.g. `http://localhost:11434/v1` (Ollama) or a LiteLLM proxy URL |
+| `LLM_API_KEY` | unset | API key for the endpoint (local servers accept any value) |
+| `LLM_MODEL` | `gpt-4o-mini` | Model name as exposed by the endpoint |
+| `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` / `LLM_TEMPERATURE` | `30` / `2` / `0.2` | Client resilience and sampling |
+| `RISK_FREE_RATE` / `TRADING_DAYS_PER_YEAR` | `0.02` / `252` | Analytics parameters |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Turns on OTLP/HTTP tracing (requires the `otel` extra) |
 
-- **LSTM**: Long Short-Term Memory neural networks for time series prediction
-- **Random Forest**: Ensemble method for classification and regression
-- **Linear Regression**: Simple linear models for trend analysis
-- **ARIMA**: Autoregressive Integrated Moving Average for time series
-- **Prophet**: Facebook's time series forecasting tool
+## GenAI design
 
-### Model Training
+- **Port and adapters.** `genai/narrator.py` defines a `PortfolioNarrator` protocol. `FakeNarrator` is deterministic and template-based, used in tests and local development. `OpenAICompatibleNarrator` wraps the `openai` SDK's `AsyncOpenAI` client. `genai/factory.py` picks the adapter from `LLM_PROVIDER`. No vendor is hard-coded: changing `LLM_BASE_URL` and `LLM_MODEL` points the service at OpenAI, Azure OpenAI, a self-hosted vLLM or Ollama, or a LiteLLM gateway that fronts any provider.
+- **Grounding.** The model receives only the computed metrics as JSON, plus a system prompt that forbids new calculations, invented data and buy/sell recommendations.
+- **Resilience.** The client has timeouts and bounded retries. Provider errors are wrapped as `NarrativeUnavailableError`, so the API degrades to metrics-only. Logs record the error type but never the prompt or the key.
+- **Testability.** The adapters are tested with stub clients. The API tests swap narrators through FastAPI `dependency_overrides`.
 
-Models are trained asynchronously using Celery tasks. You can trigger training through the API:
+## Design decisions
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/predictions" \
-     -H "Authorization: Bearer <token>" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "instrument_id": "<instrument-uuid>",
-       "prediction_type": "PRICE_FORECAST",
-       "model_type": "LSTM",
-       "parameters": {
-         "sequence_length": 60,
-         "prediction_horizon_days": 30
-       }
-     }'
-```
+- **The math stays out of the LLM.** Every number comes from `analysis/metrics.py`, which has its own unit tests. The LLM only adds wording on top.
+- **Stateless analysis endpoint.** Price series are supplied in the request, so the service has no hidden dependency on a market-data vendor. A data-provider adapter can be added behind a port later.
+- **SQLite for development, PostgreSQL for production** through portable SQLAlchemy types (`Uuid`, `JSON` with a JSONB variant on PostgreSQL). Tables are auto-created only for SQLite; PostgreSQL uses Alembic.
+- **Heavy machine learning is opt-in.** TensorFlow sits in the `ml` extra and is imported lazily. The default install, the Docker image and CI stay small and fast.
+- **App factory + lifespan.** `create_app(settings)` makes configuration explicit and testable, with no module-level side effects other than the default `app` instance.
 
-## Deployment
+## Known limitations
 
-### Production Deployment
-
-1. **Set environment variables**
-   ```bash
-   export ENVIRONMENT=production
-   export DEBUG=false
-   export JWT_SECRET_KEY="your-production-secret-key"
-   # Set other production variables
-   ```
-
-2. **Deploy with Docker Compose**
-   ```bash
-   docker-compose -f docker-compose.yml up -d
-   ```
-
-3. **Run database migrations**
-   ```bash
-   docker-compose exec api alembic upgrade head
-   ```
-
-### Environment Variables
-
-Key environment variables for production:
-
-- `ENVIRONMENT=production`
-- `DEBUG=false`
-- `JWT_SECRET_KEY`: Strong secret key for JWT tokens
-- `DATABASE_URL`: Production database URL
-- `REDIS_URL`: Production Redis URL
-- `ALLOWED_ORIGINS`: Comma-separated list of allowed origins
-- `ALLOWED_HOSTS`: Comma-separated list of allowed hosts
-
-## Monitoring and Observability
-
-### Health Checks
-
-- **API Health**: `GET /health`
-- **Database Health**: Checked via SQLAlchemy connection
-- **Redis Health**: Checked via Redis ping
-- **Celery Health**: Monitored via Flower
-
-### Logging
-
-The application uses structured logging with configurable levels:
-
-- **Console Logging**: Always enabled
-- **File Logging**: Configurable with rotation
-- **JSON Format**: Available for log aggregation systems
-
-### Metrics
-
-- **API Metrics**: Request/response times, error rates
-- **Database Metrics**: Connection pool status, query performance
-- **Celery Metrics**: Task success/failure rates, queue lengths
-- **ML Metrics**: Model accuracy, training times, prediction latency
-
-## Security
-
-### Authentication & Authorization
-
-- **JWT Tokens**: Secure token-based authentication
-- **Password Hashing**: bcrypt with salt
-- **Rate Limiting**: Configurable rate limits per endpoint
-- **CORS**: Configurable cross-origin resource sharing
-
-### Data Protection
-
-- **Input Validation**: Pydantic schemas for request validation
-- **SQL Injection**: Prevented by SQLAlchemy ORM
-- **XSS Protection**: Built-in FastAPI protections
-- **HTTPS**: Recommended for production deployments
-
-## Contributing
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes** and add tests
-4. **Run tests**: `pytest`
-5. **Run code quality checks**: `black . && isort . && flake8 && mypy`
-6. **Commit your changes**: `git commit -m 'Add amazing feature'`
-7. **Push to the branch**: `git push origin feature/amazing-feature`
-8. **Open a Pull Request**
-
-### Development Guidelines
-
-- Follow **Clean Architecture** principles
-- Write **comprehensive tests** for new features
-- Use **type hints** throughout the codebase
-- Follow **PEP 8** style guidelines
-- Write **clear commit messages**
-- Update **documentation** as needed
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## Support
-
-For technical support and questions:
-
-- **Issues**: GitHub Issues
-- **Documentation**: `/docs` endpoint when running the application
-- **Health Check**: `/health` endpoint for service status
-
-## Roadmap
-
-- [ ] Real-time market data integration
-- [ ] Advanced ML models (Transformers, Prophet)
-- [ ] WebSocket support for real-time updates
-- [ ] Mobile API endpoints
-- [ ] Advanced portfolio analytics
-- [ ] Risk management features
-- [ ] Backtesting capabilities
-- [ ] Multi-tenant support
+- Portfolio, instrument, price and prediction domain models and the database schema exist, but CRUD endpoints for them are not exposed yet. The analysis endpoint takes data inline.
+- The LSTM forecaster is a standalone module and is not exposed through the API. It is excluded from type-checking and coverage because CI does not install TensorFlow.
+- There is no refresh-token endpoint yet (the service can issue and verify refresh tokens internally).
