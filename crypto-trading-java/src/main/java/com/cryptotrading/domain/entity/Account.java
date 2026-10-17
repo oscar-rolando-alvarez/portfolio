@@ -98,11 +98,11 @@ public class Account extends BaseEntity {
         BigDecimal total = balances.stream()
                 .map(Balance::getTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
+
         BigDecimal available = balances.stream()
                 .map(Balance::getAvailable)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
+
         BigDecimal locked = balances.stream()
                 .map(Balance::getLocked)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);

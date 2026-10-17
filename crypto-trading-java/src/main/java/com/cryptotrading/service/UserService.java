@@ -42,7 +42,7 @@ public class UserService implements UserDetailsService {
      */
     public User createUser(User user) {
         log.info("Creating new user: {}", user.getUsername());
-        
+
         // Validate uniqueness
         if (userRepository.existsByUsername(user.getUsername())) {
             throw new IllegalArgumentException("Username already exists: " + user.getUsername());
@@ -53,12 +53,12 @@ public class UserService implements UserDetailsService {
 
         // Encode password
         user.setPassword(passwordEncoder.encode(user.getPassword()));
-        
+
         // Generate API key if not provided
         if (user.getApiKey() == null) {
             user.setApiKey(generateApiKey());
         }
-        
+
         // Set default role if no roles specified
         if (user.getRoles().isEmpty()) {
             user.addRole("USER");
@@ -74,9 +74,9 @@ public class UserService implements UserDetailsService {
      */
     public User updateUser(Long userId, User userUpdates) {
         log.info("Updating user: {}", userId);
-        
+
         User existingUser = getUserById(userId);
-        
+
         // Update allowed fields
         if (userUpdates.getFirstName() != null) {
             existingUser.setFirstName(userUpdates.getFirstName());
@@ -96,16 +96,16 @@ public class UserService implements UserDetailsService {
      */
     public void changePassword(Long userId, String currentPassword, String newPassword) {
         log.info("Changing password for user: {}", userId);
-        
+
         User user = getUserById(userId);
-        
+
         if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
             throw new IllegalArgumentException("Current password is incorrect");
         }
 
         user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
-        
+
         log.info("Password changed successfully for user: {}", userId);
     }
 
@@ -114,14 +114,14 @@ public class UserService implements UserDetailsService {
      */
     public String resetPassword(String email) {
         log.info("Resetting password for email: {}", email);
-        
+
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("User not found with email: " + email));
 
         String newPassword = generateTemporaryPassword();
         user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
-        
+
         log.info("Password reset successfully for user: {}", user.getUsername());
         return newPassword;
     }
@@ -131,7 +131,7 @@ public class UserService implements UserDetailsService {
      */
     public void setUserEnabled(Long userId, boolean enabled) {
         log.info("Setting user {} enabled status to: {}", userId, enabled);
-        
+
         User user = getUserById(userId);
         user.setEnabled(enabled);
         userRepository.save(user);
@@ -142,7 +142,7 @@ public class UserService implements UserDetailsService {
      */
     public void setUserLocked(Long userId, boolean locked, LocalDateTime lockedUntil) {
         log.info("Setting user {} locked status to: {}", userId, locked);
-        
+
         User user = getUserById(userId);
         user.setAccountNonLocked(!locked);
         user.setLockedUntil(locked ? lockedUntil : null);
@@ -154,7 +154,7 @@ public class UserService implements UserDetailsService {
      */
     public void handleSuccessfulLogin(String username) {
         log.debug("Handling successful login for: {}", username);
-        
+
         User user = userRepository.findByUsernameOrEmail(username, username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
@@ -168,7 +168,7 @@ public class UserService implements UserDetailsService {
      */
     public void handleFailedLogin(String username) {
         log.warn("Handling failed login attempt for: {}", username);
-        
+
         Optional<User> userOpt = userRepository.findByUsernameOrEmail(username, username);
         if (userOpt.isPresent()) {
             User user = userOpt.get();
@@ -182,14 +182,14 @@ public class UserService implements UserDetailsService {
      */
     public String enableTwoFactorAuth(Long userId) {
         log.info("Enabling 2FA for user: {}", userId);
-        
+
         User user = getUserById(userId);
         String secret = generateTwoFactorSecret();
-        
+
         user.setTwoFactorEnabled(true);
         user.setTwoFactorSecret(secret);
         userRepository.save(user);
-        
+
         return secret;
     }
 
@@ -198,7 +198,7 @@ public class UserService implements UserDetailsService {
      */
     public void disableTwoFactorAuth(Long userId) {
         log.info("Disabling 2FA for user: {}", userId);
-        
+
         User user = getUserById(userId);
         user.setTwoFactorEnabled(false);
         user.setTwoFactorSecret(null);
@@ -210,7 +210,7 @@ public class UserService implements UserDetailsService {
      */
     public void verifyEmail(Long userId) {
         log.info("Verifying email for user: {}", userId);
-        
+
         User user = getUserById(userId);
         user.setEmailVerified(true);
         userRepository.save(user);
@@ -221,7 +221,7 @@ public class UserService implements UserDetailsService {
      */
     public void addRoleToUser(Long userId, String role) {
         log.info("Adding role {} to user: {}", role, userId);
-        
+
         User user = getUserById(userId);
         user.addRole(role);
         userRepository.save(user);
@@ -232,7 +232,7 @@ public class UserService implements UserDetailsService {
      */
     public void removeRoleFromUser(Long userId, String role) {
         log.info("Removing role {} from user: {}", role, userId);
-        
+
         User user = getUserById(userId);
         user.removeRole(role);
         userRepository.save(user);
@@ -243,13 +243,13 @@ public class UserService implements UserDetailsService {
      */
     public String generateNewApiKey(Long userId) {
         log.info("Generating new API key for user: {}", userId);
-        
+
         User user = getUserById(userId);
         String newApiKey = generateApiKey();
-        
+
         user.setApiKey(newApiKey);
         userRepository.save(user);
-        
+
         return newApiKey;
     }
 
@@ -340,10 +340,10 @@ public class UserService implements UserDetailsService {
      */
     public void deleteUser(Long userId) {
         log.warn("Deleting user: {}", userId);
-        
+
         User user = getUserById(userId);
         userRepository.delete(user);
-        
+
         log.info("User deleted: {}", userId);
     }
 

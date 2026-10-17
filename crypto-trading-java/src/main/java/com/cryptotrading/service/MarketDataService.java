@@ -29,7 +29,7 @@ public class MarketDataService {
      */
     public void updateMarketData(String symbol, BigDecimal price, BigDecimal volume) {
         log.debug("Updating market data for {}: price={}, volume={}", symbol, price, volume);
-        
+
         // Create new market data entry
         MarketData marketData = MarketData.builder()
                 .symbol(symbol)
@@ -42,10 +42,10 @@ public class MarketDataService {
 
         // Clear existing best price flag
         marketDataRepository.clearBestPriceFlag(symbol, Exchange.INTERNAL);
-        
+
         // Save new market data
         marketDataRepository.save(marketData);
-        
+
         log.debug("Market data updated for {}", symbol);
     }
 

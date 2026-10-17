@@ -106,7 +106,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * Find orders created between dates
      */
     @Query("SELECT o FROM Order o WHERE o.createdAt BETWEEN :startDate AND :endDate")
-    List<Order> findOrdersBetweenDates(@Param("startDate") LocalDateTime startDate, 
+    List<Order> findOrdersBetweenDates(@Param("startDate") LocalDateTime startDate,
                                       @Param("endDate") LocalDateTime endDate);
 
     /**
@@ -130,9 +130,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            "(o.type = 'LIMIT' AND :side = 'SELL' AND o.price >= :price) OR o.type = 'MARKET') " +
            "ORDER BY CASE WHEN :side = 'BUY' THEN o.price END ASC, " +
            "CASE WHEN :side = 'SELL' THEN o.price END DESC, o.createdAt ASC")
-    List<Order> findMatchingOrders(@Param("symbol") String symbol, 
-                                  @Param("side") OrderSide side, 
-                                  @Param("oppositeSide") OrderSide oppositeSide, 
+    List<Order> findMatchingOrders(@Param("symbol") String symbol,
+                                  @Param("side") OrderSide side,
+                                  @Param("oppositeSide") OrderSide oppositeSide,
                                   @Param("price") BigDecimal price);
 
     /**
@@ -148,7 +148,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Modifying
     @Query("UPDATE Order o SET o.executedQuantity = :executedQty, o.remainingQuantity = :remainingQty, " +
            "o.avgPrice = :avgPrice, o.status = :status WHERE o.id = :orderId")
-    void updateOrderExecution(@Param("orderId") Long orderId, 
+    void updateOrderExecution(@Param("orderId") Long orderId,
                              @Param("executedQty") BigDecimal executedQuantity,
                              @Param("remainingQty") BigDecimal remainingQuantity,
                              @Param("avgPrice") BigDecimal avgPrice,
@@ -181,7 +181,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /**
      * Get daily order count
      */
-    @Query("SELECT COUNT(o) FROM Order o WHERE DATE(o.createdAt) = CURRENT_DATE")
+    @Query("SELECT COUNT(o) FROM Order o WHERE CAST(o.createdAt AS LocalDate) = LOCAL DATE")
     long getDailyOrderCount();
 
     /**
@@ -189,7 +189,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      */
     @Query("SELECT SUM(o.executedQuantity) FROM Order o WHERE o.symbol = :symbol AND o.status = 'FILLED' " +
            "AND o.createdAt BETWEEN :startDate AND :endDate")
-    BigDecimal getOrderVolumeBySymbol(@Param("symbol") String symbol, 
+    BigDecimal getOrderVolumeBySymbol(@Param("symbol") String symbol,
                                      @Param("startDate") LocalDateTime startDate,
                                      @Param("endDate") LocalDateTime endDate);
 
@@ -210,6 +210,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * Count orders by status in time range
      */
     @Query("SELECT o.status, COUNT(o) FROM Order o WHERE o.createdAt BETWEEN :startDate AND :endDate GROUP BY o.status")
-    List<Object[]> countOrdersByStatusInRange(@Param("startDate") LocalDateTime startDate, 
+    List<Object[]> countOrdersByStatusInRange(@Param("startDate") LocalDateTime startDate,
                                              @Param("endDate") LocalDateTime endDate);
 }

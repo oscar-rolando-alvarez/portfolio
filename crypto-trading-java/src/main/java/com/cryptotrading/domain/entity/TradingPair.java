@@ -138,14 +138,14 @@ public class TradingPair extends BaseEntity {
     }
 
     public boolean isValidQuantity(BigDecimal quantity) {
-        return quantity != null && 
-               quantity.compareTo(minQuantity) >= 0 && 
+        return quantity != null &&
+               quantity.compareTo(minQuantity) >= 0 &&
                quantity.compareTo(maxQuantity) <= 0;
     }
 
     public boolean isValidPrice(BigDecimal price) {
-        return price != null && 
-               price.compareTo(minPrice) >= 0 && 
+        return price != null &&
+               price.compareTo(minPrice) >= 0 &&
                price.compareTo(maxPrice) <= 0;
     }
 

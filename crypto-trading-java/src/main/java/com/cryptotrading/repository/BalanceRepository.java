@@ -142,7 +142,7 @@ public interface BalanceRepository extends JpaRepository<Balance, Long> {
      * Find largest balances by asset
      */
     @Query("SELECT b FROM Balance b WHERE b.asset = :asset ORDER BY b.total DESC")
-    List<Balance> findLargestBalancesByAsset(@Param("asset") String asset, 
+    List<Balance> findLargestBalancesByAsset(@Param("asset") String asset,
                                            org.springframework.data.domain.Pageable pageable);
 
     /**

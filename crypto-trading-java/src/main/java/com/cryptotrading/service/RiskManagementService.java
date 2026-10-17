@@ -42,24 +42,24 @@ public class RiskManagementService {
         log.debug("Validating risk for order: {}", order.getId());
 
         Account account = order.getAccount();
-        
+
         // Check account balance
         validateAccountBalance(order, account);
-        
+
         // Check position size limits
         validatePositionSizeLimit(order);
-        
+
         // Check daily loss limits
         validateDailyLossLimit(order, account);
-        
+
         // Check margin requirements for margin accounts
         if (account.isMarginEnabled()) {
             validateMarginRequirements(order, account);
         }
-        
+
         // Check concentration risk
         validateConcentrationRisk(order, account);
-        
+
         log.debug("Risk validation passed for order: {}", order.getId());
     }
 
@@ -78,7 +78,7 @@ public class RiskManagementService {
         // Simple VaR calculation using normal distribution
         BigDecimal zScore = getZScore(confidenceLevel);
         BigDecimal timeAdjustment = BigDecimal.valueOf(Math.sqrt(timeHorizonDays));
-        
+
         BigDecimal var = portfolioValue
                 .multiply(portfolioVolatility)
                 .multiply(zScore)
@@ -95,25 +95,25 @@ public class RiskManagementService {
         log.debug("Calculating Sharpe ratio for account: {}", accountId);
 
         Account account = accountService.getAccountById(accountId);
-        
+
         BigDecimal totalReturn = account.getRealizedPnl().add(account.getUnrealizedPnl());
         BigDecimal accountValue = account.getTotalBalance();
-        
+
         if (accountValue.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
-        
+
         BigDecimal returnRate = totalReturn.divide(accountValue, 6, RoundingMode.HALF_UP);
         BigDecimal excessReturn = returnRate.subtract(riskFreeRate);
-        
+
         BigDecimal volatility = calculateAccountVolatility(accountId);
-        
+
         if (volatility.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
-        
+
         BigDecimal sharpeRatio = excessReturn.divide(volatility, 6, RoundingMode.HALF_UP);
-        
+
         log.debug("Sharpe ratio calculated: {} for account: {}", sharpeRatio, accountId);
         return sharpeRatio;
     }
@@ -127,16 +127,16 @@ public class RiskManagementService {
         // This would typically analyze historical account values
         // For now, return a simple calculation based on current unrealized losses
         Account account = accountService.getAccountById(accountId);
-        
+
         BigDecimal unrealizedLoss = account.getUnrealizedPnl().min(BigDecimal.ZERO);
         BigDecimal accountValue = account.getTotalBalance();
-        
+
         if (accountValue.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
-        
+
         BigDecimal drawdown = unrealizedLoss.abs().divide(accountValue, 6, RoundingMode.HALF_UP);
-        
+
         log.debug("Max drawdown calculated: {} for account: {}", drawdown, accountId);
         return drawdown;
     }
@@ -146,20 +146,20 @@ public class RiskManagementService {
      */
     public boolean requiresMarginCall(Long accountId) {
         Account account = accountService.getAccountById(accountId);
-        
+
         if (!account.isMarginEnabled()) {
             return false;
         }
-        
+
         BigDecimal marginLevel = calculateMarginLevel(account);
         BigDecimal marginCallLevel = new BigDecimal("1.3"); // 130%
-        
+
         boolean requiresCall = marginLevel.compareTo(marginCallLevel) < 0;
-        
+
         if (requiresCall) {
             log.warn("Account {} requires margin call. Margin level: {}", accountId, marginLevel);
         }
-        
+
         return requiresCall;
     }
 
@@ -168,20 +168,20 @@ public class RiskManagementService {
      */
     public boolean requiresLiquidation(Long accountId) {
         Account account = accountService.getAccountById(accountId);
-        
+
         if (!account.isMarginEnabled()) {
             return false;
         }
-        
+
         BigDecimal marginLevel = calculateMarginLevel(account);
         BigDecimal liquidationLevel = new BigDecimal("1.1"); // 110%
-        
+
         boolean requiresLiquidation = marginLevel.compareTo(liquidationLevel) <= 0;
-        
+
         if (requiresLiquidation) {
             log.error("Account {} requires liquidation. Margin level: {}", accountId, marginLevel);
         }
-        
+
         return requiresLiquidation;
     }
 
@@ -215,8 +215,8 @@ public class RiskManagementService {
     // Private helper methods
 
     private void validateAccountBalance(Order order, Account account) {
-        String requiredAsset = order.getSide().name().equals("BUY") ? 
-                order.getTradingPair().getQuoteAsset() : 
+        String requiredAsset = order.getSide().name().equals("BUY") ?
+                order.getTradingPair().getQuoteAsset() :
                 order.getTradingPair().getBaseAsset();
 
         BigDecimal requiredAmount = order.getSide().name().equals("BUY") ?
@@ -240,7 +240,7 @@ public class RiskManagementService {
     private void validateDailyLossLimit(Order order, Account account) {
         // This would check actual daily P&L - simplified implementation
         BigDecimal currentLoss = account.getUnrealizedPnl().min(BigDecimal.ZERO).abs();
-        
+
         if (currentLoss.compareTo(maxDailyLoss) > 0) {
             throw new IllegalArgumentException("Daily loss limit exceeded");
         }
@@ -248,7 +248,7 @@ public class RiskManagementService {
 
     private void validateMarginRequirements(Order order, Account account) {
         BigDecimal marginLevel = calculateMarginLevel(account);
-        
+
         if (marginLevel.compareTo(marginRequirement) < 0) {
             throw new IllegalArgumentException("Insufficient margin for order");
         }
@@ -271,11 +271,11 @@ public class RiskManagementService {
     private BigDecimal calculateMarginLevel(Account account) {
         BigDecimal equity = account.getTotalBalance().add(account.getUnrealizedPnl());
         BigDecimal usedMargin = account.getInitialMargin();
-        
+
         if (usedMargin.compareTo(BigDecimal.ZERO) == 0) {
             return new BigDecimal("999999"); // No positions
         }
-        
+
         return equity.divide(usedMargin, 6, RoundingMode.HALF_UP);
     }
 
@@ -283,19 +283,19 @@ public class RiskManagementService {
         // Simplified portfolio volatility calculation
         // In production, this would use historical price data and correlation matrices
         BigDecimal totalVolatility = BigDecimal.ZERO;
-        
+
         for (Position position : positions) {
             // Assume 2% daily volatility per asset - should be calculated from historical data
             BigDecimal assetVolatility = new BigDecimal("0.02");
             BigDecimal positionWeight = position.getNotionalValue().divide(
                     positions.stream()
                             .map(Position::getNotionalValue)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add), 
+                            .reduce(BigDecimal.ZERO, BigDecimal::add),
                     6, RoundingMode.HALF_UP);
-            
+
             totalVolatility = totalVolatility.add(positionWeight.multiply(assetVolatility));
         }
-        
+
         return totalVolatility;
     }
 

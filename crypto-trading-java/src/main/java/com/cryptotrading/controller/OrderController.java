@@ -1,6 +1,7 @@
 package com.cryptotrading.controller;
 
 import com.cryptotrading.domain.entity.Order;
+import com.cryptotrading.domain.entity.User;
 import com.cryptotrading.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -11,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -35,7 +37,7 @@ public class OrderController {
     public ResponseEntity<Order> createOrder(
             @Valid @RequestBody Order order) {
         log.info("Creating new order: {}", order);
-        
+
         Order createdOrder = orderService.createOrder(order);
         return ResponseEntity.status(HttpStatus.CREATED).body(createdOrder);
     }
@@ -45,7 +47,7 @@ public class OrderController {
     public ResponseEntity<Order> cancelOrder(
             @Parameter(description = "Order ID") @PathVariable Long orderId) {
         log.info("Cancelling order: {}", orderId);
-        
+
         Long userId = getCurrentUserId();
         Order cancelledOrder = orderService.cancelOrder(orderId, userId);
         return ResponseEntity.ok(cancelledOrder);
@@ -89,7 +91,7 @@ public class OrderController {
     public ResponseEntity<Integer> cancelAllOrdersByUser(
             @Parameter(description = "User ID") @PathVariable Long userId) {
         log.info("Cancelling all orders for user: {}", userId);
-        
+
         int cancelledCount = orderService.cancelAllOrdersByUser(userId);
         return ResponseEntity.ok(cancelledCount);
     }
@@ -103,8 +105,9 @@ public class OrderController {
 
     private Long getCurrentUserId() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        // This would extract user ID from the authentication token
-        // For now, return a placeholder
-        return 1L;
+        if (authentication != null && authentication.getPrincipal() instanceof User user) {
+            return user.getId();
+        }
+        throw new AccessDeniedException("No authenticated user");
     }
 }
