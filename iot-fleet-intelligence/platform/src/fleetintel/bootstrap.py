@@ -182,6 +182,7 @@ def build_container(settings: Settings) -> Container:
         min_confidence=settings.min_confidence,
         temperature=settings.llm_temperature,
         max_output_tokens=settings.llm_max_output_tokens,
+        output_locales=settings.locale_list(),
     )
     return Container(
         settings=settings,

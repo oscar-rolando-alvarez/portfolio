@@ -67,6 +67,27 @@ demo: up ## Simulate 100k devices with a cell outage and print incident, enrichm
 	docker compose exec -T platform python -m fleetintel.local.demo --api http://127.0.0.1:8080
 	@echo "Traces: http://localhost:16686  |  API: curl -H 'x-api-key: demo-key-acme' localhost:8080/v1/incidents"
 
+UI_DEVICES ?= 50000
+UI_SPEED ?= 10
+
+.PHONY: demo-ui
+demo-ui: ## Kafka + platform + live gateway + dashboard; streams 50k devices with a spreading cell outage
+	docker compose --profile ui up -d --wait $(UP_FLAGS)
+	docker compose run -d --rm --name fleetintel-sim-ui simulator -devices $(UI_DEVICES) -duration 50m \
+		-speed $(UI_SPEED) -start $$(date -u +%Y-%m-%dT%H:%M:%SZ) -scenario /scenarios/demo-ui.json \
+		-sink kafka -kafka-brokers kafka:9092 -progress 0 -quiet
+	@echo "Dashboard: http://localhost:3000  (Live mode; the outage starts ~50 s in and spreads for ~30 s)"
+	@echo "Gateway:   curl -N -H 'x-api-key: demo-key-acme' localhost:8090/v1/stream"
+
+.PHONY: demo-ui-check
+demo-ui-check: ## Assert the live path end to end (run after `make demo-ui`)
+	python3 scripts/live_smoke.py --gateway http://localhost:8090 --dashboard http://localhost:3000
+
+.PHONY: dashboard
+dashboard: ## Run the dashboard locally in demo mode (no backend needed)
+	cd dashboard && npm ci && npm run dev
+
 .PHONY: down
 down: ## Stop the local stack and drop its state
-	docker compose down -v
+	docker rm -f fleetintel-sim-ui >/dev/null 2>&1 || true
+	docker compose --profile ui down -v

@@ -7,7 +7,9 @@
    incident goes to human review instead of auto-remediation.
 4. Business policy: remote-fixable root causes never request a truck roll.
 5. Privacy: customer-facing text must not leak device ids or IMSI-like numbers.
-6. Prompt-injection: untrusted evidence strings that look like instructions
+6. Localization: translations must cover the same remediation steps and get the
+   same redactions as the primary (English) text; incomplete ones are dropped.
+7. Prompt-injection: untrusted evidence strings that look like instructions
    are flagged before prompting and reported in the guardrail notes.
 """
 
@@ -19,7 +21,7 @@ from typing import Literal
 
 from pydantic import ValidationError
 
-from fleetintel.domain import Diagnosis, RootCause
+from fleetintel.domain import Diagnosis, LocalizedDiagnosis, RootCause
 
 DEVICE_ID_RE = re.compile(r"\bdev-\d{8,9}\b")
 IMSI_RE = re.compile(r"\b\d{14,15}\b")
@@ -90,6 +92,27 @@ def enforce(
         notes.append("redacted identifiers from the customer message")
         repaired = True
 
+    translations: dict[str, LocalizedDiagnosis] = {}
+    for loc, tr in d.translations.items():
+        if len(tr.remediation_actions) != len(d.remediation_steps):
+            notes.append(f"dropped {loc} translation: remediation steps do not match")
+            repaired = True
+            continue
+        fixed_tr = tr.model_copy(
+            update={
+                "summary": scrub(tr.summary),
+                "evidence": [scrub(e) for e in tr.evidence],
+                "remediation_actions": [scrub(a) for a in tr.remediation_actions],
+                "customer_message": IMSI_RE.sub(
+                    "[redacted]", DEVICE_ID_RE.sub("[device]", tr.customer_message)
+                ),
+            }
+        )
+        if fixed_tr != tr:
+            notes.append(f"redacted identifiers from the {loc} translation")
+            repaired = True
+        translations[loc] = fixed_tr
+
     truck_roll = d.truck_roll_required
     if truck_roll and d.root_cause in REMOTE_FIXABLE:
         truck_roll = False
@@ -108,6 +131,7 @@ def enforce(
             "runbook_ids": runbooks,
             "customer_message": customer,
             "truck_roll_required": truck_roll,
+            "translations": translations,
         }
     )
     if fixed.root_cause is RootCause.INSUFFICIENT_EVIDENCE:

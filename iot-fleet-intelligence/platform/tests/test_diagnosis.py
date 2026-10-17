@@ -77,7 +77,7 @@ def test_fake_model_diagnoses_cell_outage_end_to_end() -> None:
     assert rec.diagnosis.truck_roll_required is False
     assert set(rec.diagnosis.referenced_device_ids) <= set(inc.sample_device_ids)
     assert rec.diagnosis.runbook_ids and rec.diagnosis.runbook_ids[0].startswith("RB-")
-    assert rec.input_tokens > 0 and rec.prompt_version == "diag-v1"
+    assert rec.input_tokens > 0 and rec.prompt_version == "diag-v2"
     span = next(s for s in _exporter.get_finished_spans() if s.name.startswith("chat "))
     assert span.attributes is not None
     assert span.attributes["gen_ai.operation.name"] == "chat"

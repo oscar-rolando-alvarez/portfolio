@@ -7,7 +7,7 @@ import json
 import sys
 from decimal import Decimal
 
-from fleetintel.cost.model import FleetProfile, estimate
+from fleetintel.cost.model import CENT, FleetProfile, estimate, load_pricing
 from fleetintel.cost.report import (
     render_comparison,
     render_estimate,
@@ -38,7 +38,7 @@ def _profile(args: argparse.Namespace, devices: int | None = None) -> FleetProfi
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="fleetintel-cost", description=__doc__)
-    ap.add_argument("command", choices=["estimate", "compare", "sensitivity", "report"])
+    ap.add_argument("command", choices=["estimate", "compare", "sensitivity", "report", "golden"])
     ap.add_argument("--devices", type=int, default=1_000_000)
     ap.add_argument("--compare-devices", default="10000,1000000,10000000")
     ap.add_argument("--intervals", default="60,300,900,3600")
@@ -61,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--format", choices=["md", "json"], default="md")
     args = ap.parse_args(argv)
 
+    if args.command == "golden":
+        print(json.dumps(golden(), indent=1, sort_keys=True))
+        return 0
     if args.command == "report":
         sys.stdout.write(render_full_report())
         return 0
@@ -82,3 +85,57 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# Profiles whose results are frozen into dashboard/src/lib/cost/golden.json. The
+# dashboard's TypeScript port of the estimator must reproduce them to the cent
+# (vitest), and CI fails if this output and the committed file drift apart.
+GOLDEN_CASES: list[dict[str, object]] = [
+    {"devices": 10_000},
+    {"devices": 1_000_000},
+    {"devices": 10_000_000},
+    {"devices": 1_000_000, "report_interval_seconds": 60},
+    {"devices": 1_000_000, "report_interval_seconds": 900},
+    {"devices": 1_000_000, "report_interval_seconds": 3600},
+    {"devices": 1_000_000, "readings_per_message": 10},
+    {"devices": 1_000_000, "compression_ratio": "0.5", "edge_filter_ratio": "0.3"},
+    {"devices": 250_000, "ingest_path": "direct_kafka"},
+    {"devices": 2_500_000, "payload_bytes": 6000, "report_interval_seconds": 600},
+    {"devices": 1_000_000, "llm_share": "0.2", "llm_large_share": "0.2"},
+    {"devices": 5_000_000, "llm_cache_hit_rate": "0.3", "incidents_per_1k_devices_per_day": "2"},
+    {"devices": 50_000, "report_interval_seconds": 30, "payload_bytes": 2048},
+    {
+        "devices": 1000,
+        "report_interval_seconds": 3600,
+        "payload_bytes": 1000,
+        "incidents_per_1k_devices_per_day": "0",
+        "api_requests_per_month": 0,
+        "kms_keys": 0,
+        "sqs_pollers_per_queue": 0,
+        "log_bytes_per_stream_invocation": 0,
+        "xray_sampling": "0",
+    },
+]
+
+
+def golden() -> dict[str, object]:
+    def c(x: Decimal) -> str:
+        return str(x.quantize(CENT))
+
+    cases = []
+    for raw in GOLDEN_CASES:
+        r = estimate(FleetProfile.model_validate(raw))
+        cases.append(
+            {
+                "profile": raw,
+                "total_usd": c(r.total_usd),
+                "per_device_usd": str(r.per_device_usd.quantize(Decimal("0.000001"))),
+                "by_category": {k: c(v) for k, v in r.by_category.items()},
+                "volumes": {k: str(v.quantize(Decimal("0.01"))) for k, v in r.volumes.items()},
+                "recommendations": [
+                    {"title": x.title, "monthly_savings_usd": c(x.monthly_savings_usd)}
+                    for x in r.recommendations
+                ],
+            }
+        )
+    return {"generated_by": "fleetintel-cost golden", "pricing": load_pricing(), "cases": cases}

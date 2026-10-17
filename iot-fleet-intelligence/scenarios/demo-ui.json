@@ -1,0 +1,14 @@
+{
+  "name": "demo-ui",
+  "description": "make demo-ui: after the baselines are learned, a cell outage spreads across one tracking area (regional power/backhaul loss), then a congested cell and a firmware regression follow.",
+  "faults": [
+    { "type": "cell_outage", "target": "310-260-1003-100200", "start": "8m", "duration": "8m", "intensity": 0.95 },
+    { "type": "cell_outage", "target": "310-260-1003-100205", "start": "8m30s", "duration": "7m", "intensity": 0.95 },
+    { "type": "cell_outage", "target": "310-260-1003-100211", "start": "9m", "duration": "6m30s", "intensity": 0.95 },
+    { "type": "cell_outage", "target": "310-260-1003-100218", "start": "9m30s", "duration": "6m", "intensity": 0.95 },
+    { "type": "cell_outage", "target": "310-260-1003-100224", "start": "10m", "duration": "5m", "intensity": 0.95 },
+    { "type": "cell_outage", "target": "310-260-1003-100231", "start": "10m30s", "duration": "4m30s", "intensity": 0.95 },
+    { "type": "congestion", "target": "auto", "start": "22m", "duration": "6m", "intensity": 0.9 },
+    { "type": "firmware_regression", "target": "auto", "start": "32m", "duration": "6m", "intensity": 0.9 }
+  ]
+}

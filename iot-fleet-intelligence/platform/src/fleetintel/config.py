@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, ge=0, le=2)
     rag_top_k: int = Field(default=3, ge=1, le=10)
     min_confidence: float = Field(default=0.55, ge=0, le=1)
+    # Languages every diagnosis is written in (one LLM call; English is the primary text).
+    diagnosis_locales: str = "en,es"
+
+    @field_validator("diagnosis_locales")
+    @classmethod
+    def _validate_locales(cls, v: str) -> str:
+        locales = [x.strip() for x in v.split(",") if x.strip()]
+        if not locales or any(x not in ("en", "es") for x in locales):
+            raise ValueError("diagnosis_locales must be a comma-separated subset of: en, es")
+        return ",".join(locales)
+
+    def locale_list(self) -> tuple[str, ...]:
+        return tuple(self.diagnosis_locales.split(","))
 
     # --- API ---------------------------------------------------------------
     # Comma-separated "tenant:sha256(api_key)" pairs. Only hashes are configured.

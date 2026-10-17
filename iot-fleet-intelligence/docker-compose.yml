@@ -4,6 +4,8 @@
 #   jaeger   - trace UI, receives OTLP from the platform (http://localhost:16686)
 #   platform - the real Lambda handlers wired to local event sources + API on :8080
 #   simulator- the Go fleet simulator (run on demand: `make demo`)
+#   gateway  - live gateway: Kafka -> per-second aggregates + incidents -> SSE on :8090 (profile "ui")
+#   dashboard- Next.js operations & executive dashboard on :3000 (profile "ui", `make demo-ui`)
 name: iot-fleet-intelligence
 
 services:
@@ -72,6 +74,39 @@ services:
     ports: ["8080:8080"]
     read_only: true
     tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  gateway:
+    build: ./gateway
+    profiles: ["ui"]
+    depends_on:
+      kafka: {condition: service_healthy}
+      platform: {condition: service_healthy}
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: fleet.telemetry.v1
+      FLEETGW_PLATFORM_URL: http://platform:8080
+      FLEETGW_PLATFORM_API_KEY: demo-key-acme
+      # same tenant-scoped key model as the platform API (only the SHA-256 is configured)
+      FLEETGW_API_KEYS: acme-utilities:8649cdebee753898fd50e01408a9e438aa5090249bc3e51b65f33dce973b0873
+    ports: ["8090:8090"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  dashboard:
+    build: ./dashboard
+    profiles: ["ui"]
+    depends_on:
+      gateway: {condition: service_healthy}
+    environment:
+      GATEWAY_URL: http://gateway:8090
+      GATEWAY_API_KEY: demo-key-acme # stays server-side; the browser only talks to /api/stream
+      DASHBOARD_DEFAULT_MODE: live
+    ports: ["3000:3000"]
+    read_only: true
+    tmpfs: ["/tmp", "/app/.next/cache"]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 

@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens. Dark is the primary theme; light is a first-class sibling.
+ * Text/surface pairs are chosen for WCAG AA (>= 4.5:1 body, >= 3:1 large/UI).
+ * Data colours follow a validated categorical order + a reserved status set.
+ */
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f2f2ef;
+  --surface-3: #e9e9e5;
+  --border: rgba(11, 11, 11, 0.09);
+  --border-strong: rgba(11, 11, 11, 0.16);
+  --fg: #0d0d0c;
+  --fg-2: #4a4945;
+  --fg-3: #6b6a64;
+  --accent: #2f62e8;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(47, 98, 232, 0.1);
+  --ring: rgba(47, 98, 232, 0.45);
+  --good: #0a7d0a;
+  --warning: #9a6700;
+  --serious: #c2410c;
+  --critical: #c42b2b;
+  --good-soft: rgba(12, 163, 12, 0.12);
+  --warning-soft: rgba(250, 178, 25, 0.18);
+  --serious-soft: rgba(236, 131, 90, 0.16);
+  --critical-soft: rgba(208, 59, 59, 0.12);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --grid: #e1e0d9;
+  --axis: #898781;
+  --shadow: 0 1px 2px rgba(16, 16, 15, 0.05), 0 4px 16px -8px rgba(16, 16, 15, 0.08);
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0b0b0d;
+  --surface: #121215;
+  --surface-2: #18181c;
+  --surface-3: #212126;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --fg: #f2f1ee;
+  --fg-2: #b9b8b1;
+  --fg-3: #8d8c86;
+  --accent: #7b9cff;
+  --accent-fg: #0b0b0d;
+  --accent-soft: rgba(123, 156, 255, 0.12);
+  --ring: rgba(123, 156, 255, 0.55);
+  --good: #3ccf3c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #f06565;
+  --good-soft: rgba(12, 163, 12, 0.16);
+  --warning-soft: rgba(250, 178, 25, 0.14);
+  --serious-soft: rgba(236, 131, 90, 0.14);
+  --critical-soft: rgba(240, 101, 101, 0.14);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --grid: #26262a;
+  --axis: #898781;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-good-soft: var(--good-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-serious-soft: var(--serious-soft);
+  --color-critical-soft: var(--critical-soft);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --radius-card: 14px;
+  --shadow-card: var(--shadow);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-feature-settings: "ss01", "cv11";
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.5s var(--ease-out-soft) both;
+}
+.live-dot {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}

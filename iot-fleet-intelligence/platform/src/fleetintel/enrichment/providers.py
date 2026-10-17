@@ -48,18 +48,56 @@ def parse_cell_id(cell_id: str) -> tuple[str, str, int, int]:
     return mcc, mnc, int(tac), int(eci)
 
 
+def hash32(text: str) -> int:
+    """32-bit FNV-1a + murmur3 finalizer over UTF-8 bytes.
+
+    Trivially portable (the dashboard has a TypeScript twin); the finalizer fixes
+    FNV's weak avalanche on the last byte so neighbouring cell ids spread out.
+    """
+    h = 0x811C9DC5
+    for b in text.encode():
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    h ^= h >> 16
+    h = (h * 0x85EBCA6B) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * 0xC2B2AE35) & 0xFFFFFFFF
+    h ^= h >> 16
+    return h
+
+
+def _u32(seed: str, salt: str) -> float:
+    return hash32(f"{salt}:{seed}") / 2**32
+
+
+def site_location(cell_id: str) -> tuple[float, float]:
+    """Deterministic pseudo-geolocation of a cell site.
+
+    Cells of one tracking area (TAC) cluster around a metro-sized centre inside
+    the country box, like real radio planning; each site is jittered around it.
+    Golden vectors in tests keep the dashboard's TypeScript port identical.
+    """
+    mcc, mnc, tac, _ = parse_cell_id(cell_id)
+    lat0, lat1, lon0, lon1 = _COUNTRY_BOXES.get(mcc, (0.0, 1.0, 0.0, 1.0))
+    area = f"{mcc}-{mnc}-{tac}"
+    clat = lat0 + (lat1 - lat0) * (0.1 + 0.8 * _u32(area, "tac-lat"))
+    clon = lon0 + (lon1 - lon0) * (0.1 + 0.8 * _u32(area, "tac-lon"))
+    lat = clat + (_u32(cell_id, "lat") - 0.5) * 0.8
+    lon = clon + (_u32(cell_id, "lon") - 0.5) * 1.1
+    return round(lat, 4), round(lon, 4)
+
+
 # --------------------------------------------------------------------- fakes
 class HashedCellTowers:
-    """Deterministic pseudo-geolocation of a cell inside its country box."""
+    """Deterministic pseudo-geolocation: sites clustered per tracking area."""
 
     name = "celltower"
 
     def locate(self, cell_id: str) -> dict[str, Any]:
-        mcc, _, tac, _ = parse_cell_id(cell_id)
-        lat0, lat1, lon0, lon1 = _COUNTRY_BOXES.get(mcc, (0.0, 1.0, 0.0, 1.0))
+        _, _, tac, _ = parse_cell_id(cell_id)
+        lat, lon = site_location(cell_id)
         return {
-            "lat": round(lat0 + (lat1 - lat0) * _unit(cell_id, "lat"), 4),
-            "lon": round(lon0 + (lon1 - lon0) * _unit(cell_id, "lon"), 4),
+            "lat": lat,
+            "lon": lon,
             "range_m": int(800 + 4200 * _unit(cell_id, "range")),
             "tac": tac,
             "source": "fixture",

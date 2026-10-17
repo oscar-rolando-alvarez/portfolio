@@ -108,13 +108,14 @@ def api_call(
     key: str | None = API_KEY,
     query: dict[str, str] | None = None,
     body: Any = None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     event = {
         "version": "2.0",
         "routeKey": "$default",
         "rawPath": path,
         "rawQueryString": "&".join(f"{k}={v}" for k, v in (query or {}).items()),
-        "headers": {"x-api-key": key} if key else {},
+        "headers": ({"x-api-key": key} if key else {}) | (headers or {}),
         "queryStringParameters": query,
         "requestContext": {
             "http": {
@@ -181,6 +182,21 @@ def test_full_pipeline_kafka_to_api(aws: Container) -> None:
         "weather",
     }
     assert detail["body"]["incident"]["windows"] == 9  # last window still open (watermark)
+    served = detail["body"]["diagnosis"]
+    assert served["locale"] == "en" and served["available_locales"] == ["en", "es"]
+    assert "translations" not in served["diagnosis"]
+    es = api_call("GET", f"/v1/incidents/{incident_id}", query={"locale": "es"})["body"]
+    assert es["diagnosis"]["locale"] == "es"
+    assert es["diagnosis"]["diagnosis"]["root_cause"] == "cell_outage"  # enums never translated
+    assert "caída de celda" in es["diagnosis"]["diagnosis"]["summary"]
+    steps_en = [s["owner"] for s in served["diagnosis"]["remediation_steps"]]
+    assert [s["owner"] for s in es["diagnosis"]["diagnosis"]["remediation_steps"]] == steps_en
+    header = api_call(
+        "GET", f"/v1/incidents/{incident_id}", headers={"accept-language": "es-CO,es;q=0.9"}
+    )["body"]
+    assert header["diagnosis"]["locale"] == "es"
+    fallback = api_call("GET", f"/v1/incidents/{incident_id}", query={"locale": "fr"})["body"]
+    assert fallback["diagnosis"]["locale"] == "en"
 
 
 def test_poison_records_are_quarantined_not_retried(aws: Container) -> None:

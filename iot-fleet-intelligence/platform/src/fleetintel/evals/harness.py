@@ -209,6 +209,7 @@ def score(
                     first.opened_at + window / 2 + lateness - lab.start
                 ).total_seconds(),
                 "tokens": (d.input_tokens + d.output_tokens) if d else 0,
+                "locales": ["en", *sorted(d.diagnosis.translations)] if d else [],
             }
         )
     res.false_positives = sorted(
@@ -219,7 +220,7 @@ def score(
     return res
 
 
-def summarize(results: list[ScenarioResult], thresholds: dict[str, float]) -> dict[str, Any]:
+def summarize(results: list[ScenarioResult], thresholds: dict[str, Any]) -> dict[str, Any]:
     per_fault: dict[str, dict[str, int]] = defaultdict(lambda: {"tp": 0, "fn": 0, "fp": 0})
     for r in results:
         for k in r.matched_labels:
@@ -234,7 +235,10 @@ def summarize(results: list[ScenarioResult], thresholds: dict[str, float]) -> di
     diags = [d for r in results for d in r.diagnoses]
     correct = sum(1 for d in diags if d["root_cause"] == d["expected_root_cause"])
     passed = sum(1 for d in diags if d["guardrail_status"] in ("passed", "repaired"))
+    expected_locales = set(str(thresholds.get("locales", "en")).split(","))
+    localized = sum(1 for d in diags if expected_locales <= set(d.get("locales", [])))
     metrics = {
+        "localization_coverage": localized / len(diags) if diags else 1.0,
         "detection_precision": tp / (tp + fp) if tp + fp else 1.0,
         "detection_recall": tp / (tp + fn) if tp + fn else 1.0,
         "diagnosis_accuracy": correct / len(diags) if diags else 1.0,
@@ -262,6 +266,9 @@ def summarize(results: list[ScenarioResult], thresholds: dict[str, float]) -> di
         failures.append(
             f"guardrail_pass_rate {metrics['guardrail_pass_rate']:.3f} < {thresholds['guardrail_pass_rate_min']}"
         )
+    min_loc = float(thresholds.get("localization_coverage_min", 0.0))
+    if metrics["localization_coverage"] < min_loc:
+        failures.append(f"localization_coverage {metrics['localization_coverage']:.3f} < {min_loc}")
     if metrics["baseline_false_positives"] > thresholds["baseline_false_positives_max"]:
         failures.append(
             f"baseline_false_positives {metrics['baseline_false_positives']} > {thresholds['baseline_false_positives_max']}"
@@ -282,7 +289,7 @@ def to_markdown(summary: dict[str, Any], results: list[ScenarioResult]) -> str:
     lines = [
         f"**Gate: {'PASSED' if summary['passed'] else 'FAILED'}** - precision {m['detection_precision']:.3f}, "
         f"recall {m['detection_recall']:.3f}, diagnosis accuracy {m['diagnosis_accuracy']:.3f}, "
-        f"guardrail pass rate {m['guardrail_pass_rate']:.3f}, mean detection delay {m['mean_detection_delay_s']:.0f}s, "
+        f"guardrail pass rate {m['guardrail_pass_rate']:.3f}, localization coverage {m['localization_coverage']:.3f}, mean detection delay {m['mean_detection_delay_s']:.0f}s, "
         f"{m['events_replayed']:,} events replayed.",
         "",
         "| Fault type | Precision | Recall | TP | FN | FP |",

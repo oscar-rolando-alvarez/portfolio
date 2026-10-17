@@ -31,15 +31,79 @@ question: **what does this cost to run at my scale?**
 - **Resilient enrichment** behind ports: timeouts, jittered retries, circuit breakers, DynamoDB caching,
   graceful degradation.
 - **GenAI diagnosis**: provider-agnostic OpenAI-compatible client, RAG over runbooks, Pydantic structured
-  output, deterministic guardrails (grounded ids, abstention, truck-roll policy, PII redaction).
+  output, deterministic guardrails (grounded ids, abstention, truck-roll policy, PII redaction); **English and
+  Spanish from one model call**, guardrailed in both languages.
+- **Live gateway** (Go): Kafka -> per-second, per-tenant aggregates and live anomaly scores -> **Server-Sent
+  Events** with per-client backpressure; follows confirmed incidents and their AI diagnoses.
+- **Bilingual operations & executive dashboard** (Next.js 16): executive value view, live operations, geo map,
+  incidents with human-in-the-loop approval, cost & ROI simulator; **live or fully standalone demo mode**.
 - **Cost estimator** as a first-class feature: library + CLI + API, versioned pricing table, exact tests,
   computed optimization levers.
-- **Runs end to end offline**: `make demo` (Kafka KRaft + moto-server + Jaeger, no cloud account or token).
+- **Runs end to end offline**: `make demo` (Kafka KRaft + moto-server + Jaeger, no cloud account or token),
+  `make demo-ui` for the full live dashboard.
 
 ---
 
+## Dashboard
+
+A real-time operations and executive dashboard in **English and Spanish** that shows what the platform does
+for the business: fleet health streaming in, incidents confirmed and diagnosed by the LLM in the reader's
+language, the truck rolls that did not happen and what all of it costs at the buyer's scale.
+
+![Executive overview (EN)](docs/screenshots/overview-en.png)
+
+| | |
+|---|---|
+| ![A cell outage spreading across one tracking area, live](docs/screenshots/outage.gif) | ![Incident with enrichment and AI diagnosis in Spanish, with human-in-the-loop approval](docs/screenshots/incident-es.png) |
+| *Demo mode: a cell outage spreads across one tracking area (heat = devices impacted).* | *Incident detail in Spanish: signals, enrichment, guardrailed diagnosis, approve / dispatch.* |
+| ![Live operations](docs/screenshots/live-en.png) | ![Cost and ROI simulator in Spanish, light theme, COP](docs/screenshots/cost-es-light.png) |
+| *Live operations: throughput with live anomaly markers, RSRP/SINR, network mix, top degraded scopes.* | *Cost & ROI simulator (ES, light theme, COP): the platform estimator, recomputed in the browser.* |
+
+Real live mode (`make demo-ui`: 50k simulated devices through Kafka, the platform and the gateway):
+[map](docs/screenshots/live-mode-map-en.png) · [live operations](docs/screenshots/live-mode-ops-en.png).
+
+| Screen | What it answers |
+|---|---|
+| **Executive overview** | Fleet availability, devices online, active incidents by severity, MTTD (live signal -> confirmed incident), mean time to remediate, month-to-date availability SLA with error budget, truck rolls avoided and money saved, platform cost per device, LLM spend, and a "value delivered this month" narrative - every number traceable to an editable assumptions panel and the dated pricing table. |
+| **Live operations** | Events/s (5 or 15 min), RSRP/SINR distributions, network-type mix, anomaly timeline with live signals and confirmed incidents, top degraded cells / firmware builds / visited networks / APNs. |
+| **Geo map** | Every cell site coloured by health with a heat layer weighted by impacted devices (MapLibre GL, key-less OpenFreeMap basemap); click a site for its metrics and related incidents. |
+| **Incidents & AI** | Live incident feed; detail with signals, enrichment (cell tower, weather, carrier, operator status feed), the diagnosis in the active language (root cause, confidence, evidence, remediation plan with owners, truck roll yes/no, customer message), guardrail outcome and notes, and an approve-remediation / dispatch decision (recorded locally). |
+| **Cost & ROI** | Sliders for devices (10k-10M), reporting interval, payload, edge batching, share of incidents sent to the LLM and model tier; monthly AWS + LLM cost by category, cost-per-device curve, ROI against truck-roll savings, computed optimizations; CSV export, print-to-PDF and a shareable URL. |
+
+Also: command palette (Ctrl/Cmd+K), tenant selector, time range, dark/light theme, EN/ES (persisted, locale-aware
+numbers, dates and USD/COP), loading skeletons, empty and error states, keyboard navigation and reduced motion.
+
+**Live vs demo.** *Live* streams the gateway's frames through the dashboard's same-origin `/api/stream` proxy
+(the tenant API key never reaches the browser). *Demo* runs with no backend at all: a deterministic in-browser
+generator emits the same frames, mirroring the simulator's catalogue and fault scenarios on a 20-minute loop with quiet periods
+(`?demoAt=<second>` pins any moment). The header always says which one you are looking at. Design:
+[ADR 0008](docs/adr/0008-realtime-transport-sse.md), [ADR 0009](docs/adr/0009-dashboard-demo-mode-and-i18n.md).
+
+```bash
+make demo-ui        # Kafka + moto + platform + gateway + dashboard; streams 50k devices at 10x real time
+open http://localhost:3000        # Live mode; a cell outage starts ~50 s in and spreads for ~30 s
+make demo-ui-check  # asserts the live path end to end (also runs in CI)
+
+cd dashboard && npm ci && npm run dev    # demo mode only, no backend: http://localhost:3000
+```
+
+**How the KPIs are defined** (also in each tile's tooltip):
+- *Availability SLA (month to date)* - the month's mean connected share of device reports, time-weighted, against
+  the contractual target (default 99.5%, editable); error budget used = (1 - availability) / (1 - target). The
+  tile also shows the last 15 minutes, which is where an outage is visible: a cell outage pulls the recent
+  window to ~99.3% while the month stays ~99.8%. In demo mode the month-to-date history before the session is a
+  **labelled seed** per tenant (e.g. Acme 99.81%); in live mode the figure covers only what the gateway has seen.
+- *Mean time to remediate* - confirmed incident -> approved remediation, dispatch or resolution; month to date
+  (demo: seed of 47 min over 214 incidents blended with this session; live: session only).
+- *Mean time to detect* - gateway live anomaly onset -> platform-confirmed incident.
+
+> Demo-mode figures, the value model and screenshots are illustrative. Truck rolls avoided and savings are
+> **estimates from editable assumptions** (defaults: 0.3 connectivity truck rolls per 1k devices per month,
+> 25% avoidable, USD 350 each; COP at an editable 4,000 per USD), not measured results.
+
 ## Contents
 
+1. [Dashboard](#dashboard)
 1. [Key capabilities](#key-capabilities)
 2. [Architecture](#architecture)
 3. [Architecture decision records](#architecture-decision-records)
@@ -62,10 +126,12 @@ question: **what does this cost to run at my scale?**
 | Detection | Tumbling event-time windows per cell / visited PLMN / APN / firmware; EWMA baselines with effect-size and sample guards; rule table -> suspected fault; episodes -> one incident | `platform/src/fleetintel/detection.py` |
 | Enrichment | Cell-tower geolocation (OpenCelliD-style), weather (Open-Meteo), carrier/roaming registry, Statuspage-compatible status feed - each behind a port with fakes and recorded fixtures | `platform/src/fleetintel/enrichment/` |
 | Diagnosis | RAG over 8 connectivity runbooks, JSON-schema structured output, repair round-trip, guardrails, GenAI OTel spans | `platform/src/fleetintel/diagnosis/` |
-| API | `GET /v1/incidents`, `GET /v1/incidents/{id}` (incident + enrichment + diagnosis), `POST /v1/cost/estimate`, `GET /v1/cost/scenarios`, `/health`, `/ready`; API keys scoped to one tenant | `platform/src/fleetintel/handlers/api.py` |
+| Live gateway | Kafka consumer -> per-second, per-tenant aggregates (throughput, availability, RSRP/SINR histograms, RAT mix, per-cell health, top degraded scopes), EWMA anomaly scores per cell/visited network/APN/firmware, incident follower (EN + ES), SSE fan-out with backpressure, tenant-scoped API keys | `gateway/` |
+| Dashboard | Next.js 16 + React 19 + TypeScript strict, Tailwind v4, ECharts, MapLibre GL, next-intl (EN/ES), live SSE or deterministic demo mode, TS port of the cost model (parity-tested) | `dashboard/` |
+| API | `GET /v1/incidents`, `GET /v1/incidents/{id}` (incident + enrichment + diagnosis, `?locale=es` or `Accept-Language`), `POST /v1/cost/estimate`, `GET /v1/cost/scenarios`, `/health`, `/ready`; API keys scoped to one tenant | `platform/src/fleetintel/handlers/api.py` |
 | Cost | Monthly AWS + LLM estimate, scenario comparison, sensitivity, quantified optimizations | `platform/src/fleetintel/cost/` |
 | Evals | Golden fault scenarios -> precision/recall per fault type, diagnosis accuracy, guardrail pass rate; CI gate | `evals/`, `platform/src/fleetintel/evals/` |
-| IaC | Terraform: MSK Serverless, Lambda ESMs (MSK + SQS), SQS+DLQ, DynamoDB, HTTP API, IAM least privilege, KMS, alarms, X-Ray/ADOT | `infra/terraform/` |
+| IaC | Terraform: MSK Serverless, Lambda ESMs (MSK + SQS), SQS+DLQ, DynamoDB, HTTP API, IAM least privilege, KMS, alarms, X-Ray/ADOT; gateway + dashboard on ECS Fargate behind an ALB (Cloud Map, ECR, Secrets Manager) | `infra/terraform/` |
 
 ## Architecture
 
@@ -117,6 +183,11 @@ flowchart TB
     apigw["API Gateway HTTP API"]
     ext["Third-party APIs<br/>weather, cell towers, status feed"]
     llm["OpenAI-compatible LLM"]
+    subgraph rt["Real-time path (ECS Fargate)"]
+        gw["Live gateway (Go)<br/>per-second aggregates,<br/>anomaly scores, SSE hub"]
+        ui["Dashboard (Next.js)<br/>SSE proxy + EN/ES UI"]
+    end
+    user["Operator / executive<br/>(browser)"]
 
     iot --> msk
     sim --> msk
@@ -133,6 +204,10 @@ flowchart TB
     dg -- "diagnosis + status" --> ddb
     apigw --> api
     api -- "single-query reads" --> ddb
+    msk -- "all partitions, MSK IAM read-only" --> gw
+    gw -- "poll incidents + EN/ES diagnoses (tenant API key)" --> apigw
+    ui -- "SSE (Cloud Map DNS, key added server-side)" --> gw
+    user -- "HTTPS via ALB, same-origin SSE" --> ui
 ```
 
 ### Sequence - telemetry to diagnosis
@@ -172,6 +247,42 @@ sequenceDiagram
     G->>G: validate, repair once, guardrails
     G->>DB: diagnosis + status DIAGNOSED / NEEDS_REVIEW
     U->>DB: GET /v1/incidents/{id} (one query)
+```
+
+### Sequence - real-time path to the browser
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Devices / fleetsim
+    participant K as Kafka (MSK)
+    participant GW as Live gateway
+    participant P as Platform (detect, enrich, diagnose)
+    participant API as Incident API
+    participant UI as Dashboard server (/api/stream)
+    participant B as Browser (EventSource)
+
+    B->>UI: GET /api/stream?tenant=... (same origin)
+    UI->>GW: GET /v1/stream (x-api-key from server env)
+    GW-->>B: hello: 15 min history, latest snapshot, cells, recent incidents
+    loop every event
+        D->>K: telemetry (key = cell id)
+        K->>GW: fetch (all partitions, pull = backpressure)
+        GW->>GW: fold into the current second (sampled distributions)
+    end
+    loop every second, per tenant
+        GW->>GW: close second, EWMA z-scores per cell / PLMN / APN / firmware
+        GW-->>B: snapshot (serialised once, bounded queue per client, drop-oldest)
+        GW-->>B: cells (every 2 s, columnar)
+    end
+    K->>P: same topic (ESM batches)
+    P->>P: windowed detection, enrichment, one LLM call -> EN + ES diagnosis
+    loop every 2 s
+        GW->>API: GET /v1/incidents (+ detail ?locale=en / es on change)
+        API-->>GW: incident, enrichment, diagnoses
+        GW-->>B: incident (lead time = confirmed - live anomaly onset)
+    end
+    Note over B: EventSource reconnects on its own, the next hello resynchronises state
 ```
 
 ### Incident lifecycle
@@ -217,6 +328,15 @@ flowchart LR
     gw --> l4 --> ddb
     l1 & l2 & l3 & l4 --> cw
     l1 & l2 & l3 & l4 --> xr
+    subgraph ecs["ECS Fargate (private subnets, NAT egress)"]
+        gwt["Live gateway x2<br/>MSK IAM read-only"]
+        uit["Dashboard x2"]
+    end
+    alb["ALB (public subnets)<br/>TLS, 300 s idle for SSE"]
+    alb --> uit
+    uit -- "Cloud Map DNS" --> gwt
+    gwt --> msk
+    gwt --> gw
 ```
 
 ## Architecture decision records
@@ -230,6 +350,8 @@ flowchart LR
 | [0005](docs/adr/0005-simulator-scheduling.md) | Simulator: struct-of-arrays + timing wheel + counter-based RNG |
 | [0006](docs/adr/0006-llm-structured-output-rag-guardrails.md) | Provider-agnostic LLM, RAG, structured output and deterministic guardrails |
 | [0007](docs/adr/0007-cost-model.md) | A first-class, versioned, tested cost model |
+| [0008](docs/adr/0008-realtime-transport-sse.md) | Real-time path: stateful gateway, pre-aggregated frames over SSE (vs API Gateway WebSocket / AppSync Events) |
+| [0009](docs/adr/0009-dashboard-demo-mode-and-i18n.md) | Dashboard: deterministic demo mode on the same data contract; bilingual end to end |
 
 ## Tech stack
 
@@ -243,11 +365,15 @@ flowchart LR
 | Observability | OpenTelemetry API/SDK (GenAI semconv), X-Ray via Powertools, CloudWatch EMF, Jaeger locally | OTel 1.45.1, Jaeger 2.22.0 |
 | Local AWS | moto-server (DynamoDB + SQS) - no account or auth token | 5.2.4 |
 | IaC | Terraform, AWS provider, tflint (+ AWS ruleset) | 1.16.6, ~> 6.69, 0.64.0 |
+| Live gateway | Go, franz-go (+ SASL/AWS_MSK_IAM), Server-Sent Events | Go 1.27.2, franz-go 1.22.2 |
+| Dashboard | Next.js (App Router, standalone), React, TypeScript (strict), Tailwind CSS, next-intl, ECharts, MapLibre GL, zustand, cmdk, Radix UI | 16.4.2, 19.3.1, 6.0.3, 4.3.3, 4.14.9, 6.1.0, 6.14.0, 5.0.15, 1.1.1, 1.x |
+| Dashboard quality | ESLint (flat, jsx-a11y), Prettier, Vitest + Testing Library, Playwright + axe-core, bundle budget | 9.39.5, 3.9.10, 5.0.5 / 16.3.3, 1.64.1 / 4.14.0 |
 | Quality | golangci-lint, govulncheck, ruff, mypy (strict), pytest, moto, respx, pip-audit | 2.15.0, 1.9.0, 0.17, 2.4, 9.1, 5.2, 0.23, 2.10 |
 
 ## Quickstart
 
-Prerequisites: Docker, GNU Make. For local development also Go 1.27 and [uv](https://docs.astral.sh/uv/).
+Prerequisites: Docker, GNU Make. For local development also Go 1.27, [uv](https://docs.astral.sh/uv/) and
+Node.js 24+. For the dashboard see [Dashboard](#dashboard) (`make demo-ui`).
 
 ```bash
 cd iot-fleet-intelligence
@@ -260,14 +386,14 @@ Abridged output (deterministic: same seed, same incident):
 ```text
 INCIDENT inc-88d9005560f8ade6ffe5  [DIAGNOSED]  severity=critical
   suspected : cell_outage on cell 310-260-1006-100426
-  impact    : 48 of 50 devices
-  signal    : no_service_ratio = 0.9636 (baseline 0.006, z=47.88)
+  impact    : 46 of 48 devices
+  signal    : no_service_ratio = 0.9623 (baseline 0.006, z=47.81)
 ENRICHMENT
   carrier      ok   {"plmn": "310260", "country": "US", "operator": "Home network (US)"}
-  celltower    ok   {"lat": 43.5811, "lon": -114.6443, "range_m": 3868, "tac": 1006}
+  celltower    ok   {"lat": 38.9121, "lon": -106.9183, "range_m": 3868, "tac": 1006}
   status_feed  ok   {"relevant": [], "total_active": 2}
-  weather      ok   {"temperature_c": 25.2, "wind_gusts_kmh": 53.1, ...}
-DIAGNOSIS  (fake:fake-diagnosis-v1, guardrails=passed, tokens=1343+258)
+  weather      ok   {"temperature_c": 22.1, "wind_gusts_kmh": 18.1, ...}
+DIAGNOSIS  (fake:fake-diagnosis-v1, guardrails=passed, tokens=1708+460)
   root cause : cell_outage (confidence 0.97)
   step 1     : [noc] Open a priority RAN ticket for the affected site with first-drop timestamp
   step 2     : [core_network] Check site power and backhaul alarms; correlate with weather at the site
@@ -281,6 +407,7 @@ Explore further:
 
 ```bash
 curl -s -H 'x-api-key: demo-key-acme' localhost:8080/v1/incidents | jq
+curl -s -H 'x-api-key: demo-key-acme' "localhost:8080/v1/incidents/<id>?locale=es" | jq .diagnosis.diagnosis.summary
 curl -s -H 'x-api-key: demo-key-acme' -X POST localhost:8080/v1/cost/estimate \
      -d '{"devices": 2500000, "report_interval_seconds": 900, "readings_per_message": 4}' | jq .total_usd
 open http://localhost:16686            # traces incl. "chat <model>" GenAI spans
@@ -304,6 +431,9 @@ make up && make test-integration   # Kafka round trip through the stream handler
 make bench                  # simulator benchmarks (1M devices)
 make lambda-package         # platform/dist/lambda.zip (arm64, ~22 MB)
 make tf-validate            # terraform fmt/validate, no credentials
+cd gateway && go test -race ./...                   # gateway (KAFKA_BOOTSTRAP=localhost:29092 adds the Kafka test)
+cd dashboard && npm ci && npm test && npm run build && npm run e2e   # unit, build, Playwright + axe (EN/ES)
+cd dashboard && npm run screenshots                 # regenerates docs/screenshots from the real app
 ```
 
 Simulator on its own:
@@ -378,7 +508,8 @@ Golden set [`evals/golden.yaml`](evals/golden.yaml): 10 deterministic simulator 
 outage and a 90-second storm. The harness replays telemetry through the **real handlers** (Kafka-like
 partitioning by cell, Lambda-sized batches, SQS-shaped worker events) and scores incidents against the
 simulator's ground-truth labels. CI gate thresholds: precision >= 0.90, recall >= 0.95, per-fault recall 1.0,
-diagnosis accuracy >= 0.95, guardrail pass rate >= 0.90, zero baseline false positives.
+diagnosis accuracy >= 0.95, guardrail pass rate >= 0.90, zero baseline false positives, and localization
+coverage 1.0 (every diagnosis served in English and Spanish).
 
 Current results (fake LLM):
 
@@ -444,7 +575,21 @@ All platform settings are environment variables (`FLEETINTEL_` prefix, typed and
 | `FLEETINTEL_LLM_BASE_URL` / `_LLM_MODEL` / `_LLM_EMBEDDING_MODEL` | OpenAI defaults | Any OpenAI-compatible endpoint |
 | `FLEETINTEL_LLM_API_KEY` / `_LLM_API_KEY_SECRET_ARN` | - | Key from env (local) or Secrets Manager (AWS) |
 | `FLEETINTEL_RAG_TOP_K` / `_MIN_CONFIDENCE` | `3` / `0.55` | Retrieval depth, abstention threshold |
+| `FLEETINTEL_DIAGNOSIS_LOCALES` | `en,es` | Languages every diagnosis is written in (one LLM call; English is primary) |
 | `FLEETINTEL_API_KEYS` | - | `tenant:sha256(key)` pairs |
+
+Live gateway (`gateway/internal/config`) and dashboard:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `KAFKA_BROKERS` / `KAFKA_TOPIC` | `localhost:29092` / `fleet.telemetry.v1` | Telemetry source (shared with simulator and platform) |
+| `FLEETGW_KAFKA_AUTH` / `FLEETGW_KAFKA_START` | `none` / `end` | `msk_iam` for MSK Serverless; replay from `start` or tail from `end` |
+| `FLEETGW_PLATFORM_URL` / `FLEETGW_PLATFORM_API_KEY` | - | Incident API to follow (tenant-scoped key) |
+| `FLEETGW_API_KEYS` | - | `tenant:sha256(key)` pairs accepted on the stream (empty = open, local only) |
+| `FLEETGW_WINDOW_SECONDS` / `FLEETGW_ONLINE_TTL` | `30` / `2m` | Sliding window for scope stats; device presence TTL |
+| `FLEETGW_SAMPLE_BUDGET` / `FLEETGW_CLIENT_BUFFER` / `FLEETGW_MAX_CLIENTS` | `20000` / `32` / `500` | Ingest downsampling, per-client queue, connection cap |
+| `GATEWAY_URL` / `GATEWAY_API_KEY` (dashboard) | - | Enables live mode; the key stays on the server |
+| `DASHBOARD_DEFAULT_MODE` (dashboard) | live if a gateway is set | `live` or `demo` for first-time visitors |
 
 ## Observability, security and responsible AI
 
@@ -473,10 +618,19 @@ timeout, retries and a concurrency cap; poison telemetry never blocks a partitio
 idempotent. Data minimisation: the prompt carries aggregates and at most 10 sample device ids - no payloads,
 locations of individual devices or subscriber identifiers.
 
+**Dashboard and gateway.** The browser only talks to the dashboard; the dashboard's SSE proxy attaches the tenant
+key server-side and the gateway accepts SHA-256-hashed keys bound to one tenant (a mismatched `?tenant=` is a
+403). Security headers (nosniff, frame-deny, referrer policy), no third-party scripts, non-root read-only
+containers, axe (WCAG 2.2 AA) checks in CI for every screen in both locales. Human-in-the-loop decisions are
+recorded in the browser only (a demonstration of the flow, not an audit log).
+
 **Limitations.** The fake model and fixture providers prove the pipeline, not real-world accuracy; detection
 is univariate per scope (no cross-scope correlation yet); the detector state per partition must stay under
 DynamoDB's 400 KB item limit (compressed, monitored, raises loudly); the Terraform has not been applied to a
-live account in CI (validated and linted only); pricing is a dated snapshot.
+live account in CI (validated and linted only); pricing is a dated snapshot. The gateway keeps device presence
+in memory (one tenant of ~10M devices needs sharding), follows incidents by polling the API, and its live
+anomaly scores are an early signal rather than the incident of record; demo-mode numbers are illustrative; cell
+locations are deterministic stand-ins, not real towers.
 
 ## Roadmap
 
@@ -488,18 +642,24 @@ live account in CI (validated and linted only); pricing is a dated snapshot.
 4. Semantic cache for diagnoses keyed by incident signature (modelled in the cost estimator, not yet built).
 5. AWS IoT Core rule -> MSK in Terraform, multi-region active/passive, and a Grafana dashboard pack.
 6. Live pricing refresh from the AWS Price List API into a new dated table.
+7. Dashboard: persist approvals through a platform endpoint (audit trail, RBAC), incident push via DynamoDB
+   Streams -> EventBridge Pipes, static export of demo mode to S3 + CloudFront, OIDC sign-in.
 
 ## Repository layout
 
 ```text
 iot-fleet-intelligence/
   simulator/            Go fleet simulator (cmd/fleetsim, internal/{fleet,sched,faults,sim,sink,rng})
+  gateway/              Go live gateway (cmd/fleetgw, internal/{agg,hub,incidents,ingest,server,config})
+  dashboard/            Next.js dashboard (src/app, components, lib/{stream,cost,geo,format,value}, messages/{en,es}.json, e2e/)
   platform/             Python package fleetintel: handlers, detection, enrichment, diagnosis, cost, evals, local runner
   scenarios/            Fault-injection scenarios (JSON) shared by demo and evals
   evals/golden.yaml     Golden set + CI thresholds
   infra/terraform/      AWS reference deployment
   docs/adr/             Architecture decision records
   docs/cost-report.md   Generated cost report
-  docker-compose.yml    Kafka KRaft, moto-server, Jaeger, platform, simulator
-  Makefile              demo, test, lint, eval, bench, cost-report, lambda-package, tf-validate
+  docs/screenshots/     README screenshots (generated by Playwright from the real app)
+  scripts/live_smoke.py End-to-end check of the real-time path (make demo-ui-check)
+  docker-compose.yml    Kafka KRaft, moto-server, Jaeger, platform, simulator; profile "ui": gateway, dashboard
+  Makefile              demo, demo-ui, test, lint, eval, bench, cost-report, lambda-package, tf-validate
 ```

@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+import { scenarioCsv } from "./cost/export";
+import { estimate } from "./cost/model";
+import { DemoEngine } from "./stream/demo";
+import {
+  DEFAULT_ASSUMPTIONS,
+  meanDetectionLead,
+  meanTimeToRemediate,
+  monthProgress,
+  remoteFixableShare,
+  sessionLlmSpend,
+  monthlySla,
+  valueSummary,
+} from "./value";
+
+const MID_OCT = Date.UTC(2026, 9, 16, 5, 0, 0); // ~half of a 30.4-day billing month
+
+describe("value model", () => {
+  const incidents = new DemoEngine("acme-utilities", 400, MID_OCT).incidents(400);
+
+  it("tracks month progress in UTC", () => {
+    const p = monthProgress(MID_OCT);
+    expect(p.day).toBeCloseTo(15.21, 1);
+    expect(p.fraction).toBeCloseTo(0.5, 1);
+    expect(monthProgress(Date.UTC(2026, 9, 31, 23)).fraction).toBe(1);
+  });
+
+  it("matches the README value hypothesis for 1M devices", () => {
+    const v = valueSummary(1_000_000, DEFAULT_ASSUMPTIONS, MID_OCT, incidents);
+    expect(v.baselineTruckRolls).toBe(300);
+    expect(v.projectedSavingsUsd).toBe(300 * 0.25 * 350); // 75 avoided x $350
+    expect(v.platformCostUsd).toBeCloseTo(14789.57, 2); // same as the estimator
+    expect(v.costPerDeviceUsd).toBeCloseTo(0.0148, 4);
+    expect(v.llmSpendMonthUsd).toBeCloseTo(224.41, 2);
+    expect(v.roi).toBeCloseTo((26250 - 14789.57) / 14789.57, 4);
+    expect(v.truckRollsAvoided).toBeCloseTo(75 * monthProgress(MID_OCT).fraction, 6);
+    expect(v.remoteFixableShare).toBe(1);
+  });
+
+  it("derives SLA compliance, detection lead and time to remediate", () => {
+    const p = (availability: number) => ({ ts: 0, eventsPerSec: 1, devicesOnline: 1, availability, anomalyScore: 0 });
+    expect(monthlySla([], 0.995, MID_OCT, null)).toBeNull();
+    // live mode (no baseline): the observed window is the whole story
+    const live = monthlySla([p(0.999), p(0.99)], 0.995, MID_OCT, null)!;
+    expect(live.availability).toBeCloseTo(0.9945, 6);
+    expect(live.within).toBe(false);
+    // demo baseline (~15 days at 99.81%) + a 15-minute outage window at 99.2%
+    const base = { availability: 0.9981, mttrSeconds: 2820, incidents: 214 };
+    const outage = Array.from({ length: 900 }, () => p(0.992));
+    const m = monthlySla(outage, 0.995, MID_OCT, base)!;
+    expect(m.recent).toBeCloseTo(0.992, 6); // the recent window dips visibly
+    expect(m.availability).toBeGreaterThan(0.998); // the month barely moves
+    expect(m.availability).toBeLessThan(0.9981);
+    expect(m.within).toBe(true);
+    expect(m.budgetUsed).toBeCloseTo((1 - m.availability) / 0.005, 6);
+    expect(monthlySla([], 0.995, MID_OCT, base)!.availability).toBe(0.9981);
+    expect(meanDetectionLead(incidents)).toBeGreaterThan(30);
+    expect(meanDetectionLead([])).toBeNull();
+    const first = incidents[0]!;
+    const at = first.detection.confirmedMs + 120_000;
+    expect(
+      meanTimeToRemediate([{ ...first, incident: { ...first.incident, status: "DIAGNOSED" } }], { [first.incident.incident_id]: { at } }),
+    ).toBe(120);
+    expect(meanTimeToRemediate([], {})).toBeNull();
+    const mttrBase = { availability: 0.998, mttrSeconds: 3000, incidents: 99 };
+    expect(meanTimeToRemediate([], {}, mttrBase)).toBe(3000);
+    expect(
+      meanTimeToRemediate(
+        [{ ...first, incident: { ...first.incident, status: "DIAGNOSED" } }],
+        { [first.incident.incident_id]: { at } },
+        mttrBase,
+      ),
+    ).toBeCloseTo((3000 * 99 + 120) / 100, 6);
+    expect(remoteFixableShare([])).toBeNull();
+  });
+
+  it("prices the session's diagnoses", () => {
+    const s = sessionLlmSpend(incidents, 2.5, 10);
+    expect(s.input).toBeGreaterThan(0);
+    expect(s.usd).toBeCloseTo((s.input * 2.5 + s.output * 10) / 1e6, 10);
+  });
+});
+
+describe("scenario CSV export", () => {
+  it("lists inputs, line items and totals", () => {
+    const r = estimate({ devices: 50_000 });
+    const csv = scenarioCsv({ devices: 50_000, interval: 300, payload: 512, batch: 1, llmShare: 1, tier: "large" }, r);
+    const lines = csv.trim().split("\n");
+    expect(lines[0]).toBe("section,key,value,unit,unit_price_usd,monthly_usd");
+    expect(lines).toContain("scenario,devices,50000,devices,,");
+    expect(lines.at(-2)).toBe(`total,monthly_usd,,,,${r.totalUsd.toFixed(2)}`);
+    expect(csv).toContain('"Messaging (5 KB units, tiered)"');
+  });
+});
