@@ -1,0 +1,104 @@
+# Monthly, grouped updates keep the noise low across 21 independent projects.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    groups:
+      actions: { patterns: ["*"] }
+
+  - package-ecosystem: npm
+    directories:
+      - /agentic-claims-orchestrator
+      - /angular-erp-system
+      - /angular-lms-platform
+      - /defi-lending-protocol/app
+      - /nft-marketplace/app
+      - /react-analytics-dashboard
+      - /react-collaboration-app
+      - /social-media-platform
+      - /vue-project-management
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: uv
+    directories:
+      - /enterprise-rag-platform
+      - /financial-analysis-ml
+      - /graphql-recommendation-api
+      - /image-processing-service
+      - /agentic-claims-orchestrator/ml
+    schedule: { interval: monthly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: maven
+    directories:
+      - /crypto-trading-java
+      - /enterprise-messaging-java
+    schedule: { interval: monthly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: nuget
+    directories:
+      - /document-management-dotnet
+      - /ecommerce-microservices-dotnet
+    schedule: { interval: monthly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # MassTransit v9+ is commercially licensed; stay on the 8.x line.
+      - dependency-name: MassTransit*
+        versions: [">=9.0.0"]
+
+  - package-ecosystem: cargo
+    directories:
+      - /rust-blockchain
+      - /rust-web-server
+      - /defi-lending-protocol
+      - /nft-marketplace
+      - /nft-minting
+    schedule: { interval: monthly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: gomod
+    directory: /llm-gateway
+    schedule: { interval: monthly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: docker
+    directories:
+      - /agentic-claims-orchestrator
+      - /angular-erp-system
+      - /angular-lms-platform
+      - /crypto-trading-java
+      - /defi-lending-protocol/app
+      - /document-management-dotnet
+      - /ecommerce-microservices-dotnet
+      - /enterprise-messaging-java
+      - /enterprise-rag-platform
+      - /financial-analysis-ml
+      - /graphql-recommendation-api
+      - /image-processing-service
+      - /llm-gateway
+      - /nft-marketplace/app
+      - /react-analytics-dashboard
+      - /react-collaboration-app
+      - /rust-blockchain
+      - /rust-web-server
+      - /social-media-platform
+      - /vue-project-management
+    schedule: { interval: monthly }
+    groups:
+      base-images: { patterns: ["*"] }
+
+  - package-ecosystem: terraform
+    directories:
+      - /enterprise-rag-platform/infra/terraform/envs/reference
+      - /enterprise-rag-platform/infra/terraform/modules/rag_platform
+    schedule: { interval: monthly }
