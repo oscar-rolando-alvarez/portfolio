@@ -1,0 +1,7 @@
+Payroll and HR Contacts
+
+The payroll contact is Jane Roe, phone +1 415 555 0134, email jane.roe@northwind.example.
+For tax forms reference her record 123-45-6789 only when requested by the auditor.
+
+Payroll runs on the last business day of each month. Corrections submitted after the 20th
+of the month are processed in the following payroll cycle.
