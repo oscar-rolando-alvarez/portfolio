@@ -1,342 +1,256 @@
-# Enterprise Messaging System
+# Enterprise Messaging System (Java)
 
-A comprehensive, production-ready enterprise messaging system built with Spring Boot, featuring real-time communication, microservices architecture, and scalable event streaming.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-messaging-java.yml/badge.svg)
 
-## Features
+A Spring Boot backend for team chat inside an organization, similar in shape to Slack or Teams.
+It has channels and groups, real-time delivery over STOMP WebSockets, reactions, read receipts
+and presence, and domain events streamed through Apache Kafka. Message content can be encrypted
+at rest. The goal is a realistic event-driven service with an honest test suite that runs against
+real PostgreSQL and Kafka.
 
-### Core Messaging
-- **Real-time messaging** via WebSocket with STOMP protocol
-- **Thread support** for organized conversations
-- **Message reactions** with emoji support
-- **Read receipts** and delivery status tracking
-- **Message editing and deletion** with audit trails
-- **File attachments** with virus scanning
-- **Message search** with full-text capabilities
+## What it does
 
-### User Management
-- **User registration and authentication** with JWT
-- **Role-based access control** (User, Moderator, Admin, Super Admin)
-- **Presence system** with online/offline status
-- **Two-factor authentication** support
-- **Account lockout** protection
-- **Password reset** functionality
+Internal chat has two jobs that pull in different directions. Delivery must be immediate for
+online users, and every message must also be durable, auditable and available to downstream
+consumers such as notifications, analytics and compliance. This service handles both:
 
-### Channels & Groups
-- **Public and private channels**
-- **Group messaging** with member management
-- **Channel invitations** with expiration and usage limits
-- **Admin controls** for moderation
-- **Announcement channels** with restricted posting
-- **Slow mode** for rate limiting
+- **Synchronous path:** clients send over STOMP. The message is persisted in PostgreSQL and fanned
+  out to channel subscribers through the WebSocket broker.
+- **Asynchronous path:** domain events (`user-events`, `message-events`, ...) go to Kafka, where
+  consumers process them independently with manual acknowledgements.
 
-### Enterprise Features
-- **Message encryption** for sensitive communications
-- **Event streaming** with Apache Kafka
-- **Audit logging** for compliance
-- **Analytics and monitoring** with Prometheus/Grafana
-- **File upload and sharing** with type restrictions
-- **Admin dashboard** for system management
+## Key features
 
-### Technical Features
-- **Microservices architecture** ready
-- **Horizontal scaling** support
-- **Redis caching** for performance
-- **Database migrations** with Liquibase
-- **Comprehensive API documentation** with OpenAPI
-- **Docker containerization**
-- **Kubernetes deployment** manifests
-- **Health checks and monitoring**
+- **Real-time messaging**: STOMP over WebSocket (`/websocket`, plus SockJS on `/ws`). It covers
+  channel messages, typing indicators, reactions, per-user read receipts and presence updates.
+- **JWT authentication** for REST and for the WebSocket handshake. The authenticated user becomes
+  the STOMP principal.
+- **Event streaming**: Kafka topics with explicit retention, idempotent producer, Jackson 3 JSON
+  with type headers, `ErrorHandlingDeserializer`, observation and tracing across produce/consume.
+- **Event metrics**: each consumed event increments
+  `messaging_events_total{category,type}` (Prometheus).
+- **Encryption at rest**: optional AES-256-GCM with a random IV per message (authenticated, so
+  tampering is detected).
+- **Domain model**: users, channels (public/private/direct), groups, invites, threaded replies,
+  attachments, reactions, delivery status and presence.
+- **Observability**: health probes, Prometheus metrics, OpenTelemetry tracing through Micrometer
+  (OTLP export when configured), trace IDs in every log line, ECS JSON logs in containers.
+- **Schema management**: Liquibase migrations, with Hibernate validating the mapping at startup.
+
+## Tech stack
+
+| Area | Technology | Version |
+| --- | --- | --- |
+| Language / runtime | Java (Eclipse Temurin), virtual threads | 21 LTS |
+| Framework | Spring Boot (Spring Framework 7, Spring Security 7) | 4.1.1 |
+| Real time | Spring WebSocket, STOMP, SockJS | Boot-managed |
+| Event streaming | Spring for Apache Kafka / Apache Kafka (KRaft) | 4.1.1 / 4.2.2 |
+| Persistence | Spring Data JPA, Hibernate ORM | Boot-managed (Hibernate 7.4) |
+| Database | PostgreSQL | 18.6 |
+| Migrations | Liquibase | Boot-managed |
+| Auth | JJWT | 0.13.0 |
+| API docs | springdoc-openapi | 3.1.1 |
+| Observability | Micrometer, Prometheus registry, OpenTelemetry | Boot-managed |
+| Testing | JUnit 5, AssertJ, Awaitility, Testcontainers (PostgreSQL, Kafka) | Boot-managed (Testcontainers 2) |
+| Build | Maven wrapper, Spotless | Maven 3.9.16 |
+| Container | Multi-stage Dockerfile, Temurin JRE on Alpine, non-root | 21.0.12 |
 
 ## Architecture
 
+### Container view
+
+```mermaid
+flowchart LR
+    user["Employee<br/>web or mobile client"]
+
+    subgraph svc["Enterprise Messaging System"]
+        rest["REST API<br/>auth, OpenAPI"]
+        ws["STOMP endpoint<br/>JWT handshake"]
+        broker["In-memory STOMP broker<br/>/topic, /queue, /user"]
+        core["Domain services<br/>messages, channels, presence"]
+        crypto["EncryptionService<br/>AES-256-GCM"]
+        pub["EventPublisher"]
+        cons["EventConsumer<br/>analytics, notifications"]
+    end
+
+    db[("PostgreSQL")]
+    kafka[["Apache Kafka<br/>user-events, message-events, ..."]]
+    prom["Prometheus"]
+    otel["OTLP collector"]
+
+    user -->|"HTTPS + JWT"| rest
+    user <-->|"WebSocket + JWT"| ws
+    ws --> core
+    rest --> core
+    core --> crypto
+    core --> db
+    core --> broker
+    broker -->|push| ws
+    core --> pub
+    rest --> pub
+    pub --> kafka
+    kafka --> cons
+    prom -.->|scrape| rest
+    svc -.->|"traces (optional)"| otel
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Client    │    │  Mobile Client  │    │   Admin Panel   │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │                      │                      │
-          └──────────────────────┼──────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │  Load Balancer  │
-                    │     (Nginx)     │
-                    └─────────┬───────┘
-                              │
-                    ┌─────────────────┐
-                    │  Messaging API  │
-                    │  (Spring Boot)  │
-                    └─────────┬───────┘
-                              │
-          ┌───────────────────┼───────────────────┐
-          │                   │                   │
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   PostgreSQL    │ │      Redis      │ │  Apache Kafka   │
-│   (Database)    │ │    (Cache)      │ │ (Event Stream)  │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
+
+### Registration event flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as AuthController
+    participant U as UserService
+    participant DB as PostgreSQL
+    participant P as EventPublisher
+    participant K as Kafka user-events
+    participant L as EventConsumer
+    participant M as AnalyticsService
+
+    C->>A: POST /api/auth/register
+    A->>U: createUser (BCrypt hash)
+    U->>DB: insert user + presence
+    A->>P: publishUserEvent(USER_REGISTERED)
+    P-)K: send key=user:id, JSON + type header
+    A-->>C: 201 Created + JWT
+    K-)L: deliver UserEvent
+    L->>M: trackUserEvent
+    M->>M: messaging_events_total +1
+    L->>K: manual ack
 ```
 
-## Technology Stack
+### Sending a channel message
 
-- **Backend**: Spring Boot 3.2, Java 17
-- **Database**: PostgreSQL with Liquibase migrations
-- **Cache**: Redis
-- **Message Broker**: Apache Kafka
-- **Real-time**: WebSocket with STOMP
-- **Security**: Spring Security with JWT
-- **Documentation**: OpenAPI 3.0
-- **Monitoring**: Prometheus, Grafana
-- **Containerization**: Docker, Docker Compose
-- **Orchestration**: Kubernetes
-- **Build**: Maven
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Sender (STOMP)
+    participant MC as MessageController
+    participant MS as MessageService
+    participant E as EncryptionService
+    participant DB as PostgreSQL
+    participant B as STOMP broker
+    participant R as Channel subscribers
 
-## Quick Start
+    S->>MC: SEND /app/channel/{id}/message
+    MC->>MS: sendChannelMessage(content, sender, channel)
+    MS->>MS: validate membership
+    MS->>E: encrypt (if enabled)
+    MS->>DB: save message + delivery statuses
+    MS->>B: publish to /topic/channel/{id}
+    B-->>R: MESSAGE frame
+```
 
-### Prerequisites
-- Java 17+
-- Docker and Docker Compose
-- Maven 3.6+
+## Project structure
 
-### Using Docker Compose (Recommended)
+```
+enterprise-messaging-java/
+├── src/main/java/com/enterprise/messaging/
+│   ├── config/        # security, WebSocket/STOMP, Kafka topics, JPA auditing
+│   ├── controller/    # REST auth endpoints
+│   ├── domain/        # JPA entities and enums
+│   ├── dto/           # request/response payloads
+│   ├── event/         # Kafka event contracts (MessageEvent, UserEvent)
+│   ├── exception/     # domain exceptions
+│   ├── repository/    # Spring Data repositories
+│   ├── security/      # JWT provider, filter, UserDetailsService
+│   ├── service/       # messaging, channels, presence, encryption, events
+│   └── websocket/     # STOMP controllers, payloads, handshake interceptor
+├── src/main/resources/
+│   ├── application.yml
+│   └── db/changelog/  # Liquibase changelog (formatted SQL)
+├── src/test/java/     # unit tests and *IT integration tests (Testcontainers)
+├── Dockerfile
+└── docker-compose.yml # PostgreSQL, Kafka (KRaft), app, optional Jaeger
+```
 
-1. Clone the repository:
+## Running locally
+
+Prerequisites: JDK 21 and Docker. The Maven wrapper downloads Maven for you.
+
+**With Docker Compose (app + PostgreSQL + Kafka):**
+
 ```bash
-git clone <repository-url>
-cd enterprise-messaging-java
+cp .env.example .env            # optional: adjust values
+docker compose up --build
+docker compose --profile observability up --build   # adds Jaeger UI on :16686
 ```
 
-2. Start all services:
+**Without Docker for the app:**
+
 ```bash
-docker-compose up -d
+docker compose up -d postgres kafka
+./mvnw spring-boot:run
 ```
 
-3. Wait for services to be healthy:
+Then try it:
+
 ```bash
-docker-compose ps
+curl -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \
+  -d '{"username":"bob","email":"bob@example.com","password":"s3cure-passw0rd"}'
+curl -s localhost:8080/actuator/prometheus | grep messaging_events
 ```
 
-4. Access the application:
-- API: http://localhost:8080
-- API Documentation: http://localhost:8080/swagger-ui.html
-- Grafana: http://localhost:3000 (admin/admin)
-- Prometheus: http://localhost:9090
+STOMP clients connect to `ws://localhost:8080/websocket?token=<JWT>` (or use the
+`Authorization: Bearer` header). They send to `/app/channel/{channelId}/message` and subscribe to
+`/topic/channel/{channelId}`.
 
-### Local Development
+## Testing
 
-1. Start infrastructure services:
 ```bash
-docker-compose up -d postgres redis kafka zookeeper
+./mvnw spotless:check   # formatting
+./mvnw test             # unit tests (JWT, AES-GCM encryption)
+./mvnw verify           # unit + integration tests (needs Docker for Testcontainers)
 ```
 
-2. Set environment variables:
-```bash
-export DATABASE_URL=jdbc:postgresql://localhost:5432/messaging_db
-export DATABASE_USERNAME=messaging_user
-export DATABASE_PASSWORD=messaging_pass
-export REDIS_HOST=localhost
-export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-export JWT_SECRET=mySecretKey
-```
-
-3. Run the application:
-```bash
-mvn spring-boot:run
-```
-
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - User login
-- `POST /api/auth/logout` - User logout
-- `POST /api/auth/refresh` - Refresh JWT token
-- `POST /api/auth/forgot-password` - Password reset
-
-### Users
-- `GET /api/users/me` - Get current user profile
-- `PUT /api/users/me` - Update current user profile
-- `GET /api/users/{id}` - Get user by ID
-- `GET /api/users/search` - Search users
-
-### Channels
-- `GET /api/channels` - List public channels
-- `POST /api/channels` - Create channel
-- `GET /api/channels/{id}` - Get channel details
-- `PUT /api/channels/{id}` - Update channel
-- `DELETE /api/channels/{id}` - Delete channel
-- `POST /api/channels/{id}/join` - Join channel
-- `POST /api/channels/{id}/leave` - Leave channel
-
-### Messages
-- `GET /api/channels/{id}/messages` - Get channel messages
-- `POST /api/channels/{id}/messages` - Send message
-- `PUT /api/messages/{id}` - Edit message
-- `DELETE /api/messages/{id}` - Delete message
-- `POST /api/messages/{id}/reactions` - Add reaction
-- `DELETE /api/messages/{id}/reactions/{emoji}` - Remove reaction
-
-### File Upload
-- `POST /api/files/upload` - Upload file
-- `GET /api/files/{id}` - Download file
-
-## WebSocket Events
-
-Connect to `/ws` endpoint with authentication token.
-
-### Sending Messages
-```javascript
-// Send message to channel
-stompClient.send("/app/channel/123/message", {}, JSON.stringify({
-  content: "Hello World!",
-  type: "TEXT"
-}));
-
-// Add reaction
-stompClient.send("/app/message/456/reaction", {}, JSON.stringify({
-  emoji: "👍",
-  add: true
-}));
-```
-
-### Subscribing to Events
-```javascript
-// Subscribe to channel messages
-stompClient.subscribe("/topic/channel/123", function(message) {
-  const event = JSON.parse(message.body);
-  // Handle message event
-});
-
-// Subscribe to presence updates
-stompClient.subscribe("/topic/presence", function(message) {
-  const presenceUpdate = JSON.parse(message.body);
-  // Handle presence update
-});
-```
+`MessagingApplicationIT` starts PostgreSQL 18 and Kafka 4.2 in containers. It applies the
+Liquibase changelog, validates the JPA mapping and exercises registration, login, duplicate
+detection and auth rejection. It also checks the full Kafka round trip: a registration event is
+published, consumed and counted in Micrometer. CI runs the same `verify` on every pull request.
 
 ## Configuration
 
-### Application Properties
-Key configuration options in `application.yml`:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | `jdbc:postgresql://localhost:5432/messaging_db` | JDBC URL |
+| `DATABASE_USERNAME` / `DATABASE_PASSWORD` | `messaging_user` / `messaging_pass` | Database credentials (local dev only) |
+| `DATABASE_POOL_SIZE` | `20` | Hikari max pool size |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka brokers |
+| `KAFKA_CONSUMER_GROUP` | `messaging-service` | Consumer group id |
+| `JWT_SECRET` | dev-only value | HS256 key, Base64 or raw, at least 256 bits. **Set in every real environment.** |
+| `JWT_EXPIRATION` | `86400000` | Token lifetime in ms |
+| `ENCRYPTION_ENABLED` | `false` | Encrypt message content at rest |
+| `ENCRYPTION_KEY` | unset | Base64 256-bit AES key (`openssl rand -base64 32`), required when encryption is on |
+| `FILE_UPLOAD_MAX_SIZE` / `FILE_STORAGE_PATH` | `50MB` / `/tmp/messaging-uploads` | Attachment limits and storage |
+| `LOG_LEVEL` | `INFO` | Application log level |
+| `LOGGING_STRUCTURED_FORMAT_CONSOLE` | unset (ECS in the image) | `ecs`, `logstash` or `gelf` JSON logs |
+| `TRACING_SAMPLING_PROBABILITY` | `0.1` | Trace sampling ratio |
+| `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` | unset | e.g. `http://collector:4318/v1/traces`; enables OTLP export |
+| `SERVER_PORT` | `8080` | HTTP port |
 
-```yaml
-messaging:
-  jwt:
-    secret: ${JWT_SECRET}
-    expiration: 86400000
-  encryption:
-    enabled: ${ENCRYPTION_ENABLED:false}
-    key: ${ENCRYPTION_KEY}
-  file-upload:
-    max-size: 50MB
-    allowed-types: image/jpeg,image/png,video/mp4
-```
+## Design decisions
 
-### Environment Variables
-- `DATABASE_URL` - PostgreSQL connection URL
-- `REDIS_HOST` - Redis server host
-- `KAFKA_BOOTSTRAP_SERVERS` - Kafka broker addresses
-- `JWT_SECRET` - JWT signing secret
-- `ENCRYPTION_KEY` - Message encryption key (base64)
+- **Kafka for side effects, WebSockets for delivery.** Online users get messages straight from
+  the STOMP broker. Notifications and analytics consume Kafka at their own pace, so a slow
+  consumer never delays a chat message.
+- **Boot auto-configuration for Kafka.** Producer, consumer and listener settings live in
+  `application.yml` rather than hand-built factories. The same configuration then serves local
+  runs, Docker and Testcontainers service connections, and observation stays on everywhere.
+- **Type headers plus `ErrorHandlingDeserializer`.** One consumer factory handles several event
+  types safely, and a malformed record cannot put a listener into a poison-pill loop.
+- **AES-GCM instead of AES/ECB.** ECB leaks plaintext patterns and gives no integrity. GCM with a
+  random 96-bit IV is authenticated encryption.
+- **Virtual threads.** Request handling and blocking JDBC calls run on virtual threads, which
+  suits an I/O-heavy chat backend.
+- **Real dependencies in tests.** Testcontainers PostgreSQL and Kafka instead of H2 or embedded
+  Kafka, so the tests run the production SQL dialect, migrations and broker protocol.
 
-## Monitoring
+## Known limitations
 
-### Health Checks
-- `/actuator/health` - Application health status
-- `/actuator/metrics` - Application metrics
-- `/actuator/prometheus` - Prometheus metrics
-
-### Grafana Dashboards
-Pre-configured dashboards for:
-- Application performance metrics
-- Database connection pool status
-- Kafka topic metrics
-- Redis cache performance
-- JVM metrics
-
-## Security
-
-### Authentication
-- JWT-based authentication with configurable expiration
-- Secure password hashing with BCrypt
-- Account lockout after failed attempts
-- Two-factor authentication support
-
-### Authorization
-- Role-based access control
-- Method-level security annotations
-- Resource-based permissions
-
-### Data Protection
-- Optional message encryption with AES
-- Virus scanning for file uploads
-- Input validation and sanitization
-- SQL injection prevention
-
-## Deployment
-
-### Kubernetes
-Deploy to Kubernetes cluster:
-
-```bash
-kubectl apply -f k8s/
-```
-
-### Production Considerations
-- Use external databases (AWS RDS, Google Cloud SQL)
-- Configure Redis Cluster for high availability
-- Set up Kafka cluster with multiple brokers
-- Enable SSL/TLS for all communications
-- Configure proper backup strategies
-- Set up log aggregation (ELK stack)
-
-## Development
-
-### Running Tests
-```bash
-mvn test
-```
-
-### Building
-```bash
-mvn clean package
-```
-
-### Code Quality
-- Checkstyle for code formatting
-- SpotBugs for static analysis
-- JaCoCo for code coverage
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## Support
-
-For technical support and questions:
-- Create an issue in the repository
-- Check the documentation at `/swagger-ui.html`
-- Review the application logs for debugging
-
-## Roadmap
-
-- [ ] Voice/Video calling integration
-- [ ] Advanced search with Elasticsearch
-- [ ] Message translation services
-- [ ] Mobile push notifications
-- [ ] AI-powered moderation
-- [ ] Advanced analytics dashboard
-- [ ] Multi-tenant support
-- [ ] Federation with other messaging systems
+- The STOMP broker is the in-memory simple broker, so WebSocket fan-out is per instance.
+  Running several replicas requires a broker relay (RabbitMQ/ActiveMQ STOMP) or Kafka-driven
+  fan-out.
+- REST endpoints for channel and message management are not exposed yet. Those operations are
+  available through the services and STOMP destinations.
+- Push and email notifications are logged stubs in `NotificationService`.
