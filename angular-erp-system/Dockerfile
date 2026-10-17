@@ -1,41 +1,24 @@
-# Multi-stage build for Angular ERP System
+# syntax=docker/dockerfile:1
 
-# Stage 1: Build the Angular application
-FROM node:18-alpine AS build
-
-# Set working directory
+# ---- Build stage -------------------------------------------------------------
+FROM node:24.22.0-alpine3.24 AS build
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
-# Install dependencies
-RUN npm ci --only=production
-
-# Copy source code
 COPY . .
-
-# Build the application
 RUN npm run build
 
-# Stage 2: Serve with Nginx
-FROM nginx:alpine AS production
+# ---- Runtime stage -----------------------------------------------------------
+# Unprivileged nginx: runs as UID 101 and listens on 8080.
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24 AS runtime
 
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build --chown=nginx:nginx /app/dist/angular-erp-system/browser /usr/share/nginx/html
 
-# Copy built application from build stage
-COPY --from=build /app/dist/angular-erp-system /usr/share/nginx/html
+USER nginx
+EXPOSE 8080
 
-# Copy SSL certificates (if available)
-# COPY ssl/ /etc/nginx/ssl/
-
-# Expose port 80 and 443
-EXPOSE 80 443
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost/health || exit 1
-
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
