@@ -1,403 +1,130 @@
-# Portfolio Projects
+# Portfolio — Oscar Alvarez
 
-A comprehensive collection of enterprise-grade applications showcasing expertise in modern software development across multiple technology stacks, architectural patterns, and programming paradigms.
+**Principal AI Architect** · GenAI platforms, agentic systems and cloud-native architecture
+[oralvarez@gmail.com](mailto:oralvarez@gmail.com) · [github.com/oscar-rolando-alvarez](https://github.com/oscar-rolando-alvarez)
 
-## 🎯 Overview
+This monorepo holds 21 independent, runnable reference systems. Each one builds, tests and ships in its own GitHub Actions pipeline, and comes with a README explaining the problem it solves, its architecture (Mermaid C4, sequence and data diagrams), how to run it, and the trade-offs behind it.
 
-This portfolio demonstrates proficiency in:
-- **Full-Stack Development**: Frontend, Backend, and Database technologies
-- **Architecture Patterns**: Microservices, Monolithic, Event-Driven, DDD, Clean Architecture
-- **Programming Languages**: TypeScript/JavaScript, Python, Rust, Java, C#/.NET, Solidity
-- **Cloud & DevOps**: Docker, Kubernetes, CI/CD, Cloud-native applications
-- **Modern Frameworks**: Angular, React, Vue, Spring Boot, .NET Core, FastAPI, Actix-Web
+The three **flagship GenAI systems** below are the best starting point. They show how I approach production AI: governance and evaluation first, provider-agnostic by design, observable end to end, and deployable through infrastructure as code.
 
-## Architecture
+## ⭐ Flagship GenAI systems
 
-This monorepo groups 18 independent projects, each self-contained with its own build, tests and deployment. Projects are organised by tier (frontend, backend, JVM, .NET, Rust, Web3) and share a common set of conventions: Docker for packaging, environment-based configuration, automated tests, and Kubernetes manifests where applicable. Every subfolder is a standalone project; there are no runtime cross-dependencies between them.
-
-### Portfolio map
-
-```mermaid
-flowchart TB
-    Portfolio[portfolio/]
-
-    subgraph Frontend
-        A1[angular-erp-system]
-        A2[angular-lms-platform]
-        R1[react-analytics-dashboard]
-        R2[react-collaboration-app]
-        V1[vue-project-management]
-        S1[social-media-platform]
-    end
-
-    subgraph Backend_APIs [Backend APIs and ML]
-        G1[graphql-recommendation-api]
-        I1[image-processing-service]
-        F1[financial-analysis-ml]
-    end
-
-    subgraph JVM
-        J1[crypto-trading-java]
-        J2[enterprise-messaging-java]
-    end
-
-    subgraph DotNet [.NET]
-        D1[document-management-dotnet]
-        D2[ecommerce-microservices-dotnet]
-    end
-
-    subgraph Rust
-        RS1[rust-blockchain]
-        RS2[rust-web-server]
-    end
-
-    subgraph Web3
-        W1[defi-lending-protocol]
-        W2[nft-marketplace]
-        W3[nft-minting]
-    end
-
-    Portfolio --> Frontend
-    Portfolio --> Backend_APIs
-    Portfolio --> JVM
-    Portfolio --> DotNet
-    Portfolio --> Rust
-    Portfolio --> Web3
-```
-
-### Technology stack per project
+| Project | What it is | Highlights | CI |
+|---|---|---|---|
+| [**enterprise-rag-platform**](enterprise-rag-platform/) | Multi-tenant, permission-aware knowledge assistant (RAG) | Hybrid retrieval (full-text + pgvector HNSW, RRF, reranking); tenant/group ACLs enforced inside the query and by Postgres row-level security; answers with verified citations or a refusal; PII and prompt-injection safeguards; golden-set eval gate (recall@k, MRR, faithfulness, ACL leaks); per-tenant cost accounting; Terraform for AWS (ECS Fargate, RDS pgvector) · Python 3.13, FastAPI | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-rag-platform.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-rag-platform.yml) |
+| [**agentic-claims-orchestrator**](agentic-claims-orchestrator/) | Governed multi-agent system for insurance claims intake and triage | Custom durable agent graph with Postgres checkpoints, leases and crash recovery; MCP tool servers behind a validating gateway; declarative guardrail policy with human-in-the-loop approvals; PII tokenization vault; fraud model trained offline and scored in TypeScript; hash-chained audit trail; scenario eval gate · TypeScript, Node 24, Hono, Drizzle, Helm | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/agentic-claims-orchestrator.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/agentic-claims-orchestrator.yml) |
+| [**llm-gateway**](llm-gateway/) | Enterprise LLM gateway and AI control plane | OpenAI-compatible API with streaming; cost-, latency- and weight-based routing with fallback, circuit breakers and hedging; per-tenant virtual keys, rate limits and token/USD budgets; checksum-validated PII redaction; exact + semantic cache; OpenTelemetry GenAI traces and Prometheus FinOps metrics; ~2 ms gateway overhead at p95 in local load tests · Go, Redis, Helm | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/llm-gateway.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/llm-gateway.yml) |
 
 ```mermaid
 flowchart LR
-    subgraph Languages
-        TS[TypeScript]
-        Py[Python]
-        Java[Java 17]
-        CS[C# / .NET 8]
-        Rs[Rust]
-        Sol[Solidity / Anchor]
-    end
-
-    subgraph Frameworks
-        Ang[Angular 17]
-        React[React 18 / Next.js 14]
-        Vue[Vue 3 / Nuxt 3]
-        Fast[FastAPI]
-        Spring[Spring Boot 3]
-        Dotnet[ASP.NET Core]
-        Actix[Actix-Web]
-    end
-
-    subgraph Data
-        PG[(PostgreSQL)]
-        Redis[(Redis)]
-        Mongo[(MongoDB)]
-        Qdrant[(Qdrant)]
-        Kafka[[Kafka]]
-        Rabbit[[RabbitMQ]]
-    end
-
-    TS --> Ang
-    TS --> React
-    TS --> Vue
-    Py --> Fast
-    Java --> Spring
-    CS --> Dotnet
-    Rs --> Actix
-
-    Fast --> PG
-    Fast --> Redis
-    Fast --> Qdrant
-    Spring --> Kafka
-    Dotnet --> Rabbit
-    Ang --> PG
-    React --> Redis
-    Vue --> PG
+    users["Business apps and users"] --> gw["llm-gateway<br/>routing · budgets · PII redaction · cache"]
+    rag["enterprise-rag-platform<br/>permission-aware retrieval + cited answers"] --> gw
+    agents["agentic-claims-orchestrator<br/>durable agents · MCP tools · human approvals"] --> gw
+    users --> rag
+    users --> agents
+    gw --> models["Any OpenAI-compatible model endpoint<br/>cloud or self-hosted"]
 ```
 
-### Cross-cutting patterns
+The three systems are independent, but they are designed to compose as shown: the gateway is the single governed path to models, and the RAG platform and agent orchestrator are workloads behind it.
+
+## Portfolio map
 
 ```mermaid
-flowchart TD
-    Patterns[Architecture Patterns in this portfolio]
-
-    Patterns --> MS[Microservices - ecommerce-microservices-dotnet]
-    Patterns --> CA[Clean Architecture + DDD - document-management-dotnet, financial-analysis-ml]
-    Patterns --> CQRS[CQRS - document-management-dotnet]
-    Patterns --> EDA[Event-Driven - crypto-trading-java, enterprise-messaging-java]
-    Patterns --> RT[Real-time - react-collaboration-app, vue-project-management, social-media-platform]
-    Patterns --> P2P[P2P consensus - rust-blockchain]
-    Patterns --> OnChain[On-chain programs - defi-lending-protocol, nft-marketplace]
-
-    MS --> Ocelot[Ocelot API Gateway]
-    MS --> RMQ[RabbitMQ async]
-    MS --> gRPC[gRPC sync]
-    EDA --> KafkaBus[Kafka bus]
-    RT --> WS[WebSocket]
-    RT --> WebRTC[WebRTC]
-    RT --> OT[Operational Transformation]
+flowchart TB
+    subgraph genai["GenAI and ML"]
+        rag["enterprise-rag-platform"]
+        agents["agentic-claims-orchestrator"]
+        gw["llm-gateway"]
+        fin["financial-analysis-ml"]
+        rec["graphql-recommendation-api"]
+        img["image-processing-service"]
+    end
+    subgraph web["Web frontends and full-stack"]
+        erp["angular-erp-system"]
+        lms["angular-lms-platform"]
+        dash["react-analytics-dashboard"]
+        collab["react-collaboration-app"]
+        pm["vue-project-management"]
+        social["social-media-platform"]
+    end
+    subgraph services["Backend services"]
+        crypto["crypto-trading-java"]
+        msg["enterprise-messaging-java"]
+        docs["document-management-dotnet"]
+        shop["ecommerce-microservices-dotnet"]
+        rws["rust-web-server"]
+    end
+    subgraph chain["Blockchain and Web3"]
+        rbc["rust-blockchain"]
+        defi["defi-lending-protocol"]
+        nftm["nft-marketplace"]
+        mint["nft-minting"]
+    end
 ```
 
-## 📁 Projects Directory
+## All projects
 
-### 🔷 Frontend Applications
+### GenAI and machine learning
 
-#### **Angular ERP System** (`angular-erp-system/`)
-- **Tech Stack**: Angular 17, NgRx, Angular Material, TypeScript, RxJS
-- **Architecture**: Modular, Component-Based, State Management with NgRx
-- **Features**: Multi-module ERP with inventory, HR, finance, CRM modules, real-time dashboards, i18n support, PWA capabilities
-- **Testing**: Jest unit tests, Cypress E2E tests
-- **Deployment**: Docker, Nginx, SSR support
+| Project | Summary | Stack | CI |
+|---|---|---|---|
+| [financial-analysis-ml](financial-analysis-ml/) | Portfolio risk analytics with LLM-written narrative reports grounded only in computed metrics | Python 3.13, FastAPI, NumPy/pandas, optional TensorFlow, PostgreSQL | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/financial-analysis-ml.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/financial-analysis-ml.yml) |
+| [graphql-recommendation-api](graphql-recommendation-api/) | Hybrid recommendations plus embedding-based semantic search and similar items | Python 3.13, Strawberry GraphQL, Qdrant, PostgreSQL, Redis | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/graphql-recommendation-api.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/graphql-recommendation-api.yml) |
+| [image-processing-service](image-processing-service/) | Image transformation API with vision-model captions, tags and alt text | Python 3.13, FastAPI, Pillow, OpenCV, optional OCR/YOLO | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/image-processing-service.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/image-processing-service.yml) |
 
-#### **Angular LMS Platform** (`angular-lms-platform/`)
-- **Tech Stack**: Angular 17, TypeScript, PWA, Service Workers
-- **Architecture**: Feature-based modular architecture
-- **Features**: Course management, student tracking, assessments, video streaming, offline capabilities
-- **Deployment**: Docker containerized with Nginx
+### Web frontends and full-stack
 
-#### **React Analytics Dashboard** (`react-analytics-dashboard/`)
-- **Tech Stack**: React 18, Next.js 14, TypeScript, Zustand, TailwindCSS
-- **Architecture**: Server-Side Rendering (SSR), Component-Based
-- **Features**: Real-time analytics, data visualization with Chart.js, performance monitoring, responsive design
-- **Testing**: Jest, React Testing Library
-- **Performance**: Lighthouse optimized, PWA ready
+| Project | Summary | Stack | CI |
+|---|---|---|---|
+| [angular-erp-system](angular-erp-system/) | ERP shell with an inventory module, signals and zoneless change detection | Angular 22, NgRx, Angular Material 3, Vitest | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/angular-erp-system.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/angular-erp-system.yml) |
+| [angular-lms-platform](angular-lms-platform/) | Learning platform: catalog, lesson player, graded quizzes, progress tracking | Angular 22, NgRx SignalStore, Vitest | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/angular-lms-platform.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/angular-lms-platform.yml) |
+| [react-analytics-dashboard](react-analytics-dashboard/) | Analytics dashboard with AI-generated insights and a rule-based fallback | Next.js 16, React 19, Tailwind 4, Recharts, AI SDK | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/react-analytics-dashboard.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/react-analytics-dashboard.yml) |
+| [react-collaboration-app](react-collaboration-app/) | Real-time collaborative whiteboard with history replay | React 19, Vite 8, Fabric 7, Socket.IO, Express 5 | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/react-collaboration-app.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/react-collaboration-app.yml) |
+| [vue-project-management](vue-project-management/) | Kanban project management with optimistic updates and role checks | Nuxt 4, Vue 3.5, Pinia 4, Nuxt UI 4 | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/vue-project-management.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/vue-project-management.yml) |
+| [social-media-platform](social-media-platform/) | Social network: ranked feed, messaging, real-time notifications, AI moderation | Nuxt 4, Prisma 7, PostgreSQL 18, Nitro WebSocket | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/social-media-platform.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/social-media-platform.yml) |
 
-#### **React Collaboration App** (`react-collaboration-app/`)
-- **Tech Stack**: React, Vite, TypeScript, Socket.io, WebRTC
-- **Architecture**: Real-time collaborative architecture with OT (Operational Transformation)
-- **Features**: Real-time collaborative editing, video conferencing, whiteboard, file sharing, offline sync
-- **Technologies**: WebRTC for P2P communication, Operational Transformation for conflict resolution
+### Backend services
 
-#### **Vue Project Management** (`vue-project-management/`)
-- **Tech Stack**: Vue 3, Nuxt 3, TypeScript, Pinia, TailwindCSS
-- **Architecture**: SSR with Nuxt, Composition API
-- **Features**: Kanban boards, task management, team collaboration, real-time updates via WebSocket
-- **Testing**: Vitest, Vue Test Utils
+| Project | Summary | Stack | CI |
+|---|---|---|---|
+| [crypto-trading-java](crypto-trading-java/) | Order matching engine and trading API | Spring Boot 4.1, Java 21 virtual threads, PostgreSQL, Testcontainers | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/crypto-trading-java.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/crypto-trading-java.yml) |
+| [enterprise-messaging-java](enterprise-messaging-java/) | Real-time messaging with Kafka events and encrypted messages | Spring Boot 4.1, Java 21, Kafka 4 (KRaft), WebSocket | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-messaging-java.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-messaging-java.yml) |
+| [document-management-dotnet](document-management-dotnet/) | Multi-tenant document management with review workflow and AI summaries | .NET 10, ASP.NET Core, EF Core, PostgreSQL, S3 | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/document-management-dotnet.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/document-management-dotnet.yml) |
+| [ecommerce-microservices-dotnet](ecommerce-microservices-dotnet/) | Microservices storefront with an order–payment saga | .NET 10, Aspire, YARP, RabbitMQ, PostgreSQL, MongoDB, Redis | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/ecommerce-microservices-dotnet.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/ecommerce-microservices-dotnet.yml) |
+| [rust-web-server](rust-web-server/) | High-performance API server with JWT auth, SSE, WebSocket and metrics | Rust 2024, actix-web, sqlx, Redis | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/rust-web-server.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/rust-web-server.yml) |
 
-#### **Social Media Platform** (`social-media-platform/`)
-- **Tech Stack**: Vue 3, Nuxt 3, TypeScript, Prisma, WebSocket
-- **Architecture**: Full-stack Nuxt application with server-side API
-- **Features**: Posts, stories, messaging, real-time notifications, content moderation, PWA
-- **Database**: PostgreSQL with Prisma ORM
-- **Real-time**: WebSocket for instant messaging and notifications
+### Blockchain and Web3
 
-### 🔶 Backend Services & APIs
+| Project | Summary | Stack | CI |
+|---|---|---|---|
+| [rust-blockchain](rust-blockchain/) | Blockchain node with P2P networking, wallets and smart-contract runtime | Rust 2024, libp2p, tokio | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/rust-blockchain.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/rust-blockchain.yml) |
+| [defi-lending-protocol](defi-lending-protocol/) | Isolated-market lending with liquidations, flash loans and governance | Solana, Anchor 1.2, Next.js 16, @solana/kit | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/defi-lending-protocol.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/defi-lending-protocol.yml) |
+| [nft-marketplace](nft-marketplace/) | Escrowed listings, offers and auctions for SPL and Token-2022 NFTs | Solana, Anchor 1.2, Next.js 16 | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/nft-marketplace.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/nft-marketplace.yml) |
+| [nft-minting](nft-minting/) | Token-2022 NFT minting with on-chain metadata, collections and royalties | Solana, Anchor 1.2 | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/nft-minting.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/nft-minting.yml) |
 
-#### **GraphQL Recommendation API** (`graphql-recommendation-api/`)
-- **Tech Stack**: Python, FastAPI, GraphQL, Redis, PostgreSQL, Qdrant
-- **Architecture**: GraphQL API with ML-based recommendation engine
-- **Features**: Collaborative filtering, content-based filtering, hybrid recommendations, real-time subscriptions
-- **ML Components**: Matrix factorization, vector similarity search
-- **Infrastructure**: Redis cluster for caching, Qdrant for vector search
+## Engineering standards applied across the repo
 
-#### **Image Processing Service** (`image-processing-service/`)
-- **Tech Stack**: Python, FastAPI, OpenCV, TensorFlow, Celery
-- **Architecture**: Microservice with async task processing
-- **Features**: Image transformation, object detection, OCR, batch processing
-- **Technologies**: Circuit breaker pattern, rate limiting, message queue integration
-- **Storage**: S3-compatible object storage
+- **Every project builds and tests in CI.** Each project has its own path-filtered GitHub Actions workflow with least-privilege permissions: lint, format, type checks, unit tests and integration tests (Testcontainers or service containers), plus a container build with a smoke test.
+- **AI is evaluated, not assumed.** LLM features sit behind provider-agnostic interfaces (any OpenAI-compatible endpoint) with deterministic fakes, so test suites and eval gates run offline in CI. Real models are enabled through configuration.
+- **Security by default.** Multi-stage, non-root, pinned container images; secrets only via environment (`.env.example` files hold placeholders); dependency audits per ecosystem; Dependabot for dependencies, base images and actions; see [SECURITY.md](SECURITY.md).
+- **Observable.** Backend services emit structured logs, health/readiness probes, Prometheus metrics and OpenTelemetry traces (GenAI semantic conventions for model calls).
+- **Documented decisions.** Each README covers the problem, architecture diagrams, run/test instructions and trade-offs, and states known limitations. The flagship projects add Architecture Decision Records under `docs/adr/`.
+- **Infrastructure as code.** Terraform and Helm charts are validated in CI without cloud credentials.
 
-#### **Financial Analysis ML** (`financial-analysis-ml/`)
-- **Tech Stack**: Python, FastAPI, TensorFlow, scikit-learn, PostgreSQL
-- **Architecture**: Clean Architecture with DDD principles
-- **Features**: Portfolio analysis, risk assessment, predictive modeling, backtesting
-- **ML Models**: Time series forecasting, portfolio optimization
-- **Data Pipeline**: Real-time data ingestion, feature engineering
+## Repository layout
 
-### ☕ Java/Spring Applications
+```text
+portfolio/
+├── .github/
+│   ├── workflows/        # one pipeline per project, path-filtered
+│   └── dependabot.yml    # grouped monthly updates for every ecosystem
+├── <project>/            # 21 self-contained projects, each with its own README
+├── SECURITY.md
+└── README.md
+```
 
-#### **Crypto Trading Platform** (`crypto-trading-java/`)
-- **Tech Stack**: Java 17, Spring Boot 3, WebFlux, Kafka, Redis
-- **Architecture**: Event-driven microservices with reactive programming
-- **Features**: Real-time trading, order matching, portfolio management, technical indicators
-- **Technologies**: WebSocket for real-time updates, Hazelcast for distributed caching
-- **Database**: PostgreSQL with Liquibase migrations
+Each folder is standalone: there are no build or runtime dependencies between projects. Open a project's README for its quickstart.
 
-#### **Enterprise Messaging System** (`enterprise-messaging-java/`)
-- **Tech Stack**: Java, Spring Boot, RabbitMQ/Kafka, WebSocket
-- **Architecture**: Message-driven architecture with pub/sub patterns
-- **Features**: Real-time messaging, group chats, file sharing, message persistence
-- **Scalability**: Horizontal scaling with message brokers
+## License
 
-### 🔷 .NET/C# Applications
-
-#### **Document Management System** (`document-management-dotnet/`)
-- **Tech Stack**: .NET 8, C#, Entity Framework Core, Azure Blob Storage
-- **Architecture**: Clean Architecture with DDD, CQRS pattern
-- **Features**: Document versioning, workflows, permissions, full-text search
-- **Storage**: Multiple providers (S3, Azure Blob, FileSystem)
-- **Security**: LDAP integration, role-based access control
-
-#### **E-Commerce Microservices** (`ecommerce-microservices-dotnet/`)
-- **Tech Stack**: .NET 8, C#, Ocelot API Gateway, RabbitMQ
-- **Architecture**: Microservices with API Gateway pattern
-- **Services**: Catalog, Basket, Ordering, Payment, Identity
-- **Communication**: Async messaging with RabbitMQ, gRPC for sync calls
-- **Deployment**: Kubernetes-ready with Helm charts
-
-### 🦀 Rust Applications
-
-#### **Rust Blockchain** (`rust-blockchain/`)
-- **Tech Stack**: Rust, libp2p, tokio, secp256k1
-- **Architecture**: P2P network with consensus mechanism
-- **Features**: Full blockchain implementation, smart contracts, wallet management, mining
-- **Cryptography**: SHA-256, secp256k1 for signatures
-- **Networking**: libp2p for peer discovery and communication
-
-#### **Rust Web Server** (`rust-web-server/`)
-- **Tech Stack**: Rust, Actix-Web, tokio, GraphQL
-- **Architecture**: High-performance async web server
-- **Features**: GraphQL API, WebSocket support, SSE, file uploads, authentication
-- **Performance**: Benchmarked with k6 and wrk
-- **Observability**: Prometheus metrics, structured logging
-
-### ⛓️ Blockchain/Web3 Applications
-
-#### **DeFi Lending Protocol** (`defi-lending-protocol/`)
-- **Tech Stack**: Solana, Anchor, Rust, Next.js, TypeScript
-- **Architecture**: On-chain programs with off-chain UI
-- **Features**: Lending pools, collateralized loans, liquidations, governance
-- **Smart Contracts**: Multiple programs for lending, governance, and tokens
-- **Frontend**: Next.js DApp with wallet integration
-
-#### **NFT Marketplace** (`nft-marketplace/`)
-- **Tech Stack**: Solana, Anchor, Next.js, TypeScript
-- **Architecture**: Decentralized marketplace with on-chain logic
-- **Features**: NFT minting, auctions, collections, royalty distribution
-- **Programs**: Marketplace, auction system, escrow, royalty management
-- **UI**: React-based with Web3 wallet integration
-
-## 🏗️ Architecture Patterns
-
-### Microservices
-- E-Commerce platform with service mesh
-- API Gateway pattern with Ocelot
-- Event-driven communication
-- Service discovery and load balancing
-
-### Clean Architecture
-- Document Management System
-- Financial Analysis platform
-- Domain-Driven Design principles
-- Separation of concerns
-
-### Real-time Systems
-- WebSocket implementation in multiple projects
-- WebRTC for peer-to-peer communication
-- Server-Sent Events (SSE)
-- Operational Transformation for collaboration
-
-### Event-Driven
-- Kafka/RabbitMQ integration
-- Event sourcing patterns
-- CQRS implementation
-- Pub/Sub messaging
-
-## 🔧 Technologies & Tools
-
-### Frontend
-- **Frameworks**: Angular 17, React 18, Vue 3, Next.js 14, Nuxt 3
-- **State Management**: NgRx, Zustand, Pinia
-- **Styling**: TailwindCSS, Angular Material, SCSS
-- **Build Tools**: Vite, Webpack, Angular CLI
-
-### Backend
-- **Languages**: TypeScript, Python, Java, C#, Rust, Solidity
-- **Frameworks**: Spring Boot, .NET Core, FastAPI, Actix-Web, Express
-- **Databases**: PostgreSQL, MongoDB, Redis, MySQL
-- **Message Brokers**: Kafka, RabbitMQ, Redis Pub/Sub
-
-### DevOps & Infrastructure
-- **Containerization**: Docker, Docker Compose
-- **Orchestration**: Kubernetes, Helm
-- **CI/CD**: GitHub Actions, Jenkins
-- **Monitoring**: Prometheus, Grafana, Jaeger
-
-### Testing
-- **Unit Testing**: Jest, Vitest, JUnit, xUnit
-- **E2E Testing**: Cypress, Playwright
-- **Load Testing**: k6, wrk, JMeter
-- **Coverage**: 80%+ across projects
-
-## 🚀 Deployment & Scalability
-
-All projects include:
-- Docker containerization
-- Kubernetes deployment manifests
-- Horizontal Pod Autoscaling (HPA)
-- Health checks and readiness probes
-- Environment-based configuration
-- Secrets management
-
-## 📊 Performance Optimization
-
-- Server-Side Rendering (SSR) for SEO
-- Progressive Web App (PWA) capabilities
-- Lazy loading and code splitting
-- Caching strategies (Redis, CDN)
-- Database query optimization
-- WebAssembly integration (Rust projects)
-
-## 🔒 Security
-
-- JWT authentication
-- OAuth 2.0 integration
-- RBAC (Role-Based Access Control)
-- Input validation and sanitization
-- SQL injection prevention
-- XSS and CSRF protection
-- API rate limiting
-- Secure headers implementation
-
-## 📈 Monitoring & Observability
-
-- Distributed tracing with Jaeger
-- Metrics collection with Prometheus
-- Log aggregation
-- Real-time dashboards with Grafana
-- Error tracking and alerting
-- Performance monitoring
-
-## 🧪 Quality Assurance
-
-- Comprehensive test suites
-- Code coverage reporting
-- Static code analysis
-- Linting and formatting
-- Pre-commit hooks
-- Automated testing in CI/CD
-
-## 📚 Documentation
-
-Each project includes:
-- Technical documentation
-- API documentation
-- Setup and deployment guides
-- Architecture diagrams
-- Contributing guidelines
-
-## 🎓 Learning & Best Practices
-
-This portfolio demonstrates:
-- SOLID principles
-- Design patterns implementation
-- Clean code practices
-- Agile development methodology
-- Git workflow and branching strategies
-- Code review practices
-
-## 🤝 Contributing
-
-Each project follows standard contribution guidelines with:
-- Issue templates
-- Pull request templates
-- Code of conduct
-- Commit message conventions
-
-## 📄 License
-
-Individual projects may have different licenses. Please refer to each project's LICENSE file for specific terms.
-
----
-
-**Note**: This portfolio represents a comprehensive showcase of modern software development practices across multiple technology stacks, demonstrating versatility and expertise in building scalable, maintainable, and performant applications.
+Unless a project folder contains its own LICENSE file, the code is shared for portfolio and evaluation purposes.
