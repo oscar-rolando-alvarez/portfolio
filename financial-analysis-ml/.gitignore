@@ -205,3 +205,5 @@ uploads/
 downloads/
 cache/
 tmp/
+# Ruff
+.ruff_cache/

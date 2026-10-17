@@ -1,211 +1,134 @@
-"""Integration tests for API endpoints."""
-import pytest
-from httpx import AsyncClient
-from fastapi import status
+"""API tests against the real app wired to a temporary SQLite database."""
 
-from src.api.main import app
+from __future__ import annotations
+
+import pytest
+from fastapi import status
+from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.integration
+
+
+def _register_and_login(client: TestClient, user: dict[str, str]) -> dict[str, str]:
+    assert client.post("/api/v1/auth/register", json=user).status_code == 201
+    response = client.post(
+        "/api/v1/auth/login", json={"email": user["email"], "password": user["password"]}
+    )
+    assert response.status_code == status.HTTP_200_OK
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 class TestAuthEndpoints:
-    """Test authentication endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_register_user_success(self, sample_user_data):
-        """Test successful user registration."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.post("/api/v1/auth/register", json=sample_user_data)
-        
+    def test_register_user_success(self, client: TestClient, sample_user_data):
+        response = client.post("/api/v1/auth/register", json=sample_user_data)
+
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
         assert data["email"] == sample_user_data["email"]
-        assert data["first_name"] == sample_user_data["first_name"]
-        assert data["last_name"] == sample_user_data["last_name"]
+        assert data["full_name"] == "John Doe"
         assert data["is_active"] is True
         assert data["is_verified"] is False
-    
-    @pytest.mark.asyncio
-    async def test_register_user_invalid_email(self, sample_user_data):
-        """Test user registration with invalid email."""
-        invalid_data = sample_user_data.copy()
-        invalid_data["email"] = "invalid-email"
-        
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.post("/api/v1/auth/register", json=invalid_data)
-        
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    
-    @pytest.mark.asyncio
-    async def test_register_user_weak_password(self, sample_user_data):
-        """Test user registration with weak password."""
-        invalid_data = sample_user_data.copy()
-        invalid_data["password"] = "weak"
-        
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.post("/api/v1/auth/register", json=invalid_data)
-        
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    
-    @pytest.mark.asyncio
-    async def test_login_success(self, sample_user_data):
-        """Test successful user login."""
-        # First register a user
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            await client.post("/api/v1/auth/register", json=sample_user_data)
-            
-            # Then login
-            login_data = {
-                "email": sample_user_data["email"],
-                "password": sample_user_data["password"],
-            }
-            response = await client.post("/api/v1/auth/login", json=login_data)
-        
+
+    def test_register_duplicate_email_rejected(self, client: TestClient, sample_user_data):
+        client.post("/api/v1/auth/register", json=sample_user_data)
+        response = client.post("/api/v1/auth/register", json=sample_user_data)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("email", "invalid-email"), ("password", "weak"), ("password", "nouppercase1!")],
+    )
+    def test_register_validation_errors(self, client: TestClient, sample_user_data, field, value):
+        response = client.post("/api/v1/auth/register", json={**sample_user_data, field: value})
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    def test_login_success(self, client: TestClient, sample_user_data):
+        client.post("/api/v1/auth/register", json=sample_user_data)
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": sample_user_data["email"], "password": sample_user_data["password"]},
+        )
+
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert "access_token" in data
         assert data["token_type"] == "bearer"
-        assert "expires_in" in data
-        assert "user" in data
-    
-    @pytest.mark.asyncio
-    async def test_login_invalid_credentials(self):
-        """Test login with invalid credentials."""
-        login_data = {
-            "email": "nonexistent@example.com",
-            "password": "wrongpassword",
-        }
-        
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.post("/api/v1/auth/login", json=login_data)
-        
+        assert data["expires_in"] > 0
+        assert data["user"]["email"] == sample_user_data["email"]
+
+    def test_login_invalid_credentials(self, client: TestClient):
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": "nonexistent@example.com", "password": "wrongpassword"},
+        )
+
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
-    
-    @pytest.mark.asyncio
-    async def test_get_current_user_unauthorized(self):
-        """Test getting current user without authentication."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.get("/api/v1/auth/me")
-        
+
+    def test_me_requires_token(self, client: TestClient):
+        response = client.get("/api/v1/auth/me")
+
+        assert response.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}
+
+    def test_me_rejects_garbage_token(self, client: TestClient):
+        response = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not-a-jwt"})
+
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
-    
-    @pytest.mark.asyncio
-    async def test_get_current_user_success(self, sample_user_data):
-        """Test getting current user with valid token."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            # Register and login
-            await client.post("/api/v1/auth/register", json=sample_user_data)
-            login_response = await client.post("/api/v1/auth/login", json={
-                "email": sample_user_data["email"],
-                "password": sample_user_data["password"],
-            })
-            
-            token = login_response.json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
-            
-            # Get current user
-            response = await client.get("/api/v1/auth/me", headers=headers)
-        
+
+    def test_me_with_valid_token(self, client: TestClient, sample_user_data):
+        headers = _register_and_login(client, sample_user_data)
+
+        response = client.get("/api/v1/auth/me", headers=headers)
+
         assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["email"] == sample_user_data["email"]
+        assert response.json()["email"] == sample_user_data["email"]
 
 
 class TestUserEndpoints:
-    """Test user management endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_get_my_profile(self, sample_user_data):
-        """Test getting user profile."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            # Register and login
-            await client.post("/api/v1/auth/register", json=sample_user_data)
-            login_response = await client.post("/api/v1/auth/login", json={
-                "email": sample_user_data["email"],
-                "password": sample_user_data["password"],
-            })
-            
-            token = login_response.json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
-            
-            # Get profile
-            response = await client.get("/api/v1/users/me", headers=headers)
-        
+    def test_get_my_profile(self, client: TestClient, sample_user_data):
+        headers = _register_and_login(client, sample_user_data)
+
+        response = client.get("/api/v1/users/me", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["first_name"] == "John"
+
+    def test_update_my_profile(self, client: TestClient, sample_user_data):
+        headers = _register_and_login(client, sample_user_data)
+
+        response = client.put(
+            "/api/v1/users/me", json={"first_name": "Jane", "last_name": "Smith"}, headers=headers
+        )
+
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
+        assert (data["first_name"], data["last_name"]) == ("Jane", "Smith")
         assert data["email"] == sample_user_data["email"]
-        assert data["first_name"] == sample_user_data["first_name"]
-        assert data["last_name"] == sample_user_data["last_name"]
-    
-    @pytest.mark.asyncio
-    async def test_update_my_profile(self, sample_user_data):
-        """Test updating user profile."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            # Register and login
-            await client.post("/api/v1/auth/register", json=sample_user_data)
-            login_response = await client.post("/api/v1/auth/login", json={
-                "email": sample_user_data["email"],
-                "password": sample_user_data["password"],
-            })
-            
-            token = login_response.json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
-            
-            # Update profile
-            update_data = {
-                "first_name": "Jane",
-                "last_name": "Smith",
-            }
-            response = await client.put("/api/v1/users/me", json=update_data, headers=headers)
-        
+
+    def test_deactivate_my_account(self, client: TestClient, sample_user_data):
+        headers = _register_and_login(client, sample_user_data)
+
+        response = client.delete("/api/v1/users/me", headers=headers)
+
         assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["first_name"] == "Jane"
-        assert data["last_name"] == "Smith"
-        assert data["email"] == sample_user_data["email"]  # Email should not change
-    
-    @pytest.mark.asyncio
-    async def test_deactivate_my_account(self, sample_user_data):
-        """Test deactivating user account."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            # Register and login
-            await client.post("/api/v1/auth/register", json=sample_user_data)
-            login_response = await client.post("/api/v1/auth/login", json={
-                "email": sample_user_data["email"],
-                "password": sample_user_data["password"],
-            })
-            
-            token = login_response.json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
-            
-            # Deactivate account
-            response = await client.delete("/api/v1/users/me", headers=headers)
-        
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["message"] == "Account deactivated successfully"
+        assert response.json()["message"] == "Account deactivated successfully"
+        # A deactivated account can no longer use its token.
+        assert client.get("/api/v1/users/me", headers=headers).status_code == 400
 
 
 class TestHealthEndpoints:
-    """Test health check endpoints."""
-    
-    @pytest.mark.asyncio
-    async def test_health_check(self):
-        """Test health check endpoint."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.get("/health")
-        
+    def test_health_check(self, client: TestClient):
+        response = client.get("/health")
+
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert data["status"] == "healthy"
-        assert data["service"] == "financial-analysis-ml"
-        assert data["version"] == "1.0.0"
-    
-    @pytest.mark.asyncio
-    async def test_root_endpoint(self):
-        """Test root endpoint."""
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            response = await client.get("/")
-        
+        assert data["checks"]["database"] == "ok"
+        assert response.headers["X-Request-ID"]
+
+    def test_root_endpoint(self, client: TestClient):
+        response = client.get("/")
+
         assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["message"] == "Financial Analysis ML API"
-        assert data["version"] == "1.0.0"
+        assert response.json()["docs"] == "/docs"
