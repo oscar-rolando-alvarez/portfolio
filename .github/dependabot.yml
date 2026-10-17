@@ -23,6 +23,9 @@ updates:
     groups:
       minor-and-patch: { update-types: [minor, patch] }
     ignore:
+      # Majors are upgraded deliberately, not by bot.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
       # Held back on purpose: typescript-eslint and vue-tsc do not support TS 7 yet,
       # runtimes target Node 24 LTS, and eslint-config-next does not support ESLint 10 yet.
       - dependency-name: typescript
@@ -39,9 +42,14 @@ updates:
       - /graphql-recommendation-api
       - /image-processing-service
       - /agentic-claims-orchestrator/ml
+      - /iot-fleet-intelligence/platform
     schedule: { interval: monthly }
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # Majors are upgraded deliberately, not by bot.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: maven
     directories:
@@ -50,6 +58,10 @@ updates:
     schedule: { interval: monthly }
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # Majors are upgraded deliberately, not by bot.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: nuget
     directories:
@@ -59,6 +71,9 @@ updates:
     groups:
       minor-and-patch: { update-types: [minor, patch] }
     ignore:
+      # Majors are upgraded deliberately, not by bot.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
       # MassTransit v9+ is commercially licensed; stay on the 8.x line.
       - dependency-name: MassTransit*
         versions: [">=9.0.0"]
@@ -74,15 +89,24 @@ updates:
     groups:
       minor-and-patch: { update-types: [minor, patch] }
     ignore:
+      # Majors are upgraded deliberately, not by bot.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
       # Solana crate majors must move together with the Anchor release line.
       - dependency-name: "solana-*"
         update-types: [version-update:semver-major]
 
   - package-ecosystem: gomod
-    directory: /llm-gateway
+    directories:
+      - /llm-gateway
+      - /iot-fleet-intelligence/simulator
     schedule: { interval: monthly }
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # Majors are upgraded deliberately, not by bot.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: docker
     directories:
@@ -98,6 +122,8 @@ updates:
       - /financial-analysis-ml
       - /graphql-recommendation-api
       - /image-processing-service
+      - /iot-fleet-intelligence/platform
+      - /iot-fleet-intelligence/simulator
       - /llm-gateway
       - /nft-marketplace/app
       - /react-analytics-dashboard
@@ -118,4 +144,5 @@ updates:
     directories:
       - /enterprise-rag-platform/infra/terraform/envs/reference
       - /enterprise-rag-platform/infra/terraform/modules/rag_platform
+      - /iot-fleet-intelligence/infra/terraform
     schedule: { interval: monthly }

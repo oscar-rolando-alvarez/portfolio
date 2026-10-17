@@ -3,9 +3,9 @@
 **Principal AI Architect** · GenAI platforms, agentic systems and cloud-native architecture
 [oralvarez@gmail.com](mailto:oralvarez@gmail.com) · [github.com/oscar-rolando-alvarez](https://github.com/oscar-rolando-alvarez)
 
-This monorepo holds 21 independent, runnable reference systems. Each one builds, tests and ships in its own GitHub Actions pipeline, and comes with a README explaining the problem it solves, its architecture (Mermaid C4, sequence and data diagrams), how to run it, and the trade-offs behind it.
+This monorepo holds 22 independent, runnable reference systems. Each one builds, tests and ships in its own GitHub Actions pipeline, and comes with a README explaining the problem it solves, its architecture (Mermaid C4, sequence and data diagrams), how to run it, and the trade-offs behind it.
 
-The three **flagship GenAI systems** below are the best starting point. They show how I approach production AI: governance and evaluation first, provider-agnostic by design, observable end to end, and deployable through infrastructure as code.
+The four **flagship GenAI systems** below are the best starting point. They show how I approach production AI: governance and evaluation first, provider-agnostic by design, observable end to end, and deployable through infrastructure as code.
 
 ## ⭐ Flagship GenAI systems
 
@@ -14,18 +14,21 @@ The three **flagship GenAI systems** below are the best starting point. They sho
 | [**enterprise-rag-platform**](enterprise-rag-platform/) | Multi-tenant, permission-aware knowledge assistant (RAG) | Hybrid retrieval (full-text + pgvector HNSW, RRF, reranking); tenant/group ACLs enforced inside the query and by Postgres row-level security; answers with verified citations or a refusal; PII and prompt-injection safeguards; golden-set eval gate (recall@k, MRR, faithfulness, ACL leaks); per-tenant cost accounting; Terraform for AWS (ECS Fargate, RDS pgvector) · Python 3.13, FastAPI | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-rag-platform.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/enterprise-rag-platform.yml) |
 | [**agentic-claims-orchestrator**](agentic-claims-orchestrator/) | Governed multi-agent system for insurance claims intake and triage | Custom durable agent graph with Postgres checkpoints, leases and crash recovery; MCP tool servers behind a validating gateway; declarative guardrail policy with human-in-the-loop approvals; PII tokenization vault; fraud model trained offline and scored in TypeScript; hash-chained audit trail; scenario eval gate · TypeScript, Node 24, Hono, Drizzle, Helm | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/agentic-claims-orchestrator.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/agentic-claims-orchestrator.yml) |
 | [**llm-gateway**](llm-gateway/) | Enterprise LLM gateway and AI control plane | OpenAI-compatible API with streaming; cost-, latency- and weight-based routing with fallback, circuit breakers and hedging; per-tenant virtual keys, rate limits and token/USD budgets; checksum-validated PII redaction; exact + semantic cache; OpenTelemetry GenAI traces and Prometheus FinOps metrics; ~2 ms gateway overhead at p95 in local load tests · Go, Redis, Helm | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/llm-gateway.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/llm-gateway.yml) |
+| [**iot-fleet-intelligence**](iot-fleet-intelligence/) | Event-driven IoT connectivity intelligence for fleets of millions of devices | Go simulator of millions of devices (1M devices at ~12M events/s on a laptop) with fault injection; Kafka (MSK Serverless) and SQS feeding Python Lambdas for windowed anomaly detection, third-party enrichment with circuit breakers, and RAG-grounded LLM diagnosis with structured output; DynamoDB single-table; built-in AWS + LLM cost estimator for 10k–10M devices; eval gate; Terraform · Go, Python 3.13, AWS Lambda, Kafka | [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/iot-fleet-intelligence.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/iot-fleet-intelligence.yml) |
 
 ```mermaid
 flowchart LR
     users["Business apps and users"] --> gw["llm-gateway<br/>routing · budgets · PII redaction · cache"]
     rag["enterprise-rag-platform<br/>permission-aware retrieval + cited answers"] --> gw
     agents["agentic-claims-orchestrator<br/>durable agents · MCP tools · human approvals"] --> gw
+    devices["Millions of IoT devices"] --> iot["iot-fleet-intelligence<br/>Kafka · Lambda · anomaly detection · LLM diagnosis"]
+    iot --> gw
     users --> rag
     users --> agents
     gw --> models["Any OpenAI-compatible model endpoint<br/>cloud or self-hosted"]
 ```
 
-The three systems are independent, but they are designed to compose as shown: the gateway is the single governed path to models, and the RAG platform and agent orchestrator are workloads behind it.
+The systems are independent, but they are designed to compose as shown: the gateway is the single governed path to models, and the RAG platform, the agent orchestrator and the IoT diagnosis pipeline are workloads behind it.
 
 ## Portfolio map
 
@@ -38,6 +41,7 @@ flowchart TB
         fin["financial-analysis-ml"]
         rec["graphql-recommendation-api"]
         img["image-processing-service"]
+        iot["iot-fleet-intelligence"]
     end
     subgraph web["Web frontends and full-stack"]
         erp["angular-erp-system"]
@@ -118,7 +122,7 @@ portfolio/
 ├── .github/
 │   ├── workflows/        # one pipeline per project, path-filtered
 │   └── dependabot.yml    # grouped monthly updates for every ecosystem
-├── <project>/            # 21 self-contained projects, each with its own README
+├── <project>/            # 22 self-contained projects, each with its own README
 ├── SECURITY.md
 └── README.md
 ```
