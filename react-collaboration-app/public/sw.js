@@ -7,7 +7,7 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/vite.svg',
+  '/favicon.svg',
   // Add more static assets as needed
 ];
 
