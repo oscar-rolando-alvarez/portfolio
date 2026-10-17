@@ -1,71 +1,56 @@
+using ECommerce.Services.Payment.Consumers;
 using ECommerce.Services.Payment.Data;
-using ECommerce.Services.Payment.Services;
-using ECommerce.Shared.Common.Extensions;
-using ECommerce.Shared.Common.Middleware;
+using ECommerce.Services.Payment.Endpoints;
+using ECommerce.Services.Payment.Gateway;
+using ECommerce.Shared.Common.Auth;
+using ECommerce.Shared.Common.Http;
 using MassTransit;
-using Microsoft.EntityFrameworkCore;
-using Serilog;
-using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-builder.Host.ConfigureSerilog();
+builder.AddServiceDefaults();
+builder.AddApiDefaults();
+builder.AddJwtAuthentication();
 
-// Add services to the container
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.AddNpgsqlDbContext<PaymentContext>("paymentdb");
 
-// Database
-builder.Services.AddDbContext<PaymentContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.Configure<SimulatedGatewayOptions>(builder.Configuration.GetSection(SimulatedGatewayOptions.SectionName));
+builder.Services.AddSingleton<IPaymentGateway, SimulatedPaymentGateway>();
 
-// Services
-builder.Services.AddScoped<IPaymentService, PaymentService>();
-
-// MassTransit
-builder.Services.AddMassTransit(x =>
+builder.Services.AddMassTransit(bus =>
 {
-    x.AddConsumers(Assembly.GetExecutingAssembly());
-    
-    x.UsingRabbitMq((context, cfg) =>
+    bus.SetKebabCaseEndpointNameFormatter();
+    bus.AddConsumer<OrderCreatedConsumer>();
+
+    var rabbit = builder.Configuration.GetConnectionString("messaging");
+    if (string.IsNullOrWhiteSpace(rabbit))
     {
-        cfg.Host(builder.Configuration.GetConnectionString("RabbitMQ"));
-        cfg.ConfigureEndpoints(context);
-    });
+        bus.UsingInMemory((context, cfg) => cfg.ConfigureEndpoints(context));
+    }
+    else
+    {
+        bus.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host(new Uri(rabbit));
+            cfg.UseMessageRetry(retry => retry.Exponential(5, TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)));
+            cfg.ConfigureEndpoints(context);
+        });
+    }
 });
-
-// Common services
-builder.Services.AddCommonServices(Assembly.GetExecutingAssembly());
-
-// Health checks
-builder.Services.AddHealthChecks()
-    .AddDbContext<PaymentContext>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseSerilogRequestLogging();
-
-app.UseHttpsRedirection();
+app.UseApiDefaults();
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();
+app.MapPaymentEndpoints();
 
-// Initialize database
-using (var scope = app.Services.CreateScope())
+await using (var scope = app.Services.CreateAsyncScope())
 {
-    var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-    await context.Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<PaymentContext>().Database.EnsureCreatedAsync();
 }
 
-app.Run();
+await app.RunAsync();

@@ -1,145 +1,56 @@
-version: '3.8'
+# Local stack: docker compose --env-file .env up --build -d --wait
+# API: http://localhost:8080  ·  Telemetry dashboard: http://localhost:18888
+
+name: document-management
 
 services:
-  # SQL Server Database
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: document-management-sql
+  postgres:
+    image: postgres:17-alpine
     environment:
-      ACCEPT_EULA: "Y"
-      SA_PASSWORD: "DocumentManagement123!"
-      MSSQL_PID: "Express"
-    ports:
-      - "1433:1433"
+      POSTGRES_DB: documentsdb
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      - sqlserver_data:/var/opt/mssql
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P DocumentManagement123! -Q 'SELECT 1'"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    networks:
-      - document-management
+      test: ["CMD-SHELL", "pg_isready -U postgres -d documentsdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    container_name: document-management-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    networks:
-      - document-management
-
-  # Elasticsearch
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    container_name: document-management-elasticsearch
+  dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6.1
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - http.cors.enabled=true
-      - http.cors.allow-origin="*"
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
     ports:
-      - "9200:9200"
-      - "9300:9300"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    networks:
-      - document-management
+      - "18888:18888"
 
-  # Kibana (Optional - for Elasticsearch management)
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.0
-    container_name: document-management-kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - xpack.security.enabled=false
-    ports:
-      - "5601:5601"
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    networks:
-      - document-management
-
-  # Document Management API
   api:
     build:
       context: .
-      dockerfile: src/DocumentManagement.API/Dockerfile
-    container_name: document-management-api
+      dockerfile: Dockerfile
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://+:80
-      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=DocumentManagement;User Id=sa;Password=DocumentManagement123!;TrustServerCertificate=true;
-      - ConnectionStrings__Redis=redis:6379
-      - ConnectionStrings__Elasticsearch=http://elasticsearch:9200
-      - Storage__ProviderType=FileSystem
-      - Storage__ContainerName=/app/storage
-      - JWT__SecretKey=ThisIsAVeryLongSecretKeyForJWTTokenGenerationThatMeetsMinimumRequirements
-      - JWT__Issuer=DocumentManagement
-      - JWT__Audience=DocumentManagement
-      - JWT__ExpiryMinutes=60
-    ports:
-      - "8080:80"
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__documentsdb: Host=postgres;Database=documentsdb;Username=postgres;Password=${POSTGRES_PASSWORD}
+      # Demo token validation with a shared key (see scripts/dev-token.sh). Use Authority/Audience for a real IdP.
+      Authentication__Schemes__Bearer__ValidIssuer: document-management-dev
+      Authentication__Schemes__Bearer__ValidAudiences__0: document-management-api
+      Authentication__Schemes__Bearer__SigningKeys__0__Issuer: document-management-dev
+      Authentication__Schemes__Bearer__SigningKeys__0__Value: ${JWT_SIGNING_KEY_BASE64:?set JWT_SIGNING_KEY_BASE64 in .env}
+      Storage__Provider: FileSystem
+      AI__Enabled: ${AI_ENABLED:-false}
+      AI__Endpoint: ${AI_ENDPOINT:-http://host.docker.internal:11434/v1}
+      AI__Model: ${AI_MODEL:-llama3.2}
+      AI__ApiKey: ${AI_API_KEY:-}
+      OTEL_SERVICE_NAME: document-management-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://dashboard:18889
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     volumes:
-      - ./storage:/app/storage
-      - ./logs:/app/logs
-    depends_on:
-      sqlserver:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
-    networks:
-      - document-management
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  # Nginx Reverse Proxy (Optional)
-  nginx:
-    image: nginx:alpine
-    container_name: document-management-nginx
+      - document-storage:/data/storage
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - "8080:8080"
     depends_on:
-      - api
-    networks:
-      - document-management
+      postgres: { condition: service_healthy }
 
 volumes:
-  sqlserver_data:
-    driver: local
-  redis_data:
-    driver: local
-  elasticsearch_data:
-    driver: local
-
-networks:
-  document-management:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
+  postgres-data:
+  document-storage:

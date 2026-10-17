@@ -1,76 +1,32 @@
-using ECommerce.Services.Basket.Mapping;
+using ECommerce.Services.Basket.Endpoints;
 using ECommerce.Services.Basket.Repositories;
 using ECommerce.Services.Basket.Services;
-using ECommerce.Shared.Common.Extensions;
-using ECommerce.Shared.Common.Middleware;
-using MassTransit;
-using Serilog;
-using StackExchange.Redis;
-using System.Reflection;
+using ECommerce.Shared.Common.Auth;
+using ECommerce.Shared.Common.Clients;
+using ECommerce.Shared.Common.Http;
+using FluentValidation;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-builder.Host.ConfigureSerilog();
+builder.AddServiceDefaults();
+builder.AddApiDefaults();
+builder.AddJwtAuthentication();
 
-// Add services to the container
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// Redis via the Aspire client integration (adds health check + tracing).
+builder.AddRedisClient("redis");
 
-// Redis
-builder.Services.AddSingleton<IConnectionMultiplexer>(serviceProvider =>
-{
-    var configuration = builder.Configuration.GetConnectionString("Redis");
-    return ConnectionMultiplexer.Connect(configuration!);
-});
-
-// AutoMapper
-builder.Services.AddAutoMapper(typeof(MappingProfile));
-
-// Repositories and Services
-builder.Services.AddScoped<IBasketRepository, BasketRepository>();
+builder.Services.AddCatalogClient(builder.Configuration);
+builder.Services.AddScoped<IBasketRepository, RedisBasketRepository>();
 builder.Services.AddScoped<IBasketService, BasketService>();
-
-// HTTP Client for Catalog Service
-builder.Services.AddHttpClient("CatalogService", client =>
-{
-    client.BaseAddress = new Uri(builder.Configuration["Services:Catalog"]!);
-});
-
-// MassTransit
-builder.Services.AddMassTransit(x =>
-{
-    x.UsingRabbitMq((context, cfg) =>
-    {
-        cfg.Host(builder.Configuration.GetConnectionString("RabbitMQ"));
-        cfg.ConfigureEndpoints(context);
-    });
-});
-
-// Common services
-builder.Services.AddCommonServices(Assembly.GetExecutingAssembly());
-
-// Health checks
-builder.Services.AddHealthChecks()
-    .AddRedis(builder.Configuration.GetConnectionString("Redis")!);
+builder.Services.AddValidatorsFromAssemblyContaining<AddToBasketRequestValidator>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseSerilogRequestLogging();
-
-app.UseHttpsRedirection();
+app.UseApiDefaults();
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();
+app.MapBasketEndpoints();
 
-app.Run();
+await app.RunAsync();

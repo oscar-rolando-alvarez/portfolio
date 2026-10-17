@@ -1,9 +1,16 @@
 namespace ECommerce.Shared.Events.Base;
 
-public abstract class IntegrationEvent
+/// <summary>
+/// Base type for events published across service boundaries. Events are immutable facts;
+/// <see cref="CorrelationId"/> ties together every event produced for the same business transaction.
+/// </summary>
+public abstract record IntegrationEvent
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
-    public string CorrelationId { get; set; } = string.Empty;
-    public string Source { get; set; } = string.Empty;
+    public Guid EventId { get; init; } = Guid.NewGuid();
+
+    public DateTime OccurredAt { get; init; } = DateTime.UtcNow;
+
+    public Guid CorrelationId { get; init; }
+
+    public string Source { get; init; } = string.Empty;
 }

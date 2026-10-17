@@ -1,79 +1,43 @@
 using ECommerce.Services.Catalog.Data;
-using ECommerce.Services.Catalog.Mapping;
+using ECommerce.Services.Catalog.Endpoints;
 using ECommerce.Services.Catalog.Repositories;
 using ECommerce.Services.Catalog.Services;
-using ECommerce.Shared.Common.Extensions;
-using ECommerce.Shared.Common.Middleware;
-using MassTransit;
+using ECommerce.Shared.Common.Auth;
+using ECommerce.Shared.Common.Http;
+using FluentValidation;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using MongoDB.Driver;
-using Serilog;
-using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-builder.Host.ConfigureSerilog();
+builder.AddServiceDefaults();
+builder.AddApiDefaults();
+builder.AddJwtAuthentication();
 
-// Add services to the container
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// MongoDB
-builder.Services.Configure<CatalogDatabaseSettings>(
-    builder.Configuration.GetSection("CatalogDatabase"));
-
-builder.Services.AddSingleton<IMongoClient>(serviceProvider =>
+// MongoDB via the Aspire client integration (adds health check + tracing).
+const string connectionName = "catalogdb";
+builder.AddMongoDBClient(connectionName);
+builder.Services.TryAddSingleton(sp =>
 {
-    var settings = builder.Configuration.GetSection("CatalogDatabase").Get<CatalogDatabaseSettings>();
-    return new MongoClient(settings!.ConnectionString);
+    var connectionString = builder.Configuration.GetConnectionString(connectionName);
+    var databaseName = string.IsNullOrEmpty(connectionString) ? null : MongoUrl.Create(connectionString).DatabaseName;
+    return sp.GetRequiredService<IMongoClient>().GetDatabase(databaseName ?? connectionName);
 });
 
-builder.Services.AddScoped<ICatalogContext, CatalogContext>();
-
-// AutoMapper
-builder.Services.AddAutoMapper(typeof(MappingProfile));
-
-// Repositories and Services
+builder.Services.AddSingleton<CatalogContext>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<IProductService, ProductService>();
-
-// MassTransit
-builder.Services.AddMassTransit(x =>
-{
-    x.UsingRabbitMq((context, cfg) =>
-    {
-        cfg.Host(builder.Configuration.GetConnectionString("RabbitMQ"));
-        cfg.ConfigureEndpoints(context);
-    });
-});
-
-// Common services
-builder.Services.AddCommonServices(Assembly.GetExecutingAssembly());
-
-// Health checks
-builder.Services.AddHealthChecks()
-    .AddMongoDb(builder.Configuration.GetSection("CatalogDatabase:ConnectionString").Value!);
+builder.Services.AddValidatorsFromAssemblyContaining<CreateProductRequestValidator>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseSerilogRequestLogging();
-
-app.UseHttpsRedirection();
+app.UseApiDefaults();
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();
+app.MapProductEndpoints();
 
-// Initialize database
-await DatabaseInitializer.InitializeAsync(app.Services);
+await app.InitializeCatalogAsync();
 
-app.Run();
+await app.RunAsync();

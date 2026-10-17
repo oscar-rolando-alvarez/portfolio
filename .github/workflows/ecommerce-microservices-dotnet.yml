@@ -1,0 +1,114 @@
+name: ecommerce-microservices-dotnet
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "ecommerce-microservices-dotnet/**"
+      - ".github/workflows/ecommerce-microservices-dotnet.yml"
+  pull_request:
+    paths:
+      - "ecommerce-microservices-dotnet/**"
+      - ".github/workflows/ecommerce-microservices-dotnet.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ecommerce-microservices-dotnet
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: ecommerce-microservices-dotnet/global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-ecommerce-${{ runner.os }}-${{ hashFiles('ecommerce-microservices-dotnet/Directory.Packages.props', 'ecommerce-microservices-dotnet/**/*.csproj') }}
+          restore-keys: nuget-ecommerce-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore ECommerce.slnx
+
+      - name: Build (warnings as errors)
+        run: dotnet build ECommerce.slnx --configuration Release --no-restore
+
+      - name: Unit tests
+        run: >-
+          dotnet test --project tests/ECommerce.UnitTests --configuration Release --no-build
+          --report-trx --results-directory ${{ github.workspace }}/test-results/unit
+          --coverage --coverage-output-format cobertura
+
+      # Testcontainers starts MongoDB, Redis and PostgreSQL on the runner's Docker daemon.
+      - name: Integration tests (Testcontainers)
+        run: >-
+          dotnet test --project tests/ECommerce.IntegrationTests --configuration Release --no-build
+          --report-trx --results-directory ${{ github.workspace }}/test-results/integration
+
+      - name: Vulnerable package gate (high/critical)
+        run: |
+          dotnet list ECommerce.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -qiE '\b(High|Critical)\b' vulnerable.txt; then
+            echo "::error::High or critical vulnerabilities found in NuGet dependencies"
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ecommerce-test-results
+          path: ${{ github.workspace }}/test-results
+          if-no-files-found: ignore
+
+  container-images:
+    name: Container image (${{ matrix.service.name }})
+    runs-on: ubuntu-latest
+    needs: build-test
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: identity, project: src/Services/Identity/ECommerce.Services.Identity/ECommerce.Services.Identity.csproj, assembly: ECommerce.Services.Identity }
+          - { name: catalog, project: src/Services/Catalog/ECommerce.Services.Catalog/ECommerce.Services.Catalog.csproj, assembly: ECommerce.Services.Catalog }
+          - { name: basket, project: src/Services/Basket/ECommerce.Services.Basket/ECommerce.Services.Basket.csproj, assembly: ECommerce.Services.Basket }
+          - { name: ordering, project: src/Services/Ordering/ECommerce.Services.Ordering/ECommerce.Services.Ordering.csproj, assembly: ECommerce.Services.Ordering }
+          - { name: payment, project: src/Services/Payment/ECommerce.Services.Payment/ECommerce.Services.Payment.csproj, assembly: ECommerce.Services.Payment }
+          - { name: gateway, project: src/ApiGateway/ECommerce.ApiGateway/ECommerce.ApiGateway.csproj, assembly: ECommerce.ApiGateway }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: ecommerce-microservices-dotnet
+          file: ecommerce-microservices-dotnet/Dockerfile
+          build-args: |
+            PROJECT=${{ matrix.service.project }}
+            ASSEMBLY=${{ matrix.service.assembly }}
+          tags: ecommerce/${{ matrix.service.name }}:ci
+          push: false
+          cache-from: type=gha,scope=ecommerce-${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=ecommerce-${{ matrix.service.name }}

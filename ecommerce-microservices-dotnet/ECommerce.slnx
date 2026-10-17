@@ -1,0 +1,35 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/ApiGateway/">
+    <Project Path="src/ApiGateway/ECommerce.ApiGateway/ECommerce.ApiGateway.csproj" />
+  </Folder>
+  <Folder Name="/src/Aspire/">
+    <Project Path="src/Aspire/ECommerce.AppHost/ECommerce.AppHost.csproj" />
+    <Project Path="src/Aspire/ECommerce.ServiceDefaults/ECommerce.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Basket/">
+    <Project Path="src/Services/Basket/ECommerce.Services.Basket/ECommerce.Services.Basket.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Catalog/">
+    <Project Path="src/Services/Catalog/ECommerce.Services.Catalog/ECommerce.Services.Catalog.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Identity/">
+    <Project Path="src/Services/Identity/ECommerce.Services.Identity/ECommerce.Services.Identity.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Ordering/">
+    <Project Path="src/Services/Ordering/ECommerce.Services.Ordering/ECommerce.Services.Ordering.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Payment/">
+    <Project Path="src/Services/Payment/ECommerce.Services.Payment/ECommerce.Services.Payment.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/">
+    <Project Path="src/Shared/ECommerce.Shared.Common/ECommerce.Shared.Common.csproj" />
+    <Project Path="src/Shared/ECommerce.Shared.Contracts/ECommerce.Shared.Contracts.csproj" />
+    <Project Path="src/Shared/ECommerce.Shared.Events/ECommerce.Shared.Events.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ECommerce.IntegrationTests/ECommerce.IntegrationTests.csproj" />
+    <Project Path="tests/ECommerce.UnitTests/ECommerce.UnitTests.csproj" />
+  </Folder>
+</Solution>

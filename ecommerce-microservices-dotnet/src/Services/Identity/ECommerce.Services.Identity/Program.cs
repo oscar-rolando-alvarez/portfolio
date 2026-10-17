@@ -1,82 +1,55 @@
+using System.Threading.RateLimiting;
 using ECommerce.Services.Identity.Data;
+using ECommerce.Services.Identity.Endpoints;
 using ECommerce.Services.Identity.Models;
 using ECommerce.Services.Identity.Services;
-using ECommerce.Shared.Common.Extensions;
-using ECommerce.Shared.Common.Middleware;
+using ECommerce.Shared.Common.Auth;
+using ECommerce.Shared.Common.Http;
+using FluentValidation;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
-using Serilog;
-using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-builder.Host.ConfigureSerilog();
+builder.AddServiceDefaults();
+builder.AddApiDefaults();
+builder.AddJwtAuthentication();
 
-// Add services to the container
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.AddNpgsqlDbContext<ApplicationDbContext>("identitydb");
 
-// Database
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-// Identity
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+builder.Services
+    .AddIdentityCore<ApplicationUser>(options =>
+    {
+        options.User.RequireUniqueEmail = true;
+        options.Password.RequiredLength = 8;
+        options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
+    })
+    .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
-    .AddDefaultTokenProviders();
+    .AddSignInManager();
 
-// IdentityServer
-builder.Services.AddIdentityServer(options =>
+builder.Services.AddRateLimiter(options =>
 {
-    options.Events.RaiseErrorEvents = true;
-    options.Events.RaiseInformationEvents = true;
-    options.Events.RaiseFailureEvents = true;
-    options.Events.RaiseSuccessEvents = true;
-})
-.AddConfigurationStore(options =>
-{
-    options.ConfigureDbContext = b => b.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
-})
-.AddOperationalStore(options =>
-{
-    options.ConfigureDbContext = b => b.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
-})
-.AddAspNetIdentity<ApplicationUser>()
-.AddDeveloperSigningCredential(); // For development only
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(RateLimitPolicies.Auth, context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+});
 
-// Custom services
-builder.Services.AddScoped<IUserService, UserService>();
-
-// Common services
-builder.Services.AddCommonServices(Assembly.GetExecutingAssembly());
-
-// Health checks
-builder.Services.AddHealthChecks()
-    .AddDbContext<ApplicationDbContext>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<ITokenService, TokenService>();
+builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseSerilogRequestLogging();
-
-app.UseHttpsRedirection();
-app.UseIdentityServer();
+app.UseApiDefaults();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();
+app.MapAccountEndpoints();
 
-// Initialize database
-await DatabaseInitializer.InitializeAsync(app.Services);
+await app.SeedIdentityAsync();
 
-app.Run();
+await app.RunAsync();

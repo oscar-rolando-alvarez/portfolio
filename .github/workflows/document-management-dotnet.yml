@@ -1,0 +1,101 @@
+name: document-management-dotnet
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "document-management-dotnet/**"
+      - ".github/workflows/document-management-dotnet.yml"
+  pull_request:
+    paths:
+      - "document-management-dotnet/**"
+      - ".github/workflows/document-management-dotnet.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: document-management-dotnet
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: document-management-dotnet/global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: nuget-dms-${{ runner.os }}-${{ hashFiles('document-management-dotnet/Directory.Packages.props', 'document-management-dotnet/**/*.csproj') }}
+          restore-keys: nuget-dms-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore DocumentManagement.slnx
+
+      - name: Build (warnings as errors)
+        run: dotnet build DocumentManagement.slnx --configuration Release --no-restore
+
+      - name: Unit tests
+        run: >-
+          dotnet test --project tests/DocumentManagement.UnitTests --configuration Release --no-build
+          --report-trx --results-directory ${{ github.workspace }}/test-results/unit
+          --coverage --coverage-output-format cobertura
+
+      # Testcontainers starts PostgreSQL on the runner's Docker daemon.
+      - name: Integration tests (Testcontainers)
+        run: >-
+          dotnet test --project tests/DocumentManagement.IntegrationTests --configuration Release --no-build
+          --report-trx --results-directory ${{ github.workspace }}/test-results/integration
+
+      - name: Vulnerable package gate (high/critical)
+        run: |
+          dotnet list DocumentManagement.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -qiE '\b(High|Critical)\b' vulnerable.txt; then
+            echo "::error::High or critical vulnerabilities found in NuGet dependencies"
+            exit 1
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: document-management-test-results
+          path: ${{ github.workspace }}/test-results
+          if-no-files-found: ignore
+
+  container-image:
+    name: Container image
+    runs-on: ubuntu-latest
+    needs: build-test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: document-management-dotnet
+          file: document-management-dotnet/Dockerfile
+          tags: document-management/api:ci
+          push: false
+          cache-from: type=gha,scope=document-management
+          cache-to: type=gha,mode=max,scope=document-management

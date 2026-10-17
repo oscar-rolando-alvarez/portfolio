@@ -13,10 +13,6 @@ public class DocumentComment : BaseEntity
     public DateTime? ResolvedAt { get; private set; }
     public string? ResolvedBy { get; private set; }
 
-    // Navigation properties
-    public Document Document { get; private set; } = null!;
-    public DocumentComment? ParentComment { get; private set; }
-    public virtual ICollection<DocumentComment> Replies { get; private set; } = new List<DocumentComment>();
 
     private DocumentComment() { } // For EF Core
 

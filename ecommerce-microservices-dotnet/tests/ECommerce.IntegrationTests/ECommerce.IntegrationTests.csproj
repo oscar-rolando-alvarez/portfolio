@@ -1,31 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
-    <PackageReference Include="xunit" Version="2.6.1" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
-    <PackageReference Include="Testcontainers" Version="3.6.0" />
-    <PackageReference Include="Testcontainers.MsSql" Version="3.6.0" />
-    <PackageReference Include="Testcontainers.MongoDb" Version="3.6.0" />
-    <PackageReference Include="Testcontainers.Redis" Version="3.6.0" />
-    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
+    <PackageReference Include="Testcontainers.MongoDb" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.Redis" />
+    <PackageReference Include="xunit.v3" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/Services/Catalog/ECommerce.Services.Catalog/ECommerce.Services.Catalog.csproj" />
-    <ProjectReference Include="../../src/Services/Basket/ECommerce.Services.Basket/ECommerce.Services.Basket.csproj" />
-    <ProjectReference Include="../../src/Services/Ordering/ECommerce.Services.Ordering/ECommerce.Services.Ordering.csproj" />
-    <ProjectReference Include="../../src/Shared/ECommerce.Shared.Contracts/ECommerce.Shared.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Services\Basket\ECommerce.Services.Basket\ECommerce.Services.Basket.csproj" />
+    <ProjectReference Include="..\..\src\Services\Catalog\ECommerce.Services.Catalog\ECommerce.Services.Catalog.csproj" />
+    <ProjectReference Include="..\..\src\Services\Identity\ECommerce.Services.Identity\ECommerce.Services.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Services\Ordering\ECommerce.Services.Ordering\ECommerce.Services.Ordering.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+    <Using Include="Xunit" />
   </ItemGroup>
 
 </Project>

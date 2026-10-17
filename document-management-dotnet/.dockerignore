@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/*.user
+**/TestResults/
+src/DocumentManagement.Api/storage/
+tests/
+.env
+*.md

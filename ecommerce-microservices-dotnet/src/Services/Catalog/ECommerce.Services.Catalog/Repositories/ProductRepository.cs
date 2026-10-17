@@ -1,126 +1,108 @@
+using System.Text.RegularExpressions;
 using ECommerce.Services.Catalog.Data;
 using ECommerce.Services.Catalog.Models;
-using ECommerce.Shared.Common.Models;
+using ECommerce.Services.Catalog.Services;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace ECommerce.Services.Catalog.Repositories;
 
-public class ProductRepository : IProductRepository
+public interface IProductRepository
 {
-    private readonly ICatalogContext _context;
+    Task<Product?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
-    public ProductRepository(ICatalogContext context)
+    Task<Product?> GetBySkuAsync(string sku, CancellationToken cancellationToken = default);
+
+    Task<(IReadOnlyList<Product> Items, long TotalCount)> GetPageAsync(
+        int pageNumber, int pageSize, string? category, string? searchTerm, CancellationToken cancellationToken = default);
+
+    Task CreateAsync(Product product, CancellationToken cancellationToken = default);
+
+    Task<bool> ReplaceAsync(Product product, CancellationToken cancellationToken = default);
+
+    Task<bool> DeactivateAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateStockAsync(Guid id, int newStock, CancellationToken cancellationToken = default);
+}
+
+public sealed class ProductRepository(CatalogContext context) : IProductRepository
+{
+    private static readonly FilterDefinitionBuilder<Product> Filter = Builders<Product>.Filter;
+
+    public async Task<Product?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
+        await context.Products.Find(p => p.Id == id && p.IsActive).FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<Product?> GetBySkuAsync(string sku, CancellationToken cancellationToken = default) =>
+        await context.Products.Find(p => p.Sku == sku).FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<(IReadOnlyList<Product> Items, long TotalCount)> GetPageAsync(
+        int pageNumber, int pageSize, string? category, string? searchTerm, CancellationToken cancellationToken = default)
     {
-        _context = context;
-    }
+        var filter = Filter.Eq(p => p.IsActive, true);
 
-    public async Task<IEnumerable<Product>> GetProductsAsync()
-    {
-        return await _context.Products
-            .Find(p => p.IsActive)
-            .ToListAsync();
-    }
-
-    public async Task<Product?> GetProductAsync(Guid id)
-    {
-        return await _context.Products
-            .Find(p => p.Id == id && p.IsActive)
-            .FirstOrDefaultAsync();
-    }
-
-    public async Task<Product?> GetProductBySkuAsync(string sku)
-    {
-        return await _context.Products
-            .Find(p => p.Sku == sku && p.IsActive)
-            .FirstOrDefaultAsync();
-    }
-
-    public async Task<PagedResult<Product>> GetProductsPagedAsync(int pageNumber, int pageSize, string? category = null, string? searchTerm = null)
-    {
-        var filterBuilder = Builders<Product>.Filter;
-        var filter = filterBuilder.Eq(p => p.IsActive, true);
-
-        if (!string.IsNullOrEmpty(category))
+        if (!string.IsNullOrWhiteSpace(category))
         {
-            filter = filterBuilder.And(filter, filterBuilder.Eq(p => p.Category, category));
+            filter &= Filter.Eq(p => p.Category, category);
         }
 
-        if (!string.IsNullOrEmpty(searchTerm))
+        if (!string.IsNullOrWhiteSpace(searchTerm))
         {
-            var searchFilter = filterBuilder.Or(
-                filterBuilder.Regex(p => p.Name, new MongoDB.Bson.BsonRegularExpression(searchTerm, "i")),
-                filterBuilder.Regex(p => p.Description, new MongoDB.Bson.BsonRegularExpression(searchTerm, "i"))
-            );
-            filter = filterBuilder.And(filter, searchFilter);
+            // Escape user input so it is matched literally (no regex injection / ReDoS).
+            var pattern = new BsonRegularExpression(Regex.Escape(searchTerm.Trim()), "i");
+            filter &= Filter.Or(
+                Filter.Regex(p => p.Name, pattern),
+                Filter.Regex(p => p.Description, pattern),
+                Filter.AnyEq(p => p.Tags, searchTerm.Trim().ToLowerInvariant()));
         }
 
-        var totalCount = await _context.Products.CountDocumentsAsync(filter);
-        var items = await _context.Products
+        var totalCount = await context.Products.CountDocumentsAsync(filter, cancellationToken: cancellationToken);
+        var items = await context.Products
             .Find(filter)
+            .SortBy(p => p.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Limit(pageSize)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
-        return new PagedResult<Product>(items, (int)totalCount, pageNumber, pageSize);
+        return (items, totalCount);
     }
 
-    public async Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category)
+    public async Task CreateAsync(Product product, CancellationToken cancellationToken = default)
     {
-        return await _context.Products
-            .Find(p => p.Category == category && p.IsActive)
-            .ToListAsync();
+        try
+        {
+            await context.Products.InsertOneAsync(product, cancellationToken: cancellationToken);
+        }
+        catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            // The unique SKU index is the source of truth when two requests race.
+            throw new DuplicateSkuException(product.Sku);
+        }
     }
 
-    public async Task<IEnumerable<Product>> SearchProductsAsync(string searchTerm)
-    {
-        var filter = Builders<Product>.Filter.And(
-            Builders<Product>.Filter.Eq(p => p.IsActive, true),
-            Builders<Product>.Filter.Or(
-                Builders<Product>.Filter.Regex(p => p.Name, new MongoDB.Bson.BsonRegularExpression(searchTerm, "i")),
-                Builders<Product>.Filter.Regex(p => p.Description, new MongoDB.Bson.BsonRegularExpression(searchTerm, "i")),
-                Builders<Product>.Filter.AnyIn(p => p.Tags, new[] { searchTerm })
-            )
-        );
-
-        return await _context.Products
-            .Find(filter)
-            .ToListAsync();
-    }
-
-    public async Task<Product> CreateProductAsync(Product product)
-    {
-        product.CreatedAt = DateTime.UtcNow;
-        await _context.Products.InsertOneAsync(product);
-        return product;
-    }
-
-    public async Task<bool> UpdateProductAsync(Product product)
+    public async Task<bool> ReplaceAsync(Product product, CancellationToken cancellationToken = default)
     {
         product.UpdatedAt = DateTime.UtcNow;
-        var result = await _context.Products
-            .ReplaceOneAsync(p => p.Id == product.Id, product);
-        return result.IsAcknowledged && result.ModifiedCount > 0;
+        var result = await context.Products.ReplaceOneAsync(p => p.Id == product.Id, product, cancellationToken: cancellationToken);
+        return result.IsAcknowledged && result.MatchedCount > 0;
     }
 
-    public async Task<bool> DeleteProductAsync(Guid id)
+    public async Task<bool> DeactivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var update = Builders<Product>.Update
             .Set(p => p.IsActive, false)
             .Set(p => p.UpdatedAt, DateTime.UtcNow);
 
-        var result = await _context.Products
-            .UpdateOneAsync(p => p.Id == id, update);
-        return result.IsAcknowledged && result.ModifiedCount > 0;
+        var result = await context.Products.UpdateOneAsync(p => p.Id == id && p.IsActive, update, cancellationToken: cancellationToken);
+        return result.IsAcknowledged && result.MatchedCount > 0;
     }
 
-    public async Task<bool> UpdateStockAsync(Guid productId, int newStock)
+    public async Task<bool> UpdateStockAsync(Guid id, int newStock, CancellationToken cancellationToken = default)
     {
         var update = Builders<Product>.Update
             .Set(p => p.StockQuantity, newStock)
             .Set(p => p.UpdatedAt, DateTime.UtcNow);
 
-        var result = await _context.Products
-            .UpdateOneAsync(p => p.Id == productId, update);
-        return result.IsAcknowledged && result.ModifiedCount > 0;
+        var result = await context.Products.UpdateOneAsync(p => p.Id == id && p.IsActive, update, cancellationToken: cancellationToken);
+        return result.IsAcknowledged && result.MatchedCount > 0;
     }
 }

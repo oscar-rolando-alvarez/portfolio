@@ -1,296 +1,567 @@
+# Application tier. Images are built from the shared Dockerfile (see README).
+# Secrets come from the 'ecommerce-secrets' Secret; create it out-of-band (see secrets.example.yaml).
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: identity-service
+  name: identity
   namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: identity
+    app.kubernetes.io/part-of: ecommerce
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: identity-service
+      app.kubernetes.io/name: identity
   template:
     metadata:
       labels:
-        app: identity-service
+        app.kubernetes.io/name: identity
+        app.kubernetes.io/part-of: ecommerce
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: identity-service
-        image: ecommerce/identity-service:latest
+      - name: identity
+        image: ghcr.io/oscar-rolando-alvarez/ecommerce-identity:latest
         ports:
-        - containerPort: 80
+        - name: http
+          containerPort: 8080
         env:
         - name: ASPNETCORE_ENVIRONMENT
-          value: "Production"
-        - name: ConnectionStrings__DefaultConnection
-          value: "Server=sqlserver;Database=ECommerceIdentity;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
+          value: Production
+        - name: OTEL_SERVICE_NAME
+          value: identity
+        - name: Jwt__SigningKey
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: jwt-signing-key
+        - name: ConnectionStrings__identitydb
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: identitydb
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        startupProbe:
+          httpGet:
+            path: /alive
+            port: http
+          failureThreshold: 30
+          periodSeconds: 2
         livenessProbe:
           httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 30
+            path: /alive
+            port: http
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 80
-          initialDelaySeconds: 5
+            port: http
           periodSeconds: 5
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: identity-service
+  name: identity
   namespace: ecommerce
 spec:
+  type: ClusterIP
   selector:
-    app: identity-service
+    app.kubernetes.io/name: identity
   ports:
-  - port: 80
-    targetPort: 80
+  - name: http
+    port: 80
+    targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: catalog-service
+  name: catalog
   namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/part-of: ecommerce
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: catalog-service
+      app.kubernetes.io/name: catalog
   template:
     metadata:
       labels:
-        app: catalog-service
+        app.kubernetes.io/name: catalog
+        app.kubernetes.io/part-of: ecommerce
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: catalog-service
-        image: ecommerce/catalog-service:latest
+      - name: catalog
+        image: ghcr.io/oscar-rolando-alvarez/ecommerce-catalog:latest
         ports:
-        - containerPort: 80
+        - name: http
+          containerPort: 8080
         env:
         - name: ASPNETCORE_ENVIRONMENT
-          value: "Production"
-        - name: CatalogDatabase__ConnectionString
-          value: "mongodb://mongodb:27017"
-        - name: ConnectionStrings__RabbitMQ
-          value: "amqp://guest:guest@rabbitmq:5672"
+          value: Production
+        - name: OTEL_SERVICE_NAME
+          value: catalog
+        - name: Jwt__SigningKey
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: jwt-signing-key
+        - name: ConnectionStrings__catalogdb
+          value: "mongodb://mongodb:27017/catalogdb"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        startupProbe:
+          httpGet:
+            path: /alive
+            port: http
+          failureThreshold: 30
+          periodSeconds: 2
         livenessProbe:
           httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 30
+            path: /alive
+            port: http
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 80
-          initialDelaySeconds: 5
+            port: http
           periodSeconds: 5
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: catalog-service
+  name: catalog
   namespace: ecommerce
 spec:
+  type: ClusterIP
   selector:
-    app: catalog-service
+    app.kubernetes.io/name: catalog
   ports:
-  - port: 80
-    targetPort: 80
+  - name: http
+    port: 80
+    targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: basket-service
+  name: basket
   namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: basket
+    app.kubernetes.io/part-of: ecommerce
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: basket-service
+      app.kubernetes.io/name: basket
   template:
     metadata:
       labels:
-        app: basket-service
+        app.kubernetes.io/name: basket
+        app.kubernetes.io/part-of: ecommerce
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: basket-service
-        image: ecommerce/basket-service:latest
+      - name: basket
+        image: ghcr.io/oscar-rolando-alvarez/ecommerce-basket:latest
         ports:
-        - containerPort: 80
+        - name: http
+          containerPort: 8080
         env:
         - name: ASPNETCORE_ENVIRONMENT
-          value: "Production"
-        - name: ConnectionStrings__Redis
+          value: Production
+        - name: OTEL_SERVICE_NAME
+          value: basket
+        - name: Jwt__SigningKey
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: jwt-signing-key
+        - name: ConnectionStrings__redis
           value: "redis:6379"
-        - name: ConnectionStrings__RabbitMQ
-          value: "amqp://guest:guest@rabbitmq:5672"
-        - name: Services__Catalog
-          value: "http://catalog-service:80"
+        - name: services__catalog__http__0
+          value: "http://catalog"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        startupProbe:
+          httpGet:
+            path: /alive
+            port: http
+          failureThreshold: 30
+          periodSeconds: 2
         livenessProbe:
           httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 30
+            path: /alive
+            port: http
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 80
-          initialDelaySeconds: 5
+            port: http
           periodSeconds: 5
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: basket-service
+  name: basket
   namespace: ecommerce
 spec:
+  type: ClusterIP
   selector:
-    app: basket-service
+    app.kubernetes.io/name: basket
   ports:
-  - port: 80
-    targetPort: 80
+  - name: http
+    port: 80
+    targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ordering-service
+  name: ordering
   namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: ordering
+    app.kubernetes.io/part-of: ecommerce
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: ordering-service
+      app.kubernetes.io/name: ordering
   template:
     metadata:
       labels:
-        app: ordering-service
+        app.kubernetes.io/name: ordering
+        app.kubernetes.io/part-of: ecommerce
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: ordering-service
-        image: ecommerce/ordering-service:latest
+      - name: ordering
+        image: ghcr.io/oscar-rolando-alvarez/ecommerce-ordering:latest
         ports:
-        - containerPort: 80
+        - name: http
+          containerPort: 8080
         env:
         - name: ASPNETCORE_ENVIRONMENT
-          value: "Production"
-        - name: ConnectionStrings__DefaultConnection
-          value: "Server=sqlserver;Database=ECommerceOrdering;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
-        - name: ConnectionStrings__RabbitMQ
-          value: "amqp://guest:guest@rabbitmq:5672"
+          value: Production
+        - name: OTEL_SERVICE_NAME
+          value: ordering
+        - name: Jwt__SigningKey
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: jwt-signing-key
+        - name: ConnectionStrings__orderingdb
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: orderingdb
+        - name: ConnectionStrings__messaging
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: messaging
+        - name: services__catalog__http__0
+          value: "http://catalog"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        startupProbe:
+          httpGet:
+            path: /alive
+            port: http
+          failureThreshold: 30
+          periodSeconds: 2
         livenessProbe:
           httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 30
+            path: /alive
+            port: http
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 80
-          initialDelaySeconds: 5
+            port: http
           periodSeconds: 5
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ordering-service
+  name: ordering
   namespace: ecommerce
 spec:
+  type: ClusterIP
   selector:
-    app: ordering-service
+    app.kubernetes.io/name: ordering
   ports:
-  - port: 80
-    targetPort: 80
+  - name: http
+    port: 80
+    targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: payment-service
+  name: payment
   namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: payment
+    app.kubernetes.io/part-of: ecommerce
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: payment-service
+      app.kubernetes.io/name: payment
   template:
     metadata:
       labels:
-        app: payment-service
+        app.kubernetes.io/name: payment
+        app.kubernetes.io/part-of: ecommerce
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: payment-service
-        image: ecommerce/payment-service:latest
+      - name: payment
+        image: ghcr.io/oscar-rolando-alvarez/ecommerce-payment:latest
         ports:
-        - containerPort: 80
+        - name: http
+          containerPort: 8080
         env:
         - name: ASPNETCORE_ENVIRONMENT
-          value: "Production"
-        - name: ConnectionStrings__DefaultConnection
-          value: "Server=sqlserver;Database=ECommercePayment;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
-        - name: ConnectionStrings__RabbitMQ
-          value: "amqp://guest:guest@rabbitmq:5672"
+          value: Production
+        - name: OTEL_SERVICE_NAME
+          value: payment
+        - name: Jwt__SigningKey
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: jwt-signing-key
+        - name: ConnectionStrings__paymentdb
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: paymentdb
+        - name: ConnectionStrings__messaging
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: messaging
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        startupProbe:
+          httpGet:
+            path: /alive
+            port: http
+          failureThreshold: 30
+          periodSeconds: 2
         livenessProbe:
           httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 30
+            path: /alive
+            port: http
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 80
-          initialDelaySeconds: 5
+            port: http
           periodSeconds: 5
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: payment-service
+  name: payment
   namespace: ecommerce
 spec:
+  type: ClusterIP
   selector:
-    app: payment-service
+    app.kubernetes.io/name: payment
   ports:
-  - port: 80
-    targetPort: 80
+  - name: http
+    port: 80
+    targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-gateway
+  name: gateway
   namespace: ecommerce
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: ecommerce
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: api-gateway
+      app.kubernetes.io/name: gateway
   template:
     metadata:
       labels:
-        app: api-gateway
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/part-of: ecommerce
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: api-gateway
-        image: ecommerce/api-gateway:latest
+      - name: gateway
+        image: ghcr.io/oscar-rolando-alvarez/ecommerce-gateway:latest
         ports:
-        - containerPort: 80
+        - name: http
+          containerPort: 8080
         env:
         - name: ASPNETCORE_ENVIRONMENT
-          value: "Production"
+          value: Production
+        - name: OTEL_SERVICE_NAME
+          value: gateway
+        - name: Jwt__SigningKey
+          valueFrom:
+            secretKeyRef:
+              name: ecommerce-secrets
+              key: jwt-signing-key
+        - name: services__identity__http__0
+          value: "http://identity"
+        - name: services__catalog__http__0
+          value: "http://catalog"
+        - name: services__basket__http__0
+          value: "http://basket"
+        - name: services__ordering__http__0
+          value: "http://ordering"
+        - name: services__payment__http__0
+          value: "http://payment"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        startupProbe:
+          httpGet:
+            path: /alive
+            port: http
+          failureThreshold: 30
+          periodSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /alive
+            port: http
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          periodSeconds: 5
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: api-gateway
+  name: gateway
   namespace: ecommerce
 spec:
-  selector:
-    app: api-gateway
-  ports:
-  - port: 80
-    targetPort: 80
   type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
