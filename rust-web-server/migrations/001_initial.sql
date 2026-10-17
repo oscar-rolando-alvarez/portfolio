@@ -1,4 +1,5 @@
--- Initial migration for the Rust web server
+-- Initial schema: users, tokens, uploaded files and sessions.
+-- Requires PostgreSQL 13+ (gen_random_uuid is built in).
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -7,16 +8,15 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    is_verified BOOLEAN DEFAULT false,
-    roles TEXT[] DEFAULT ARRAY['user'],
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    is_verified BOOLEAN NOT NULL DEFAULT false,
+    roles TEXT[] NOT NULL DEFAULT ARRAY['user'],
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_login TIMESTAMPTZ
 );
 
 -- Indexes for users table
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_roles ON users USING GIN(roles);
 
@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token_hash VARCHAR(255) NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    is_revoked BOOLEAN DEFAULT false
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_revoked BOOLEAN NOT NULL DEFAULT false
 );
 
 -- Indexes for refresh tokens
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS files (
     size BIGINT NOT NULL,
     content_type VARCHAR(255) NOT NULL,
     file_path VARCHAR(1000) NOT NULL,
-    uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Indexes for files table

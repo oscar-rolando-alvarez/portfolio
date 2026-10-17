@@ -1,436 +1,257 @@
-use crate::{
-    error::AppError,
-    models::{
-        auth::*,
-        user::{User, UserResponse},
-    },
-    AppState,
-};
-use actix_web::{web, HttpRequest, HttpResponse, Result};
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use std::time::Duration;
+
+use actix_web::{HttpResponse, web};
+use chrono::Utc;
 use sqlx::Row;
-use std::collections::HashMap;
 use uuid::Uuid;
 use validator::Validate;
 
-/// Register a new user
+use crate::{
+    AppState,
+    error::AppError,
+    middleware::auth::AuthUser,
+    models::{
+        auth::{
+            AuthResponse, ChangePasswordRequest, LoginRequest, RefreshTokenRequest,
+            RefreshTokenResponse, RegisterRequest, Role, UserInfo,
+        },
+        user::{User, UserResponse},
+    },
+    services::security::{
+        ACCESS_AUDIENCE, REFRESH_AUDIENCE, decode_token, hash_password, hash_token, issue_token,
+        revoked_token_key, verify_password,
+    },
+};
+
+const DEFAULT_ROLE: Role = Role::User;
+
+/// `POST /api/auth/register`
 pub async fn register(
     body: web::Json<RegisterRequest>,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let email = body.email.trim().to_lowercase();
 
-    // Check if user already exists
-    let existing_user = sqlx::query("SELECT id FROM users WHERE email = $1")
-        .bind(&body.email)
-        .fetch_optional(data.db.pool())
-        .await?;
+    // Argon2 is CPU bound: keep it off the async executor threads.
+    let password = body.password.clone();
+    let password_hash = web::block(move || hash_password(&password))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))??;
 
-    if existing_user.is_some() {
-        return Err(AppError::BadRequest("User already exists".to_string()));
-    }
-
-    // Hash password
-    let password_hash = hash_password(&body.password)?;
-
-    // Create user
-    let user_id = Uuid::new_v4();
-    let now = Utc::now();
-
-    sqlx::query(
+    let roles = vec![DEFAULT_ROLE.as_str().to_string()];
+    let user = sqlx::query_as::<_, User>(
         r#"
-        INSERT INTO users (id, email, password_hash, first_name, last_name, roles, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO users (email, password_hash, first_name, last_name, roles)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (email) DO NOTHING
+        RETURNING *
         "#,
     )
-    .bind(user_id)
-    .bind(&body.email)
+    .bind(&email)
     .bind(&password_hash)
-    .bind(&body.first_name)
-    .bind(&body.last_name)
-    .bind(&vec!["user".to_string()])
-    .bind(now)
-    .bind(now)
-    .execute(data.db.pool())
-    .await?;
+    .bind(body.first_name.trim())
+    .bind(body.last_name.trim())
+    .bind(&roles)
+    .fetch_optional(state.db.pool())
+    .await?
+    .ok_or_else(|| AppError::Conflict("a user with this email already exists".into()))?;
 
-    // Generate tokens
-    let (access_token, refresh_token) = generate_tokens(
-        user_id,
-        &body.email,
-        &vec!["user".to_string()],
-        &data.config.jwt,
-    )?;
-
-    // Store refresh token
-    store_refresh_token(user_id, &refresh_token, &data).await?;
-
-    // Update metrics
-    data.metrics.increment_user_registrations();
-
-    let response = AuthResponse {
-        access_token,
-        refresh_token,
-        token_type: "Bearer".to_string(),
-        expires_in: data.config.jwt.expiration,
-        user: UserInfo {
-            id: user_id,
-            email: body.email.clone(),
-            first_name: body.first_name.clone(),
-            last_name: body.last_name.clone(),
-            roles: vec!["user".to_string()],
-            permissions: Role::User.permissions().iter().map(|p| p.as_str().to_string()).collect(),
-            created_at: now,
-            updated_at: now,
-        },
-    };
-
+    let response = issue_session(&state, &user).await?;
+    state.metrics.user_registrations_total.inc();
     Ok(HttpResponse::Created().json(response))
 }
 
-/// Login user
+/// `POST /api/auth/login`
 pub async fn login(
     body: web::Json<LoginRequest>,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
+    let email = body.email.trim().to_lowercase();
 
-    // Find user
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE email = $1 AND is_active = true"
-    )
-    .bind(&body.email)
-    .fetch_optional(data.db.pool())
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+    let user =
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1 AND is_active = true")
+            .bind(&email)
+            .fetch_optional(state.db.pool())
+            .await?;
 
-    // Verify password
-    if !verify_password(&body.password, &user.password_hash)? {
-        return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+    let invalid = || AppError::Unauthorized("invalid credentials".into());
+    let user = user.ok_or_else(invalid)?;
+
+    let password = body.password.clone();
+    let hash = user.password_hash.clone();
+    let valid = web::block(move || verify_password(&password, &hash))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))??;
+    if !valid {
+        return Err(invalid());
     }
 
-    // Update last login
-    sqlx::query("UPDATE users SET last_login = $1 WHERE id = $2")
-        .bind(Utc::now())
+    sqlx::query("UPDATE users SET last_login = NOW() WHERE id = $1")
         .bind(user.id)
-        .execute(data.db.pool())
+        .execute(state.db.pool())
         .await?;
 
-    // Generate tokens
-    let permissions: Vec<String> = user.roles
-        .iter()
-        .flat_map(|role| {
-            if let Some(r) = Role::from_str(role) {
-                r.permissions().iter().map(|p| p.as_str().to_string()).collect()
-            } else {
-                vec![]
-            }
-        })
-        .collect();
+    let response = issue_session(&state, &user).await?;
+    state.metrics.user_logins_total.inc();
+    Ok(HttpResponse::Ok().json(response))
+}
 
-    let (access_token, refresh_token) = generate_tokens(
+/// `POST /api/auth/refresh` - exchanges a valid refresh token for a new access token.
+pub async fn refresh_token(
+    body: web::Json<RefreshTokenRequest>,
+    state: web::Data<AppState>,
+) -> Result<HttpResponse, AppError> {
+    let claims = decode_token(&state.config, &body.refresh_token, REFRESH_AUDIENCE)
+        .map_err(|_| AppError::Unauthorized("invalid refresh token".into()))?;
+
+    let record = sqlx::query(
+        r#"
+        SELECT user_id FROM refresh_tokens
+        WHERE token_hash = $1 AND is_revoked = false AND expires_at > NOW()
+        "#,
+    )
+    .bind(hash_token(&body.refresh_token))
+    .fetch_optional(state.db.pool())
+    .await?
+    .ok_or_else(|| AppError::Unauthorized("refresh token revoked or expired".into()))?;
+
+    let user_id: Uuid = record.try_get("user_id")?;
+    if user_id != claims.sub {
+        return Err(AppError::Unauthorized("invalid refresh token".into()));
+    }
+
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1 AND is_active = true")
+        .bind(user_id)
+        .fetch_optional(state.db.pool())
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("user not found".into()))?;
+
+    let access_token = issue_token(
+        &state.config,
         user.id,
         &user.email,
         &user.roles,
-        &data.config.jwt,
+        ACCESS_AUDIENCE,
     )?;
 
-    // Store refresh token
-    store_refresh_token(user.id, &refresh_token, &data).await?;
-
-    // Update metrics
-    data.metrics.increment_user_logins();
-
-    let response = AuthResponse {
+    Ok(HttpResponse::Ok().json(RefreshTokenResponse {
         access_token,
-        refresh_token,
-        token_type: "Bearer".to_string(),
-        expires_in: data.config.jwt.expiration,
-        user: UserInfo {
-            id: user.id,
-            email: user.email,
-            first_name: user.first_name,
-            last_name: user.last_name,
-            roles: user.roles,
-            permissions,
-            created_at: user.created_at,
-            updated_at: user.updated_at,
-        },
-    };
-
-    Ok(HttpResponse::Ok().json(response))
+        token_type: "Bearer".into(),
+        expires_in: state.config.jwt.expiration,
+    }))
 }
 
-/// Refresh access token
-pub async fn refresh_token(
-    body: web::Json<RefreshTokenRequest>,
-    data: web::Data<AppState>,
-) -> Result<HttpResponse, AppError> {
-    // Verify refresh token
-    let token_hash = hash_token(&body.refresh_token);
-    
-    let refresh_token_record = sqlx::query(
-        r#"
-        SELECT user_id, expires_at FROM refresh_tokens 
-        WHERE token_hash = $1 AND is_revoked = false
-        "#
-    )
-    .bind(&token_hash)
-    .fetch_optional(data.db.pool())
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("Invalid refresh token".to_string()))?;
+/// `POST /api/v1/user/logout` - revokes refresh tokens and deny-lists the current access token.
+pub async fn logout(user: AuthUser, state: web::Data<AppState>) -> Result<HttpResponse, AppError> {
+    sqlx::query("UPDATE refresh_tokens SET is_revoked = true WHERE user_id = $1")
+        .bind(user.0.sub)
+        .execute(state.db.pool())
+        .await?;
 
-    let user_id: Uuid = refresh_token_record.get("user_id");
-    let expires_at: chrono::DateTime<Utc> = refresh_token_record.get("expires_at");
+    let remaining = user
+        .0
+        .exp
+        .saturating_sub(Utc::now().timestamp().max(0) as u64);
+    state
+        .cache
+        .set(
+            &revoked_token_key(&user.0.jti),
+            &true,
+            Some(Duration::from_secs(remaining.max(1))),
+        )
+        .await?;
 
-    if Utc::now() > expires_at {
-        return Err(AppError::Unauthorized("Refresh token expired".to_string()));
-    }
-
-    // Get user
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE id = $1 AND is_active = true"
-    )
-    .bind(user_id)
-    .fetch_optional(data.db.pool())
-    .await?
-    .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
-
-    // Generate new access token
-    let claims = Claims {
-        sub: user.id,
-        email: user.email.clone(),
-        roles: user.roles.clone(),
-        permissions: user.roles
-            .iter()
-            .flat_map(|role| {
-                if let Some(r) = Role::from_str(role) {
-                    r.permissions().iter().map(|p| p.as_str().to_string()).collect()
-                } else {
-                    vec![]
-                }
-            })
-            .collect(),
-        exp: (Utc::now() + Duration::seconds(data.config.jwt.expiration)).timestamp() as usize,
-        iat: Utc::now().timestamp() as usize,
-        nbf: Utc::now().timestamp() as usize,
-        iss: "rust-web-server".to_string(),
-        aud: "api".to_string(),
-    };
-
-    let access_token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(data.config.jwt.secret.as_bytes()),
-    )?;
-
-    let response = RefreshTokenResponse {
-        access_token,
-        token_type: "Bearer".to_string(),
-        expires_in: data.config.jwt.expiration,
-    };
-
-    Ok(HttpResponse::Ok().json(response))
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "message": "Logged out successfully" })))
 }
 
-/// Logout user
-pub async fn logout(
-    req: HttpRequest,
-    data: web::Data<AppState>,
-) -> Result<HttpResponse, AppError> {
-    if let Some(claims) = req.extensions().get::<Claims>() {
-        // Revoke all refresh tokens for this user
-        sqlx::query("UPDATE refresh_tokens SET is_revoked = true WHERE user_id = $1")
-            .bind(claims.sub)
-            .execute(data.db.pool())
-            .await?;
-
-        // In a real application, you might also want to blacklist the current JWT token
-        // This would require storing it in Redis with its expiration time
-    }
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "Logged out successfully"
-    })))
-}
-
-/// Change password
+/// `PUT /api/v1/user/password`
 pub async fn change_password(
-    req: HttpRequest,
+    user: AuthUser,
     body: web::Json<ChangePasswordRequest>,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
     body.validate()?;
 
-    let claims = req
-        .extensions()
-        .get::<Claims>()
-        .ok_or_else(|| AppError::Unauthorized("User not authenticated".to_string()))?;
-
-    // Get current user
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-        .bind(claims.sub)
-        .fetch_optional(data.db.pool())
+    let record = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user.0.sub)
+        .fetch_optional(state.db.pool())
         .await?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+        .ok_or_else(|| AppError::NotFound("user not found".into()))?;
 
-    // Verify current password
-    if !verify_password(&body.current_password, &user.password_hash)? {
-        return Err(AppError::BadRequest("Current password is incorrect".to_string()));
-    }
+    let current = body.current_password.clone();
+    let new = body.new_password.clone();
+    let hash = record.password_hash;
+    let new_hash = web::block(move || -> Result<Option<String>, AppError> {
+        if verify_password(&current, &hash)? {
+            hash_password(&new).map(Some)
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))??
+    .ok_or_else(|| AppError::BadRequest("current password is incorrect".into()))?;
 
-    // Hash new password
-    let new_password_hash = hash_password(&body.new_password)?;
-
-    // Update password
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3")
-        .bind(&new_password_hash)
-        .bind(Utc::now())
-        .bind(claims.sub)
-        .execute(data.db.pool())
+    let mut tx = state.db.pool().begin().await?;
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(&new_hash)
+        .bind(user.0.sub)
+        .execute(&mut *tx)
         .await?;
-
-    // Revoke all refresh tokens to force re-login
     sqlx::query("UPDATE refresh_tokens SET is_revoked = true WHERE user_id = $1")
-        .bind(claims.sub)
-        .execute(data.db.pool())
+        .bind(user.0.sub)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "Password changed successfully"
-    })))
+    Ok(HttpResponse::Ok().json(serde_json::json!({ "message": "Password changed successfully" })))
 }
 
-/// Get current user profile
-pub async fn profile(
-    req: HttpRequest,
-    data: web::Data<AppState>,
-) -> Result<HttpResponse, AppError> {
-    let claims = req
-        .extensions()
-        .get::<Claims>()
-        .ok_or_else(|| AppError::Unauthorized("User not authenticated".to_string()))?;
-
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-        .bind(claims.sub)
-        .fetch_optional(data.db.pool())
+/// `GET /api/v1/user/profile`
+pub async fn profile(user: AuthUser, state: web::Data<AppState>) -> Result<HttpResponse, AppError> {
+    let record = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user.0.sub)
+        .fetch_optional(state.db.pool())
         .await?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+        .ok_or_else(|| AppError::NotFound("user not found".into()))?;
 
-    Ok(HttpResponse::Ok().json(UserResponse::from(user)))
+    Ok(HttpResponse::Ok().json(UserResponse::from(record)))
 }
 
-// Helper functions
-
-fn hash_password(password: &str) -> Result<String, AppError> {
-    let salt = uuid::Uuid::new_v4().to_string();
-    let argon2 = Argon2::default();
-    
-    argon2
-        .hash_password(password.as_bytes(), &salt.as_bytes())
-        .map(|hash| hash.to_string())
-        .map_err(|e| AppError::Internal(format!("Password hashing failed: {}", e)))
-}
-
-fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
-    let parsed_hash = PasswordHash::new(hash)
-        .map_err(|e| AppError::Internal(format!("Invalid password hash: {}", e)))?;
-    
-    Ok(Argon2::default()
-        .verify_password(password.as_bytes(), &parsed_hash)
-        .is_ok())
-}
-
-fn generate_tokens(
-    user_id: Uuid,
-    email: &str,
-    roles: &[String],
-    jwt_config: &crate::config::JwtConfig,
-) -> Result<(String, String), AppError> {
-    let now = Utc::now();
-    
-    let permissions: Vec<String> = roles
-        .iter()
-        .flat_map(|role| {
-            if let Some(r) = Role::from_str(role) {
-                r.permissions().iter().map(|p| p.as_str().to_string()).collect()
-            } else {
-                vec![]
-            }
-        })
-        .collect();
-
-    // Access token claims
-    let access_claims = Claims {
-        sub: user_id,
-        email: email.to_string(),
-        roles: roles.to_vec(),
-        permissions,
-        exp: (now + Duration::seconds(jwt_config.expiration)).timestamp() as usize,
-        iat: now.timestamp() as usize,
-        nbf: now.timestamp() as usize,
-        iss: "rust-web-server".to_string(),
-        aud: "api".to_string(),
-    };
-
-    // Refresh token claims (longer expiration, minimal data)
-    let refresh_claims = Claims {
-        sub: user_id,
-        email: email.to_string(),
-        roles: vec![],
-        permissions: vec![],
-        exp: (now + Duration::seconds(jwt_config.refresh_expiration)).timestamp() as usize,
-        iat: now.timestamp() as usize,
-        nbf: now.timestamp() as usize,
-        iss: "rust-web-server".to_string(),
-        aud: "refresh".to_string(),
-    };
-
-    let access_token = encode(
-        &Header::default(),
-        &access_claims,
-        &EncodingKey::from_secret(jwt_config.secret.as_bytes()),
-    )?;
-
-    let refresh_token = encode(
-        &Header::default(),
-        &refresh_claims,
-        &EncodingKey::from_secret(jwt_config.secret.as_bytes()),
-    )?;
-
-    Ok((access_token, refresh_token))
-}
-
-async fn store_refresh_token(
-    user_id: Uuid,
-    refresh_token: &str,
-    data: &web::Data<AppState>,
-) -> Result<(), AppError> {
-    let token_hash = hash_token(refresh_token);
-    let expires_at = Utc::now() + Duration::seconds(data.config.jwt.refresh_expiration);
+/// Issues an access/refresh token pair and persists the refresh token hash.
+async fn issue_session(state: &AppState, user: &User) -> Result<AuthResponse, AppError> {
+    let config = &state.config;
+    let access_token = issue_token(config, user.id, &user.email, &user.roles, ACCESS_AUDIENCE)?;
+    let refresh_token = issue_token(config, user.id, &user.email, &user.roles, REFRESH_AUDIENCE)?;
 
     sqlx::query(
         r#"
-        INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+        VALUES ($1, $2, NOW() + make_interval(secs => $3))
         "#,
     )
-    .bind(Uuid::new_v4())
-    .bind(user_id)
-    .bind(token_hash)
-    .bind(expires_at)
-    .bind(Utc::now())
-    .execute(data.db.pool())
+    .bind(user.id)
+    .bind(hash_token(&refresh_token))
+    .bind(config.jwt.refresh_expiration as f64)
+    .execute(state.db.pool())
     .await?;
 
-    Ok(())
-}
-
-fn hash_token(token: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    format!("{:x}", hasher.finalize())
+    Ok(AuthResponse {
+        access_token,
+        refresh_token,
+        token_type: "Bearer".into(),
+        expires_in: config.jwt.expiration,
+        user: UserInfo {
+            id: user.id,
+            email: user.email.clone(),
+            first_name: user.first_name.clone(),
+            last_name: user.last_name.clone(),
+            roles: user.roles.clone(),
+            permissions: Role::permissions_for(&user.roles),
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+        },
+    })
 }

@@ -1,24 +1,29 @@
-use crate::{error::AppError, models::auth::Claims, AppState};
-use actix_web::{dev::ServiceRequest, web, Error, HttpMessage};
-use actix_web_httpauth::extractors::bearer::BearerAuth;
-use jsonwebtoken::{decode, DecodingKey, Validation};
-use std::sync::Arc;
+use std::future::{Ready, ready};
 
+use actix_web::{
+    Error, FromRequest, HttpMessage, HttpRequest, dev::Payload, dev::ServiceRequest, web,
+};
+use actix_web_httpauth::extractors::bearer::BearerAuth;
+
+use crate::{
+    AppState,
+    error::AppError,
+    models::auth::{Claims, Role},
+    services::security::{ACCESS_AUDIENCE, decode_token, revoked_token_key},
+};
+
+/// Validator for `actix_web_httpauth::middleware::HttpAuthentication::bearer`.
+///
+/// On success the decoded [`Claims`] are stored in the request extensions.
 pub async fn jwt_validator(
     req: ServiceRequest,
     credentials: BearerAuth,
 ) -> Result<ServiceRequest, (Error, ServiceRequest)> {
-    let app_state = req
-        .app_data::<web::Data<AppState>>()
-        .ok_or_else(|| {
-            (
-                AppError::Internal("App state not found".to_string()).into(),
-                req,
-            )
-        })?
-        .clone();
+    let Some(state) = req.app_data::<web::Data<AppState>>().cloned() else {
+        return Err((AppError::Internal("app state missing".into()).into(), req));
+    };
 
-    match validate_jwt_token(credentials.token(), &app_state).await {
+    match validate_access_token(credentials.token(), &state).await {
         Ok(claims) => {
             req.extensions_mut().insert(claims);
             Ok(req)
@@ -27,76 +32,44 @@ pub async fn jwt_validator(
     }
 }
 
-pub async fn validate_jwt_token(token: &str, app_state: &AppState) -> Result<Claims, AppError> {
-    let secret = &app_state.config.jwt.secret;
-    let algorithm = match app_state.config.jwt.algorithm.as_str() {
-        "HS256" => jsonwebtoken::Algorithm::HS256,
-        "HS384" => jsonwebtoken::Algorithm::HS384,
-        "HS512" => jsonwebtoken::Algorithm::HS512,
-        _ => jsonwebtoken::Algorithm::HS256,
-    };
-
-    let mut validation = Validation::new(algorithm);
-    validation.validate_exp = true;
-    validation.validate_nbf = true;
-
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    )
-    .map_err(|e| AppError::Unauthorized(format!("Invalid token: {}", e)))?;
-
-    // Check if token is blacklisted (optional - requires Redis)
-    let blacklist_key = format!("blacklist:token:{}", token);
-    if app_state.cache.exists(&blacklist_key).await.unwrap_or(false) {
-        return Err(AppError::Unauthorized("Token has been revoked".to_string()));
+/// Checks signature, expiry, audience and the Redis deny-list.
+pub async fn validate_access_token(token: &str, state: &AppState) -> Result<Claims, AppError> {
+    let claims = decode_token(&state.config, token, ACCESS_AUDIENCE)?;
+    // Fail closed: if Redis is unreachable we cannot prove the token was not revoked.
+    if state.cache.exists(&revoked_token_key(&claims.jti)).await? {
+        return Err(AppError::Unauthorized("token has been revoked".into()));
     }
-
-    Ok(token_data.claims)
+    Ok(claims)
 }
 
+/// Extractor giving handlers access to the authenticated user's claims.
 #[derive(Debug, Clone)]
-pub struct AuthenticatedUser {
-    pub user_id: uuid::Uuid,
-    pub email: String,
-    pub roles: Vec<String>,
-}
+pub struct AuthUser(pub Claims);
 
-impl From<Claims> for AuthenticatedUser {
-    fn from(claims: Claims) -> Self {
-        Self {
-            user_id: claims.sub,
-            email: claims.email,
-            roles: claims.roles,
-        }
-    }
-}
-
-// Role-based authorization helper
-pub fn require_role(required_role: &str) -> impl Fn(&Claims) -> Result<(), AppError> + '_ {
-    move |claims: &Claims| {
-        if claims.roles.contains(&required_role.to_string()) {
+impl AuthUser {
+    pub fn require_role(&self, role: Role) -> Result<(), AppError> {
+        if self.0.has_role(role) {
             Ok(())
         } else {
             Err(AppError::Forbidden(format!(
-                "Required role '{}' not found",
-                required_role
+                "role '{}' required",
+                role.as_str()
             )))
         }
     }
 }
 
-// Permission-based authorization helper
-pub fn require_permission(required_permission: &str) -> impl Fn(&Claims) -> Result<(), AppError> + '_ {
-    move |claims: &Claims| {
-        if claims.permissions.contains(&required_permission.to_string()) {
-            Ok(())
-        } else {
-            Err(AppError::Forbidden(format!(
-                "Required permission '{}' not found",
-                required_permission
-            )))
-        }
+impl FromRequest for AuthUser {
+    type Error = AppError;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
+        ready(
+            req.extensions()
+                .get::<Claims>()
+                .cloned()
+                .map(AuthUser)
+                .ok_or_else(|| AppError::Unauthorized("authentication required".into())),
+        )
     }
 }

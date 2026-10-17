@@ -1,16 +1,20 @@
-use crate::{config::Config, error::AppError};
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres, Row};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use tracing::{info, warn};
 
+use crate::{config::Config, error::AppError};
+
+/// Thin wrapper around a Postgres connection pool.
 #[derive(Clone)]
 pub struct DatabaseService {
-    pool: Pool<Postgres>,
+    pool: PgPool,
 }
 
 impl DatabaseService {
     pub async fn new(config: &Config) -> Result<Self, AppError> {
-        info!("Connecting to database: {}", config.database.url);
+        info!("connecting to Postgres");
 
         let pool = PgPoolOptions::new()
             .max_connections(config.database.max_connections)
@@ -20,90 +24,61 @@ impl DatabaseService {
             .max_lifetime(Duration::from_secs(config.database.max_lifetime))
             .connect(&config.database.url)
             .await
-            .map_err(|e| {
-                AppError::Database(format!("Failed to connect to database: {}", e))
-            })?;
-
-        // Test the connection
-        let _: (i64,) = sqlx::query_as("SELECT 1")
-            .fetch_one(&pool)
-            .await
-            .map_err(|e| AppError::Database(format!("Database health check failed: {}", e)))?;
-
-        info!("Database connection established successfully");
+            .map_err(|e| AppError::Database(format!("failed to connect to database: {e}")))?;
 
         Ok(Self { pool })
     }
 
-    pub fn pool(&self) -> &Pool<Postgres> {
+    pub fn from_pool(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 
+    /// Applies the embedded SQL migrations in `./migrations`.
     pub async fn migrate(&self) -> Result<(), AppError> {
-        info!("Running database migrations...");
-        
-        sqlx::migrate!("./migrations")
-            .run(&self.pool)
-            .await
-            .map_err(|e| AppError::Database(format!("Migration failed: {}", e)))?;
-
-        info!("Database migrations completed successfully");
+        info!("running database migrations");
+        sqlx::migrate!("./migrations").run(&self.pool).await?;
         Ok(())
     }
 
-    pub async fn health_check(&self) -> Result<DatabaseHealth, AppError> {
-        let start = std::time::Instant::now();
-        
-        // Test basic connectivity
-        let result: Result<(i64,), sqlx::Error> = sqlx::query_as("SELECT 1")
+    pub async fn health_check(&self) -> DatabaseHealth {
+        let start = Instant::now();
+        let result = sqlx::query_scalar::<_, i32>("SELECT 1")
             .fetch_one(&self.pool)
             .await;
-
-        let response_time = start.elapsed();
-        let is_healthy = result.is_ok();
-
-        if let Err(e) = result {
-            warn!("Database health check failed: {}", e);
+        if let Err(e) = &result {
+            warn!(error = %e, "database health check failed");
         }
 
-        // Get pool statistics
-        let pool_stats = PoolStats {
-            size: self.pool.size(),
-            idle: self.pool.num_idle(),
-            connections: self.pool.num_idle() + self.pool.size(),
-        };
-
-        Ok(DatabaseHealth {
-            healthy: is_healthy,
-            response_time_ms: response_time.as_millis() as u64,
-            pool_stats,
-        })
+        DatabaseHealth {
+            healthy: result.is_ok(),
+            response_time_ms: start.elapsed().as_millis() as u64,
+            pool: self.stats(),
+        }
     }
 
-    pub async fn get_stats(&self) -> DatabaseStats {
+    pub fn stats(&self) -> DatabaseStats {
+        let size = self.pool.size();
+        let idle = self.pool.num_idle() as u32;
         DatabaseStats {
-            pool_size: self.pool.size(),
-            idle_connections: self.pool.num_idle(),
-            active_connections: self.pool.size() - self.pool.num_idle(),
+            pool_size: size,
+            idle_connections: idle,
+            active_connections: size.saturating_sub(idle),
         }
     }
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DatabaseHealth {
     pub healthy: bool,
     pub response_time_ms: u64,
-    pub pool_stats: PoolStats,
+    pub pool: DatabaseStats,
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct PoolStats {
-    pub size: u32,
-    pub idle: u32,
-    pub connections: u32,
-}
-
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DatabaseStats {
     pub pool_size: u32,
     pub idle_connections: u32,

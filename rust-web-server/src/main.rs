@@ -1,149 +1,141 @@
+use std::{path::Path, time::Duration};
+
 use actix_cors::Cors;
 use actix_files::Files;
 use actix_web::{
-    middleware::{Compress, Logger, NormalizePath, TrailingSlash},
-    web, App, HttpServer,
+    App, HttpServer,
+    middleware::{Compress, DefaultHeaders, NormalizePath, TrailingSlash, from_fn},
+    web,
 };
-use actix_web_httpauth::middleware::HttpAuthentication;
-use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_actix_web::TracingLogger;
 
-mod config;
-mod error;
-mod handlers;
-mod middleware;
-mod models;
-mod routes;
-mod services;
-mod utils;
+use rust_web_server::{
+    AppResult, AppState,
+    config::Config,
+    configure_app,
+    middleware::{metrics, rate_limit},
+    telemetry,
+};
 
-#[cfg(feature = "graphql")]
-mod graphql;
+fn cors(allowed: &str) -> Cors {
+    let cors = Cors::default()
+        .allow_any_method()
+        .allow_any_header()
+        .max_age(3600);
+    if allowed.trim() == "*" {
+        cors.allow_any_origin()
+    } else {
+        allowed
+            .split(',')
+            .map(str::trim)
+            .filter(|o| !o.is_empty())
+            .fold(cors, |cors, origin| cors.allowed_origin(origin))
+    }
+}
 
-use config::Config;
-use error::AppError;
-use middleware::{auth, metrics, rate_limit};
-use services::{cache::CacheService, database::DatabaseService, metrics::MetricsService};
+/// `rust-web-server healthcheck`: probes the local liveness endpoint so that
+/// container health checks work without shipping curl in the image.
+fn healthcheck() -> std::process::ExitCode {
+    use std::io::{Read, Write};
 
-type AppResult<T> = Result<T, AppError>;
+    let port = std::env::var("APP_PORT").unwrap_or_else(|_| "8080".into());
+    let probe = || -> std::io::Result<bool> {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port.parse().unwrap_or(8080)))?;
+        stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+        stream.write_all(
+            b"GET /api/health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )?;
+        let mut response = String::new();
+        stream.read_to_string(&mut response)?;
+        Ok(response.starts_with("HTTP/1.1 200"))
+    };
+    match probe() {
+        Ok(true) => std::process::ExitCode::SUCCESS,
+        _ => std::process::ExitCode::FAILURE,
+    }
+}
 
-#[derive(Clone)]
-pub struct AppState {
-    pub config: Arc<Config>,
-    pub db: Arc<DatabaseService>,
-    pub cache: Arc<CacheService>,
-    pub metrics: Arc<MetricsService>,
+fn main() -> std::process::ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        return healthcheck();
+    }
+    match serve() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("fatal: {err}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
 
 #[actix_web::main]
-async fn main() -> AppResult<()> {
-    // Initialize tracing
-    utils::logging::init_logging()?;
+async fn serve() -> AppResult<()> {
+    let config = Config::from_env()?;
+    let _telemetry = telemetry::init(&config.logging)?;
 
-    // Load configuration
-    let config = Arc::new(Config::from_env()?);
-    info!("Starting rust-web-server on {}:{}", config.host, config.port);
+    info!(
+        host = %config.host,
+        port = config.port,
+        environment = %config.environment,
+        "starting {} v{}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+    );
 
-    // Initialize services
-    let db = Arc::new(DatabaseService::new(&config).await?);
-    let cache = Arc::new(CacheService::new(&config).await?);
-    let metrics = Arc::new(MetricsService::new());
+    let state = AppState::connect(config).await?;
+    state.db.migrate().await?;
 
-    // Run database migrations
-    db.migrate().await?;
+    // Periodically drop rate-limiter state for idle clients.
+    if let Some(limiter) = state.rate_limiter.clone() {
+        actix_web::rt::spawn(async move {
+            let mut tick = actix_web::rt::time::interval(Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                limiter.cleanup();
+            }
+        });
+    }
 
-    // Create app state
-    let app_state = AppState {
-        config: config.clone(),
-        db,
-        cache,
-        metrics,
-    };
+    let config = state.config.clone();
+    let data = web::Data::new(state);
+    let serve_static = Path::new(&config.static_dir).is_dir();
+    let static_dir = config.static_dir.clone();
+    let cors_origins = config.cors_allowed_origins.clone();
 
-    // Create HTTP server
-    let server = HttpServer::new(move || {
-        let cors = Cors::default()
-            .allow_any_origin()
-            .allow_any_method()
-            .allow_any_header()
-            .max_age(3600);
-
-        let auth = HttpAuthentication::bearer(auth::jwt_validator);
-
+    // Actix installs SIGINT/SIGTERM handlers and drains in-flight requests
+    // for up to `shutdown_timeout` seconds.
+    HttpServer::new(move || {
         let mut app = App::new()
-            .app_data(web::Data::new(app_state.clone()))
-            .wrap(TracingLogger::default())
-            .wrap(Logger::default())
-            .wrap(Compress::default())
+            .app_data(data.clone())
+            .app_data(web::JsonConfig::default().limit(256 * 1024))
+            .wrap(from_fn(rate_limit::enforce))
+            .wrap(from_fn(metrics::track))
+            .wrap(cors(&cors_origins))
             .wrap(NormalizePath::new(TrailingSlash::Trim))
-            .wrap(cors)
-            .wrap(metrics::MetricsMiddleware)
-            .wrap(rate_limit::RateLimitMiddleware::new(
-                app_state.config.rate_limit.requests_per_minute,
-                app_state.config.rate_limit.burst_size,
-            ));
-
-        // Public routes (no authentication)
-        app = app.configure(routes::public::configure);
-
-        // Protected routes (require authentication)
-        app = app
-            .service(
-                web::scope("/api/v1")
-                    .wrap(auth)
-                    .configure(routes::protected::configure),
+            .wrap(Compress::default())
+            .wrap(
+                DefaultHeaders::new()
+                    .add(("X-Content-Type-Options", "nosniff"))
+                    .add(("X-Frame-Options", "DENY"))
+                    .add(("Referrer-Policy", "no-referrer")),
             )
-            .service(
-                web::scope("/admin")
-                    .wrap(auth)
-                    .configure(routes::admin::configure),
-            );
+            .wrap(TracingLogger::default())
+            .configure(configure_app);
 
-        // Static files
-        app = app.service(
-            Files::new("/static", "./static")
-                .show_files_listing()
-                .use_etag(true)
-                .use_last_modified(true),
-        );
-
-        // WebSocket routes
-        app = app.configure(routes::websocket::configure);
-
-        // GraphQL endpoint
-        #[cfg(feature = "graphql")]
-        {
-            app = app.configure(routes::graphql::configure);
+        if serve_static {
+            app = app.service(Files::new("/static", &static_dir).use_etag(true));
         }
-
         app
     })
-    .bind(format!("{}:{}", config.host, config.port))?
-    .workers(config.workers)
+    .bind((config.host.as_str(), config.port))?
+    .workers(config.workers.max(1))
     .max_connections(config.max_connections)
-    .client_request_timeout(std::time::Duration::from_secs(config.request_timeout))
-    .shutdown_timeout(config.shutdown_timeout);
+    .client_request_timeout(Duration::from_secs(config.request_timeout))
+    .shutdown_timeout(config.shutdown_timeout)
+    .run()
+    .await?;
 
-    // Start server with graceful shutdown
-    let server_handle = server.run();
-    let server_future = server_handle.clone();
-
-    // Setup graceful shutdown
-    tokio::spawn(async move {
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => {
-                warn!("Received shutdown signal, gracefully shutting down...");
-                server_handle.stop(true).await;
-            }
-            Err(err) => {
-                eprintln!("Unable to listen for shutdown signal: {}", err);
-            }
-        }
-    });
-
-    server_future.await?;
-    info!("Server has shut down gracefully");
-
+    info!("server stopped");
     Ok(())
 }

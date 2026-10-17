@@ -1,16 +1,15 @@
-use crate::{error::AppError, models::auth::Claims, AppState};
+use std::path::{Path, PathBuf};
+
 use actix_multipart::Multipart;
-use actix_web::{web, HttpRequest, HttpResponse, Result};
-use futures::{StreamExt, TryStreamExt};
-use serde::{Deserialize, Serialize};
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
+use actix_web::{HttpResponse, http::header, web};
+use futures_util::TryStreamExt;
+use serde::Serialize;
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10MB
-const UPLOAD_DIR: &str = "./uploads";
+use crate::{AppState, error::AppError, middleware::auth::AuthUser, models::user::FileRecord};
+
+pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct UploadResponse {
@@ -21,206 +20,194 @@ pub struct UploadResponse {
     pub uploaded_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct FileRecord {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub filename: String,
-    pub original_name: String,
-    pub size: i64,
-    pub content_type: String,
-    pub file_path: String,
-    pub uploaded_at: chrono::DateTime<chrono::Utc>,
+/// Keeps only a short, alphanumeric extension so user input never reaches the filesystem path.
+fn safe_extension(original: &str) -> Option<String> {
+    Path::new(original)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty() && e.len() <= 10 && e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .map(str::to_ascii_lowercase)
 }
 
+/// Strips characters that could break out of a `Content-Disposition` header.
+fn sanitize_display_name(original: &str) -> String {
+    let name: String = original
+        .chars()
+        .filter(|c| !c.is_control() && *c != '"' && *c != '\\' && *c != '/')
+        .take(200)
+        .collect();
+    if name.is_empty() { "file".into() } else { name }
+}
+
+fn multipart_error(e: actix_multipart::MultipartError) -> AppError {
+    AppError::BadRequest(format!("invalid multipart payload: {e}"))
+}
+
+/// `POST /api/v1/upload/file` - multipart upload, streamed to disk.
 pub async fn upload_file(
-    req: HttpRequest,
+    user: AuthUser,
     mut payload: Multipart,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
-    let claims = req
-        .extensions()
-        .get::<Claims>()
-        .ok_or_else(|| AppError::Unauthorized("User not authenticated".to_string()))?;
+    let upload_dir = PathBuf::from(&state.config.upload_dir);
+    tokio::fs::create_dir_all(&upload_dir).await?;
 
-    // Ensure upload directory exists
-    tokio::fs::create_dir_all(UPLOAD_DIR).await
-        .map_err(|e| AppError::Internal(format!("Failed to create upload directory: {}", e)))?;
+    let mut uploaded = Vec::new();
 
-    let mut uploaded_files = Vec::new();
-
-    while let Some(mut field) = payload.try_next().await? {
-        let content_disposition = field.content_disposition();
-        
-        let filename = content_disposition
-            .get_filename()
-            .ok_or_else(|| AppError::BadRequest("No filename provided".to_string()))?
-            .to_string();
-
-        let content_type = field
-            .content_type()
-            .map(|ct| ct.to_string())
-            .unwrap_or_else(|| "application/octet-stream".to_string());
-
-        // Generate unique filename
-        let file_id = Uuid::new_v4();
-        let file_extension = Path::new(&filename)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
-        
-        let unique_filename = if file_extension.is_empty() {
-            file_id.to_string()
-        } else {
-            format!("{}.{}", file_id, file_extension)
+    while let Some(mut field) = payload.try_next().await.map_err(multipart_error)? {
+        let Some(original_name) = field
+            .content_disposition()
+            .and_then(|cd| cd.get_filename())
+            .map(sanitize_display_name)
+        else {
+            // Ignore non-file form fields.
+            continue;
         };
+        let content_type = field.content_type().map_or_else(
+            || "application/octet-stream".to_string(),
+            ToString::to_string,
+        );
 
-        let file_path = PathBuf::from(UPLOAD_DIR).join(&unique_filename);
-        
-        // Create the file
-        let mut file = web::block(move || std::fs::File::create(file_path.clone()))
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to create file: {}", e)))?
-            .map_err(|e| AppError::Internal(format!("File creation error: {}", e)))?;
+        let id = Uuid::new_v4();
+        let stored_name = match safe_extension(&original_name) {
+            Some(ext) => format!("{id}.{ext}"),
+            None => id.to_string(),
+        };
+        let path = upload_dir.join(&stored_name);
 
+        let mut file = tokio::fs::File::create(&path).await?;
         let mut size = 0u64;
-
-        // Stream file data
-        while let Some(chunk) = field.try_next().await? {
-            size += chunk.len() as u64;
-            
-            if size > MAX_FILE_SIZE as u64 {
-                // Clean up partial file
-                let _ = tokio::fs::remove_file(&file_path).await;
-                return Err(AppError::BadRequest(
-                    format!("File size exceeds maximum limit of {} bytes", MAX_FILE_SIZE)
-                ));
+        let write_result: Result<(), AppError> = async {
+            while let Some(chunk) = field.try_next().await.map_err(multipart_error)? {
+                size += chunk.len() as u64;
+                if size > MAX_FILE_SIZE {
+                    return Err(AppError::BadRequest(format!(
+                        "file exceeds the maximum size of {MAX_FILE_SIZE} bytes"
+                    )));
+                }
+                file.write_all(&chunk).await?;
             }
+            file.flush().await?;
+            Ok(())
+        }
+        .await;
 
-            file = web::block(move || {
-                file.write_all(&chunk)?;
-                Ok::<_, std::io::Error>(file)
-            })
-            .await
-            .map_err(|e| AppError::Internal(format!("Write error: {}", e)))?
-            .map_err(|e| AppError::Internal(format!("File write error: {}", e)))?;
+        if let Err(e) = write_result {
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(e);
         }
 
-        // Save file record to database
-        let now = chrono::Utc::now();
-        sqlx::query(
+        let record = sqlx::query_as::<_, FileRecord>(
             r#"
-            INSERT INTO files (id, user_id, filename, original_name, size, content_type, file_path, uploaded_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO files (id, user_id, filename, original_name, size, content_type, file_path)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
             "#,
         )
-        .bind(file_id)
-        .bind(claims.sub)
-        .bind(&unique_filename)
-        .bind(&filename)
+        .bind(id)
+        .bind(user.0.sub)
+        .bind(&stored_name)
+        .bind(&original_name)
         .bind(size as i64)
         .bind(&content_type)
-        .bind(file_path.to_string_lossy().to_string())
-        .bind(now)
-        .execute(data.db.pool())
+        .bind(path.to_string_lossy().as_ref())
+        .fetch_one(state.db.pool())
         .await?;
 
-        uploaded_files.push(UploadResponse {
-            id: file_id,
-            filename: unique_filename,
+        uploaded.push(UploadResponse {
+            id: record.id,
+            filename: record.filename,
             size,
-            content_type,
-            uploaded_at: now,
+            content_type: record.content_type,
+            uploaded_at: record.uploaded_at,
         });
     }
 
-    if uploaded_files.is_empty() {
-        return Err(AppError::BadRequest("No files uploaded".to_string()));
+    if uploaded.is_empty() {
+        return Err(AppError::BadRequest("no files uploaded".into()));
     }
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "files": uploaded_files,
-        "message": format!("{} file(s) uploaded successfully", uploaded_files.len())
+    Ok(HttpResponse::Created().json(serde_json::json!({
+        "message": format!("{} file(s) uploaded successfully", uploaded.len()),
+        "files": uploaded,
     })))
 }
 
+async fn find_owned_file(state: &AppState, id: Uuid, owner: Uuid) -> Result<FileRecord, AppError> {
+    sqlx::query_as::<_, FileRecord>("SELECT * FROM files WHERE id = $1 AND user_id = $2")
+        .bind(id)
+        .bind(owner)
+        .fetch_optional(state.db.pool())
+        .await?
+        .ok_or_else(|| AppError::NotFound("file not found".into()))
+}
+
+/// `GET /api/v1/upload/files/{id}` - download a file owned by the caller.
 pub async fn get_file(
-    req: HttpRequest,
+    user: AuthUser,
     path: web::Path<Uuid>,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
-    let claims = req
-        .extensions()
-        .get::<Claims>()
-        .ok_or_else(|| AppError::Unauthorized("User not authenticated".to_string()))?;
-
-    let file_id = path.into_inner();
-
-    // Get file record from database
-    let file_record = sqlx::query_as::<_, FileRecord>(
-        "SELECT * FROM files WHERE id = $1 AND user_id = $2"
-    )
-    .bind(file_id)
-    .bind(claims.sub)
-    .fetch_optional(data.db.pool())
-    .await?
-    .ok_or_else(|| AppError::NotFound("File not found".to_string()))?;
-
-    // Check if file exists on disk
-    let file_path = PathBuf::from(&file_record.file_path);
-    if !file_path.exists() {
-        return Err(AppError::NotFound("File not found on disk".to_string()));
-    }
-
-    // Read file content
-    let file_content = tokio::fs::read(&file_path).await
-        .map_err(|e| AppError::Internal(format!("Failed to read file: {}", e)))?;
+    let record = find_owned_file(&state, path.into_inner(), user.0.sub).await?;
+    let bytes = match tokio::fs::read(&record.file_path).await {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(AppError::NotFound("file content missing".into()));
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     Ok(HttpResponse::Ok()
-        .insert_header(("Content-Type", file_record.content_type))
+        .insert_header((header::CONTENT_TYPE, record.content_type))
         .insert_header((
-            "Content-Disposition",
-            format!("attachment; filename=\"{}\"", file_record.original_name),
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", record.original_name),
         ))
-        .body(file_content))
+        .insert_header((header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
+        .body(bytes))
 }
 
+/// `DELETE /api/v1/upload/files/{id}`
 pub async fn delete_file(
-    req: HttpRequest,
+    user: AuthUser,
     path: web::Path<Uuid>,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
-    let claims = req
-        .extensions()
-        .get::<Claims>()
-        .ok_or_else(|| AppError::Unauthorized("User not authenticated".to_string()))?;
+    let record = find_owned_file(&state, path.into_inner(), user.0.sub).await?;
 
-    let file_id = path.into_inner();
-
-    // Get file record from database
-    let file_record = sqlx::query_as::<_, FileRecord>(
-        "SELECT * FROM files WHERE id = $1 AND user_id = $2"
-    )
-    .bind(file_id)
-    .bind(claims.sub)
-    .fetch_optional(data.db.pool())
-    .await?
-    .ok_or_else(|| AppError::NotFound("File not found".to_string()))?;
-
-    // Delete file from disk
-    let file_path = PathBuf::from(&file_record.file_path);
-    if file_path.exists() {
-        tokio::fs::remove_file(&file_path).await
-            .map_err(|e| AppError::Internal(format!("Failed to delete file: {}", e)))?;
+    match tokio::fs::remove_file(&record.file_path).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
-
-    // Delete record from database
     sqlx::query("DELETE FROM files WHERE id = $1")
-        .bind(file_id)
-        .execute(data.db.pool())
+        .bind(record.id)
+        .execute(state.db.pool())
         .await?;
 
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "message": "File deleted successfully"
-    })))
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_is_restricted() {
+        assert_eq!(safe_extension("photo.PNG"), Some("png".into()));
+        assert_eq!(safe_extension("archive.tar.gz"), Some("gz".into()));
+        assert_eq!(safe_extension("evil.p/hp"), None);
+        assert_eq!(safe_extension("noext"), None);
+        assert_eq!(safe_extension("x.thisiswaytoolong"), None);
+    }
+
+    #[test]
+    fn display_name_cannot_inject_headers() {
+        assert_eq!(
+            sanitize_display_name("a\"b\r\nSet-Cookie: x.txt"),
+            "abSet-Cookie: x.txt"
+        );
+        assert_eq!(sanitize_display_name("../../etc/passwd"), "....etcpasswd");
+        assert_eq!(sanitize_display_name(""), "file");
+    }
 }
