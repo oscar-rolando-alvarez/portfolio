@@ -86,9 +86,7 @@ def configure_logging(level: str = "INFO") -> None:
     )
 
 
-def _add_trace_ids(
-    _: Any, __: str, event: MutableMapping[str, Any]
-) -> MutableMapping[str, Any]:
+def _add_trace_ids(_: Any, __: str, event: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     ctx = trace.get_current_span().get_span_context()
     if ctx.is_valid:
         event["trace_id"] = format(ctx.trace_id, "032x")

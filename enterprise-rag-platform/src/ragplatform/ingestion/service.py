@@ -113,6 +113,8 @@ class IngestionService:
             doc.mime_type = resolved_mime
             doc.redact_pii = redact
             doc.title = title or existing.title
+            if title:
+                doc.metadata = {**doc.metadata, "title_provided": True}
             doc.version += 1
             doc.status = DocumentStatus.PENDING
             doc.error = None
@@ -127,7 +129,11 @@ class IngestionService:
                 content_hash=content_hash,
                 acl_groups=groups,
                 redact_pii=redact,
-                metadata={"uploaded_by": principal.subject, "filename": filename},
+                metadata={
+                    "uploaded_by": principal.subject,
+                    "filename": filename,
+                    "title_provided": title is not None,
+                },
             )
         await self._store.save(doc, data)
 
@@ -162,7 +168,7 @@ class IngestionService:
     async def _process(self, doc: Document) -> int:
         raw = await self._store.load_raw(doc.tenant_id, doc.id)
         parsed = parse_document(raw, doc.mime_type, fallback_title=doc.title)
-        title = doc.title if doc.title != doc.external_id else parsed.title
+        title = doc.title if doc.metadata.get("title_provided") else parsed.title
         chunks: list[Chunk] = []
         pii_totals: dict[str, int] = {}
         for ordinal, rc in enumerate(self._chunker.chunk(parsed)):

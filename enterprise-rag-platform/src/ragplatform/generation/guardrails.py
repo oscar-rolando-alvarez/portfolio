@@ -27,8 +27,9 @@ _PATTERNS: tuple[tuple[str, float, re.Pattern[str]], ...] = tuple(
         (
             "role_hijack",
             0.4,
-            r"\byou are now\b|\bact as (an?|the) (unrestricted|jailbroken|developer)|\bnew (system )?instructions?\s*:",
+            r"\byou are now\b|\bact as (an?|the) (unrestricted|jailbroken|developer)",
         ),
+        ("new_instructions", 0.3, r"\bnew (system )?(instructions?|rules)\s*:"),
         (
             "prompt_exfiltration",
             0.5,
