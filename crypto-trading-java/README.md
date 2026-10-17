@@ -1,394 +1,240 @@
-# Crypto Trading Platform
+# Crypto Trading Platform (Java)
 
-A comprehensive cryptocurrency trading platform built with Spring Boot 3, designed for high-frequency trading with low latency and high throughput.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/crypto-trading-java.yml/badge.svg)
 
-## 🚀 Features
+A Spring Boot backend for a centralized crypto exchange: user accounts and balances, order entry,
+an in-memory **price-time priority matching engine**, pre-trade risk checks and trade settlement,
+backed by PostgreSQL. It is built to show how the core of an exchange fits together cleanly on a
+modern JVM stack, with real tests against a real database.
 
-### Core Trading Features
-- **Real-time Order Book Management** - Live order matching with sub-millisecond latency
-- **Multiple Order Types** - Market, Limit, Stop-Loss, Stop-Limit, Take-Profit, Trailing Stop, Iceberg, OCO
-- **Advanced Order Matching Engine** - FIFO price-time priority matching algorithm
-- **Trading Pairs Management** - Support for multiple cryptocurrency pairs
-- **Price Charts & Technical Indicators** - Real-time charting with TA4J integration
-- **Portfolio Tracking** - Comprehensive P&L calculation and performance analytics
-- **Trading History & Analytics** - Detailed trade history and performance metrics
+## What it does
 
-### Exchange Integration
-- **Multi-Exchange Support** - Binance, Coinbase Pro, Kraken integration
-- **WebSocket Connections** - Real-time market data streaming
-- **Order Execution** - Cross-exchange order routing
-- **Arbitrage Detection** - Automated arbitrage opportunity identification
-- **Rate Normalization** - Unified pricing across exchanges
+Exchanges need a single, consistent place where orders meet. This service owns that flow:
 
-### Risk Management
-- **Position Sizing Algorithms** - Kelly Criterion and other position sizing strategies
-- **Automated Risk Controls** - Stop-loss and take-profit automation
-- **Risk Metrics** - VaR, Sharpe ratio, Sortino ratio, Calmar ratio calculations
-- **Margin Trading Support** - Advanced margin calculations and liquidation engine
-- **Liquidation Engine** - Automated position liquidation for risk management
+1. A trader registers and logs in to get a JWT.
+2. An order is validated (trading pair, size limits), checked against risk limits and the
+   required funds are reserved.
+3. The matching engine matches the order against the opposite side of the book for its symbol.
+   Fills produce maker and taker trades, commissions and balance updates; any remainder of a
+   limit order rests on the book.
 
-### Advanced Features
-- **Algorithmic Trading Framework** - Custom trading bot development
-- **Backtesting Engine** - Historical strategy testing and optimization
-- **Machine Learning Integration** - Price prediction models
-- **Multi-Factor Authentication** - Enhanced security with 2FA
-- **Admin Dashboard** - Comprehensive administration interface
-- **Audit Logging** - Complete transaction and activity logging
+## Key features
 
-## 🏗️ Architecture
+- **Matching engine**: per-symbol order books with price-time priority, market and limit orders,
+  partial fills, maker/taker fees charged in the received asset, sorted depth snapshots.
+- **Concurrency**: one lock per symbol (a `ReentrantLock`, so virtual threads never pin a
+  carrier thread), so different symbols match in parallel.
+- **Risk management**: max position size, daily loss, drawdown and margin requirement checks
+  (configurable), plus VaR, Sharpe ratio and max drawdown calculations.
+- **Accounts and balances**: available/locked balances per asset, fund reservation on order
+  entry, settlement on fills.
+- **Security**: stateless JWT (HS256) auth, BCrypt password hashing, role-based endpoint rules.
+- **API docs**: OpenAPI 3 with Swagger UI.
+- **Observability**: Actuator health probes, Prometheus metrics, OpenTelemetry tracing through
+  Micrometer (OTLP export when configured), trace IDs in logs, ECS JSON logs in containers.
+- **Schema management**: Liquibase owns the schema, and Hibernate validates the mapping against it
+  at startup.
 
-### System Architecture
+## Tech stack
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Client    │    │  Mobile App     │    │  Trading Bot    │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │                      │                      │
-          └──────────────────────┼──────────────────────┘
-                                 │
-                    ┌─────────────┴─────────────┐
-                    │      Load Balancer       │
-                    └─────────────┬─────────────┘
-                                 │
-                    ┌─────────────┴─────────────┐
-                    │    API Gateway/Ingress   │
-                    └─────────────┬─────────────┘
-                                 │
-              ┌──────────────────┼──────────────────┐
-              │                  │                  │
-    ┌─────────┴─────────┐ ┌─────────┴─────────┐ ┌─────────┴─────────┐
-    │  Trading App 1    │ │  Trading App 2    │ │  Trading App N    │
-    │  (Spring Boot)    │ │  (Spring Boot)    │ │  (Spring Boot)    │
-    └─────────┬─────────┘ └─────────┬─────────┘ └─────────┬─────────┘
-              │                     │                     │
-              └──────────────────────┼─────────────────────┘
-                                    │
-           ┌────────────────────────┼────────────────────────┐
-           │                       │                        │
-    ┌──────┴──────┐      ┌────────┴────────┐      ┌────────┴────────┐
-    │ PostgreSQL  │      │ Redis Cluster   │      │ Kafka Cluster   │
-    │ (Primary)   │      │ (Cache/Session) │      │ (Event Stream)  │
-    └─────────────┘      └─────────────────┘      └─────────────────┘
-           │
-    ┌──────┴──────┐
-    │ PostgreSQL  │
-    │ (Replica)   │
-    └─────────────┘
-```
+| Area | Technology | Version |
+| --- | --- | --- |
+| Language / runtime | Java (Eclipse Temurin), virtual threads | 21 LTS |
+| Framework | Spring Boot (Spring Framework 7, Spring Security 7) | 4.1.1 |
+| Persistence | Spring Data JPA, Hibernate ORM | Boot-managed (Hibernate 7.4) |
+| Database | PostgreSQL | 18.6 |
+| Migrations | Liquibase | Boot-managed |
+| Auth | JJWT | 0.13.0 |
+| API docs | springdoc-openapi | 3.1.1 |
+| Observability | Micrometer, Prometheus registry, OpenTelemetry | Boot-managed |
+| Testing | JUnit 5, Mockito, AssertJ, Testcontainers | Boot-managed (Testcontainers 2) |
+| Build | Maven wrapper, Spotless | Maven 3.9.16 |
+| Container | Multi-stage Dockerfile, Temurin JRE on Alpine, non-root | 21.0.12 |
 
-### Technology Stack
+## Architecture
 
-- **Backend Framework**: Spring Boot 3.2.0 with Java 17
-- **Security**: Spring Security with JWT authentication
-- **Database**: PostgreSQL with connection pooling (HikariCP)
-- **Caching**: Redis for session management and market data caching
-- **Message Streaming**: Apache Kafka for event-driven architecture
-- **Distributed Computing**: Hazelcast for distributed data grid
-- **WebSocket**: Real-time bidirectional communication
-- **Database Migrations**: Liquibase for version control
-- **Documentation**: OpenAPI/Swagger for API documentation
-- **Monitoring**: Micrometer with Prometheus and Grafana
-- **Containerization**: Docker and Kubernetes for deployment
+### Container view
 
-## 🛠️ Installation & Setup
+```mermaid
+flowchart LR
+    trader["Trader / client app"]
+    ops["Operator"]
 
-### Prerequisites
-- Java 17 or higher
-- Maven 3.8+
-- Docker & Docker Compose
-- PostgreSQL 14+
-- Redis 6+
-- Kafka 3.4+
+    subgraph platform["Crypto Trading Platform"]
+        api["REST API<br/>Spring MVC + Security, JWT"]
+        orders["Order Service<br/>validation, fund reservation"]
+        risk["Risk Management<br/>limits, VaR, drawdown"]
+        engine["Matching Engine<br/>in-memory order books per symbol"]
+        settle["Trade and Account Services<br/>trades, fees, balances"]
+    end
 
-### Quick Start with Docker
+    db[("PostgreSQL<br/>schema by Liquibase")]
+    prom["Prometheus"]
+    otel["OTLP collector<br/>Jaeger, Tempo, ..."]
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-repo/crypto-trading-java.git
-   cd crypto-trading-java
-   ```
-
-2. **Start the entire stack**
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Access the application**
-   - API: http://localhost:8080
-   - Swagger UI: http://localhost:8080/swagger-ui.html
-   - Actuator Health: http://localhost:8080/api/actuator/health
-
-### Manual Setup
-
-1. **Database Setup**
-   ```bash
-   # PostgreSQL
-   createdb crypto_trading
-   createuser crypto_user
-   
-   # Update application.yml with your database credentials
-   ```
-
-2. **Redis Setup**
-   ```bash
-   # Start Redis
-   redis-server
-   ```
-
-3. **Kafka Setup**
-   ```bash
-   # Start Zookeeper
-   bin/zookeeper-server-start.sh config/zookeeper.properties
-   
-   # Start Kafka
-   bin/kafka-server-start.sh config/server.properties
-   ```
-
-4. **Application Setup**
-   ```bash
-   # Build the application
-   mvn clean package
-   
-   # Run the application
-   java -jar target/crypto-trading-platform-1.0.0.jar
-   ```
-
-### Environment Configuration
-
-Create an `application-prod.yml` file for production:
-
-```yaml
-spring:
-  datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-  
-  data:
-    redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
-      password: ${REDIS_PASSWORD}
-  
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
-
-exchanges:
-  binance:
-    api-key: ${BINANCE_API_KEY}
-    secret-key: ${BINANCE_SECRET_KEY}
-  coinbase:
-    api-key: ${COINBASE_API_KEY}
-    secret-key: ${COINBASE_SECRET_KEY}
-    passphrase: ${COINBASE_PASSPHRASE}
-  kraken:
-    api-key: ${KRAKEN_API_KEY}
-    secret-key: ${KRAKEN_SECRET_KEY}
+    trader -->|"HTTPS + JWT"| api
+    api --> orders
+    orders --> risk
+    orders --> engine
+    engine --> settle
+    orders --> db
+    settle --> db
+    ops -->|"/actuator/prometheus"| prom
+    prom -.->|scrape| api
+    api -.->|"traces (optional)"| otel
 ```
 
-## 📖 API Documentation
+### Placing a limit order
 
-### Authentication
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as OrderController
+    participant O as OrderService
+    participant R as RiskManagementService
+    participant M as OrderMatchingService
+    participant T as Trade/AccountService
+    participant DB as PostgreSQL
 
-All API endpoints require JWT authentication except for public endpoints.
+    C->>A: POST /api/v1/orders (Bearer JWT)
+    A->>O: createOrder(order)
+    O->>O: validate pair, size, price
+    O->>R: validateOrderRisk(order)
+    O->>T: lock funds for the order
+    O->>DB: insert order (PENDING)
+    O->>M: submitOrder(order)
+    M->>M: acquire symbol lock
+    loop while order crosses best opposite price
+        M->>T: record maker and taker trades, fees
+        M->>T: settle balances
+        M->>DB: update resting order
+    end
+    M->>M: rest remainder on book, release lock
+    M->>DB: save order (FILLED, PARTIALLY_FILLED or OPEN)
+    A-->>C: 201 Created + order
+```
+
+### Core data model
+
+```mermaid
+erDiagram
+    USERS ||--o{ ACCOUNTS : owns
+    USERS ||--o{ ORDERS : places
+    ACCOUNTS ||--o{ BALANCES : holds
+    ACCOUNTS ||--o{ POSITIONS : has
+    TRADING_PAIRS ||--o{ ORDERS : "quoted in"
+    ORDERS ||--o{ TRADES : "filled by"
+    USERS ||--o{ PORTFOLIOS : tracks
+    PORTFOLIOS ||--o{ PORTFOLIO_SNAPSHOTS : records
+```
+
+## Project structure
+
+```
+crypto-trading-java/
+├── src/main/java/com/cryptotrading/
+│   ├── config/          # Spring Security configuration
+│   ├── controller/      # REST controllers, DTOs, ProblemDetail error mapping
+│   ├── domain/          # JPA entities and enums
+│   ├── repository/      # Spring Data repositories and analytics queries
+│   ├── security/        # JWT issuing/validation filter
+│   └── service/         # orders, matching engine, risk, accounts, trades
+├── src/main/resources/
+│   ├── application.yml
+│   └── db/changelog/    # Liquibase changelog (formatted SQL)
+├── src/test/java/       # unit tests and *IT integration tests (Testcontainers)
+├── k8s/deployment.yaml  # reference Kubernetes manifests
+├── Dockerfile
+└── docker-compose.yml
+```
+
+## Running locally
+
+Prerequisites: JDK 21 and Docker. The Maven wrapper downloads Maven for you.
+
+**With Docker Compose (app + PostgreSQL):**
 
 ```bash
-# Register a new user
-POST /api/v1/auth/register
-{
-  "username": "trader123",
-  "email": "trader@example.com",
-  "password": "securePassword123",
-  "firstName": "John",
-  "lastName": "Doe"
-}
-
-# Login
-POST /api/v1/auth/login
-{
-  "username": "trader123",
-  "password": "securePassword123"
-}
-
-# Use JWT token in subsequent requests
-Authorization: Bearer <your_jwt_token>
+cp .env.example .env            # optional: adjust values
+docker compose up --build
+# optional tracing UI at http://localhost:16686
+docker compose --profile observability up --build
 ```
 
-### Trading Operations
+**Without Docker for the app:**
 
 ```bash
-# Create a new order
-POST /api/v1/orders
-{
-  "symbol": "BTCUSDT",
-  "side": "BUY",
-  "type": "LIMIT",
-  "quantity": "0.001",
-  "price": "50000.00",
-  "timeInForce": "GTC"
-}
-
-# Get order book
-GET /api/v1/market/orderbook?symbol=BTCUSDT&depth=10
-
-# Get user orders
-GET /api/v1/orders/user/{userId}?page=0&size=20
-
-# Cancel an order
-DELETE /api/v1/orders/{orderId}
+docker compose up -d postgres   # or point DB_URL at your own PostgreSQL
+./mvnw spring-boot:run
 ```
 
-### WebSocket Endpoints
-
-```javascript
-// Market data stream
-ws://localhost:8080/ws/market/{symbol}
-
-// User order updates
-ws://localhost:8080/ws/user/{userId}/orders
-
-// Order book updates
-ws://localhost:8080/ws/orderbook/{symbol}
-```
-
-## 🚀 Deployment
-
-### Kubernetes Deployment
-
-1. **Apply Kubernetes manifests**
-   ```bash
-   kubectl apply -f k8s/
-   ```
-
-2. **Check deployment status**
-   ```bash
-   kubectl get pods -l app=crypto-trading-app
-   kubectl get services
-   ```
-
-3. **Scale the deployment**
-   ```bash
-   kubectl scale deployment crypto-trading-app --replicas=5
-   ```
-
-### Production Considerations
-
-- **Database**: Use managed PostgreSQL (AWS RDS, Google Cloud SQL)
-- **Caching**: Redis Cluster for high availability
-- **Message Queue**: Managed Kafka (Confluent Cloud, AWS MSK)
-- **Load Balancing**: Use cloud load balancers with health checks
-- **SSL/TLS**: Enable HTTPS with proper certificates
-- **Monitoring**: Set up comprehensive monitoring and alerting
-- **Backup**: Regular database backups and disaster recovery plan
-
-## 🧪 Testing
-
-### Running Tests
+Then try it:
 
 ```bash
-# Unit tests
-mvn test
-
-# Integration tests
-mvn verify
-
-# Test coverage report
-mvn jacoco:report
+curl -X POST localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' \
+  -d '{"username":"alice","email":"alice@example.com","password":"s3cure-passw0rd"}'
+TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"s3cure-passw0rd"}' | jq -r .accessToken)
+curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/orders/active
 ```
 
-### Load Testing
+Useful URLs: Swagger UI `http://localhost:8080/swagger-ui.html`, health
+`http://localhost:8080/actuator/health`, metrics `http://localhost:8080/actuator/prometheus`.
+
+## Testing
 
 ```bash
-# Install Artillery
-npm install -g artillery
-
-# Run load tests
-artillery run loadtest/trading-api-test.yml
+./mvnw spotless:check   # formatting
+./mvnw test             # unit tests (matching engine)
+./mvnw verify           # unit + integration tests (needs Docker for Testcontainers)
 ```
 
-## 📊 Monitoring & Observability
+`CryptoTradingApplicationIT` boots the whole application against PostgreSQL 18 in a container. It
+applies the Liquibase changelog, has Hibernate validate the schema, and runs the
+register, login and protected-call flow plus the health, metrics and OpenAPI endpoints. CI runs
+the same `verify` on every pull request.
 
-### Metrics
+## Configuration
 
-The application exposes metrics via Micrometer:
-- **Custom Metrics**: Order execution time, matching engine performance
-- **JVM Metrics**: Memory usage, GC performance, thread pools
-- **Database Metrics**: Connection pool stats, query performance
-- **Cache Metrics**: Redis hit/miss ratios, cache sizes
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/crypto_trading` | JDBC URL |
+| `DB_USERNAME` / `DB_PASSWORD` | `crypto_user` / `crypto_password` | Database credentials (local dev only) |
+| `DB_POOL_SIZE` | `20` | Hikari max pool size |
+| `JWT_SECRET` | dev-only value | HS256 key, Base64 or raw, at least 256 bits. **Set in every real environment.** |
+| `JWT_EXPIRATION` / `JWT_REFRESH_EXPIRATION` | `86400000` / `604800000` | Token lifetimes in ms |
+| `RISK_MAX_POSITION_SIZE`, `RISK_MAX_DAILY_LOSS`, `RISK_MAX_DRAWDOWN`, `RISK_MARGIN_REQUIREMENT` | `1000000`, `100000`, `0.2`, `0.1` | Pre-trade risk limits |
+| `LOG_LEVEL` | `INFO` | Application log level |
+| `LOGGING_STRUCTURED_FORMAT_CONSOLE` | unset (ECS in the image) | `ecs`, `logstash` or `gelf` JSON logs |
+| `TRACING_SAMPLING_PROBABILITY` | `0.1` | Trace sampling ratio |
+| `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` | unset | e.g. `http://collector:4318/v1/traces`; enables OTLP export |
+| `SERVER_PORT` | `8080` | HTTP port |
 
-### Health Checks
+## Design decisions
 
-- **Liveness Probe**: `/api/actuator/health/liveness`
-- **Readiness Probe**: `/api/actuator/health/readiness`
-- **Custom Health Indicators**: Database connectivity, external APIs
+- **In-memory order books, single writer per symbol.** Matching needs low latency and strict
+  ordering, so each symbol has one book guarded by one lock and the database is the system of
+  record. As a result the service runs as a **single replica** (see `k8s/deployment.yaml`).
+  Scaling out means partitioning symbols across instances, for example by consistent hashing or
+  one Kafka partition per symbol.
+- **Virtual threads + `ReentrantLock`.** Request handling uses virtual threads. The matching lock
+  is a `ReentrantLock` rather than `synchronized`, because on Java 21 a virtual thread that blocks
+  inside `synchronized` pins its carrier thread.
+- **Liquibase owns the schema; Hibernate only validates.** A schema drift fails startup and
+  fails CI, so it never reaches production.
+- **`BigDecimal` everywhere** for prices, quantities and fees (scale 18), with no floating point in
+  money paths.
+- **Real dependencies in tests.** The integration tests use Testcontainers PostgreSQL instead of
+  H2, so the SQL dialect, constraints and migrations are exactly the ones used in production.
+- **Opt-in telemetry export.** Metrics and trace context are always on. The OTLP exporter is only
+  created when an endpoint is configured, so local runs and CI stay self-contained.
 
-### Logging
+## Known limitations
 
-Structured logging with the following levels:
-- **ERROR**: System errors, failed trades, security violations
-- **WARN**: Risk limit breaches, unusual trading patterns
-- **INFO**: Order executions, user actions, system events
-- **DEBUG**: Detailed order matching, market data updates
-
-## 🔒 Security Features
-
-- **JWT Authentication** with configurable expiration
-- **Role-Based Access Control** (RBAC)
-- **API Rate Limiting** to prevent abuse
-- **Input Validation** and sanitization
-- **Audit Logging** for all trading activities
-- **Two-Factor Authentication** support
-- **Account Lockout** after failed login attempts
-- **CORS Configuration** for web security
-
-## 🎯 Performance Characteristics
-
-- **Order Latency**: Sub-millisecond order processing
-- **Throughput**: 10,000+ orders per second
-- **WebSocket Updates**: Real-time market data with <1ms latency
-- **Database Performance**: Optimized queries with proper indexing
-- **Memory Usage**: Efficient object pooling and garbage collection
-- **CPU Optimization**: Parallel processing for order matching
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow Java coding standards and best practices
-- Write comprehensive unit and integration tests
-- Update documentation for new features
-- Ensure security considerations for all changes
-- Performance test significant changes
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 🆘 Support
-
-- **Documentation**: [Wiki](https://github.com/your-repo/crypto-trading-java/wiki)
-- **Issues**: [GitHub Issues](https://github.com/your-repo/crypto-trading-java/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/crypto-trading-java/discussions)
-
-## 🔗 Related Projects
-
-- [Crypto Trading Frontend](https://github.com/your-repo/crypto-trading-frontend)
-- [Trading Bot Examples](https://github.com/your-repo/crypto-trading-bots)
-- [Market Data Collector](https://github.com/your-repo/crypto-market-data)
-
----
-
-**⚠️ Disclaimer**: This software is for educational and development purposes. Trading cryptocurrencies carries significant financial risk. Always do your own research and consider seeking advice from financial professionals before trading.
+- The order books are not rebuilt from the database on restart. Resting orders survive in
+  PostgreSQL but are not re-submitted to the engine.
+- External exchange connectivity and arbitrage are out of scope for this service. The repository
+  queries for market data exist, but no exchange adapters do.
+- `POST /api/v1/orders` accepts the order entity directly. A dedicated request DTO with
+  server-side resolution of user, account and pair is the next step.
