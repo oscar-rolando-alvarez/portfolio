@@ -1,73 +1,30 @@
-# Multi-stage Docker build for GraphQL Recommendation API
-
-# Build stage
-FROM python:3.11-slim as builder
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    g++ \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set work directory
+# syntax=docker/dockerfile:1.7
+# ---- builder: resolve and install locked dependencies with uv ----
+FROM python:3.13.16-slim-trixie AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra qdrant --no-install-project
 
-# Production stage
-FROM python:3.11-slim as production
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra qdrant --no-editable
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libpq5 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Set work directory
+# ---- runtime: slim, non-root ----
+FROM python:3.13.16-slim-trixie AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH" \
+    DATABASE_URL="sqlite+aiosqlite:////app/data/recommender.db"
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home app \
+    && mkdir -p /app/data && chown app:app /app/data
 WORKDIR /app
-
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy application code
-COPY app/ ./app/
-COPY alembic/ ./alembic/
-COPY alembic.ini .
-COPY .env.example .env
-
-# Create directories and set permissions
-RUN mkdir -p /app/logs && \
-    chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Expose port
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --chown=app:app alembic ./alembic
+COPY --chown=app:app alembic.ini ./
+USER app
 EXPOSE 8000
-
-# Run the application
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+CMD ["uvicorn", "recommender.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

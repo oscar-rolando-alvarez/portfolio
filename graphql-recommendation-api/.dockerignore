@@ -1,0 +1,15 @@
+.venv
+.git
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov
+*.db
+.env
+tests
+k8s
+docker-compose.yml
+Makefile
