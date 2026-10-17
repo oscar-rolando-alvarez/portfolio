@@ -1,10 +1,13 @@
 """Alembic environment configuration."""
+
 import asyncio
 import os
 from logging.config import fileConfig
+
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
 from alembic import context
 
 # this is the Alembic Config object, which provides
@@ -17,7 +20,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import your models here
-from src.infrastructure.database.models import Base
+from financial_analysis.infrastructure.database.models import Base  # noqa: E402
 
 # Set target metadata
 target_metadata = Base.metadata

@@ -1,416 +1,188 @@
-# Image Processing Microservice
+# Image Processing Service
 
-A scalable, production-ready Python microservice for image processing with AI capabilities, built with FastAPI and designed for high throughput with horizontal scaling.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/image-processing-service.yml/badge.svg)
 
-## Features
+An async image API built on FastAPI. It handles common transformations with Pillow and OpenCV (info, resize, crop, thumbnail, filters, enhancement) and stores originals in a content-addressed store. It also offers **vision-model captioning and tagging** through any OpenAI-compatible endpoint. OCR and YOLO object detection are optional extras, so the default install stays small.
 
-### Core Image Processing
-- **Multiple Filters**: Blur, sharpen, edge detection, Gaussian blur, median filter, emboss, contour
-- **Resizing and Cropping**: Maintain aspect ratio, exact dimensions, smart cropping
-- **Image Enhancement**: Brightness, contrast, saturation, sharpness adjustments
-- **Format Conversion**: Support for JPEG, PNG, WebP, BMP, TIFF
-- **Batch Processing**: Process multiple images with multiple operations
+> Problem: most products need the same image pipeline. They must accept untrusted uploads safely, generate renditions, and produce alt text and tags for accessibility and search. This service does that behind one small, well-tested API. The AI parts are pluggable: the core never depends on a specific model vendor or on heavy ML runtimes.
 
-### AI Capabilities
-- **OCR Text Extraction**: Using Tesseract and EasyOCR engines
-- **Object Detection**: YOLO-based object detection with pre-trained models
-- **Face Detection**: OpenCV Haar cascades for face detection
-- **Image Analysis**: Color analysis, texture analysis, composition metrics
+## Key features
 
-### Architecture & Scalability
-- **Event-Driven Architecture**: RabbitMQ/Apache Kafka message queuing
-- **Async Processing**: FastAPI with async endpoints and worker pools
-- **Cloud Storage**: S3-compatible storage (AWS S3/MinIO)
-- **Horizontal Scaling**: Kubernetes-ready with auto-scaling
-- **Circuit Breaker**: Resilient external service calls
-- **Rate Limiting**: Per-user/API key rate limiting with Redis
+- **Transformations**: `/images/info`, `/resize` (aspect-aware, including upscaling), `/crop`, `/thumbnail` (square centre crop), `/filter` (blur, sharpen, grayscale, edges, emboss, contour, median, sepia), `/enhance` (brightness, contrast, saturation, sharpness). Output can be JPEG, PNG or WebP.
+- **Vision captioning** (`/images/analyze`): returns a caption, tags and alt text as JSON validated with Pydantic. Runs against any OpenAI-compatible vision model, or a deterministic fake for development and tests.
+- **Safe uploads**: an upload size cap (at most limit + 1 bytes are read into memory; put a body-size limit at the ingress as well), a format allow-list, `verify()` for corrupt files, a pixel-count and decompression-bomb guard, EXIF orientation normalized, and metadata (EXIF/GPS) stripped from outputs.
+- **Storage**: `POST /images` stores originals content-addressed (SHA-256, deduplicated, traversal-safe). `GET /images/{key}` serves them with immutable cache headers.
+- **Optional extras**: `/images/ocr` (Tesseract) and `/images/detect` (Ultralytics YOLO) are imported lazily. They return **501** with an install hint when the extra is not present.
+- **Operations**: structured JSON logs with request ids, Prometheus `/metrics` (HTTP and per-operation latency), `/health`, optional OpenTelemetry, a non-root Docker image with an optional OCR layer, and Kubernetes manifests (Kustomize).
 
-### Monitoring & Observability
-- **Prometheus Metrics**: Custom application and system metrics
-- **Structured Logging**: JSON logs with correlation IDs
-- **Health Checks**: Kubernetes liveness and readiness probes
-- **Distributed Tracing**: OpenTelemetry integration ready
+## Tech stack
 
-## Architecture Overview
+| Area | Technology | Version |
+|---|---|---|
+| Language / packaging | Python, uv + `pyproject.toml` | 3.13 / uv 0.13 |
+| API | FastAPI, Uvicorn, python-multipart | 0.143 / 0.54 / 0.0.32 |
+| Imaging | Pillow, OpenCV (headless), NumPy | 13.0 / 5.0 / 2.5 |
+| GenAI | `openai` SDK against any OpenAI-compatible vision model | 3.33 |
+| Optional AI | pytesseract + Tesseract (`ocr`), Ultralytics YOLO (`detection`) | 0.3 / 8.4 |
+| Observability | structlog, prometheus-client, OpenTelemetry (`otel` extra) | 26.1 / 0.26 / 1.45 |
+| Quality | Ruff, mypy (strict), pytest + coverage, pip-audit | 0.17 / 2.4 / 9.1 |
+| Runtime | Docker `python:3.13.16-slim-trixie` | |
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Load Balancer │────│   API Gateway   │────│   FastAPI App   │
-│   (Nginx/K8s)   │    │  (Rate Limit)   │    │  (3+ replicas)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                        │
-                       ┌─────────────────────────────────┼─────────────────────────────────┐
-                       │                                 │                                 │
-                       ▼                                 ▼                                 ▼
-              ┌─────────────────┐               ┌─────────────────┐               ┌─────────────────┐
-              │  Message Queue  │               │  Worker Pool    │               │  Storage Layer  │
-              │ (RabbitMQ/Kafka)│               │ (5+ workers)    │               │   (S3/MinIO)    │
-              └─────────────────┘               └─────────────────┘               └─────────────────┘
-                       │                                 │                                 │
-                       │                                 │                                 │
-                       ▼                                 ▼                                 ▼
-              ┌─────────────────┐               ┌─────────────────┐               ┌─────────────────┐
-              │   Task Queue    │               │ Image Processing│               │  File Storage   │
-              │   Management    │               │   • OpenCV      │               │   • Images      │
-              │                 │               │   • PIL/Pillow  │               │   • Results     │
-              │                 │               │   • Tesseract   │               │   • Metadata    │
-              │                 │               │   • YOLO Models │               │                 │
-              └─────────────────┘               └─────────────────┘               └─────────────────┘
-                       │                                 │                                 │
-                       └─────────────────────────────────┼─────────────────────────────────┘
-                                                         │
-                                ┌─────────────────────────────────┐
-                                │         Data Layer              │
-                                │  ┌─────────────┐ ┌─────────────┐│
-                                │  │ PostgreSQL  │ │    Redis    ││
-                                │  │ (Metadata)  │ │  (Cache)    ││
-                                │  └─────────────┘ └─────────────┘│
-                                └─────────────────────────────────┘
+## Architecture
+
+### Container view
+
+```mermaid
+flowchart LR
+    client["Client app / curl"]
+    subgraph svc["image-processing-service"]
+        api["FastAPI routes<br/>multipart uploads"]
+        guard["Upload guard<br/>size, format, pixels, verify"]
+        proc["Processing<br/>Pillow + OpenCV, thread pool"]
+        vision["VisionAnalyzer port<br/>fake or OpenAI-compatible"]
+        extras["Optional extras<br/>Tesseract OCR, YOLO"]
+        store["Storage port<br/>local content-addressed"]
+    end
+    llm["OpenAI-compatible vision model<br/>OpenAI, Azure OpenAI, Ollama, vLLM, LiteLLM"]
+    disk[("Volume /app/data")]
+    prom["Prometheus"]
+
+    client -->|"POST multipart"| api --> guard --> proc
+    api --> vision
+    api --> extras
+    api --> store --> disk
+    vision -.->|"chat completions + image data URL"| llm
+    prom -->|"scrape /metrics"| svc
 ```
 
-## API Endpoints
+### Vision analysis flow
 
-### Image Processing
-- `POST /api/v1/upload` - Upload image file
-- `POST /api/v1/resize` - Resize image
-- `POST /api/v1/crop` - Crop image
-- `POST /api/v1/filter` - Apply image filters
-- `POST /api/v1/enhance` - Enhance image (brightness, contrast, etc.)
-- `POST /api/v1/batch` - Batch process multiple images
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Client
+    participant A as POST /api/v1/images/analyze
+    participant P as Processing
+    participant V as VisionAnalyzer
+    participant M as Vision model
 
-### AI Services
-- `POST /api/v1/ocr` - Extract text from image
-- `POST /api/v1/detect-objects` - Detect objects in image
-- `POST /api/v1/detect-faces` - Detect faces in image
-- `GET /api/v1/image-info` - Get image metadata and analysis
+    C->>A: multipart file
+    A->>P: load_image with limits, in a worker thread
+    P-->>A: oriented image or 413/422
+    A->>P: describe, which computes colour, brightness and sharpness
+    A->>V: analyze image and info
+    alt VISION_PROVIDER=openai
+        V->>V: downscale to VISION_MAX_SIDE, encode JPEG data URL
+        V->>M: system prompt + image, JSON response format
+        M-->>V: caption, tags, alt_text JSON
+        V->>V: Pydantic validation, tag normalization
+    else VISION_PROVIDER=fake
+        V->>V: deterministic caption from image statistics
+    end
+    V-->>A: VisionResult, or VisionUnavailableError mapped to 502
+    A-->>C: 200 info + vision + provider
+```
 
-### Management
-- `GET /api/v1/tasks/{task_id}` - Get task status
-- `GET /health/` - Comprehensive health check
-- `GET /health/live` - Liveness probe
-- `GET /health/ready` - Readiness probe
-- `GET /metrics` - Prometheus metrics
+## API at a glance
 
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Docker and Docker Compose
-- Make (optional, for convenience commands)
-
-### 1. Clone and Setup
 ```bash
-git clone <repository-url>
+curl -F file=@photo.jpg localhost:8000/api/v1/images/info
+curl -F file=@photo.jpg -F width=800 -F height=600 -F output_format=webp \
+     localhost:8000/api/v1/images/resize -o photo.webp
+curl -F file=@photo.jpg -F filter_type=sepia localhost:8000/api/v1/images/filter -o sepia.jpg
+curl -F file=@photo.jpg localhost:8000/api/v1/images/analyze
+```
+
+The interactive OpenAPI docs are at `/docs`.
+
+## Project structure
+
+```text
+image-processing-service/
+├── src/image_service/
+│   ├── main.py            # App factory, lifespan, /health, /metrics
+│   ├── config.py          # pydantic-settings
+│   ├── processing.py      # Pure image operations + upload validation
+│   ├── storage.py         # Storage port + local content-addressed adapter
+│   ├── extras.py          # Lazy OCR / object detection
+│   ├── observability.py   # structlog, Prometheus middleware, OpenTelemetry
+│   ├── genai/vision.py    # VisionAnalyzer port, fake + OpenAI-compatible adapter
+│   └── api/routes.py      # HTTP endpoints
+├── tests/{unit,integration}
+├── k8s/                   # Kustomize: deployment, service, HPA, ingress, config
+├── Dockerfile             # Multi-stage, non-root, optional WITH_OCR build arg
+└── docker-compose.yml
+```
+
+## Running locally
+
+```bash
 cd image-processing-service
-cp .env.example .env
-# Edit .env with your configuration
+uv sync                         # add --extra ocr (needs the tesseract binary) or --extra detection
+uv run uvicorn image_service.main:app --reload
 ```
 
-### 2. Development Setup
+With Docker (this includes Tesseract OCR):
+
 ```bash
-# Using Make (recommended)
-make dev-setup
-
-# Or manually
-pip install -r requirements.txt
-docker-compose up -d
-python -m uvicorn app.main:app --reload
+docker compose up --build       # http://localhost:8000/docs
+# or: docker build --build-arg WITH_OCR=true -t image-processing-service . && docker run -p 8000:8000 image-processing-service
 ```
 
-### 3. Access the Service
-- **API Documentation**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
-- **Metrics**: http://localhost:8000/metrics
-- **RabbitMQ Management**: http://localhost:15672 (guest/guest)
-- **MinIO Console**: http://localhost:9001 (minioadmin/minioadmin)
+To use a real vision model:
 
-## Production Deployment
-
-### Docker Deployment
 ```bash
-# Build and run with Docker Compose
-make docker-compose-up
-
-# Or build custom image
-make docker-build
-docker run -p 8000:8000 --env-file .env image-processing-service:latest
+export VISION_PROVIDER=openai
+export LLM_BASE_URL=http://localhost:11434/v1   # e.g. Ollama; omit for the OpenAI default
+export LLM_API_KEY=...                          # any value for local servers
+export LLM_VISION_MODEL=llama3.2-vision
 ```
 
-### Kubernetes Deployment
+## Testing and quality
+
 ```bash
-# Deploy to Kubernetes
-make k8s-deploy
-
-# Check status
-make k8s-status
-
-# View logs
-make k8s-logs
+uv run ruff check . && uv run ruff format --check .
+uv run mypy                     # strict
+uv run pytest                   # unit + API tests, coverage gate 90%
 ```
 
-### Kubernetes Configuration
-The service includes comprehensive Kubernetes manifests:
-- **Deployment**: API servers and worker pods with auto-scaling
-- **Service**: Load balancing and service discovery
-- **Ingress**: External access with SSL termination
-- **ConfigMap/Secrets**: Configuration management
-- **HPA**: Horizontal Pod Autoscaler for dynamic scaling
-- **NetworkPolicy**: Network security policies
+Test images are generated in memory, and vision calls use the fake or stub clients, so the suite runs offline in about a second. The OCR and detection extras are not installed in CI. Their "unavailable" paths are tested, and OCR was checked manually in the Docker image built with `WITH_OCR=true`. CI also builds the image and smoke-tests `/health`. `pip-audit` runs as an **advisory** job (`continue-on-error`).
 
 ## Configuration
 
-### Environment Variables
-Key configuration options (see `.env.example` for full list):
+| Variable | Default | Description |
+|---|---|---|
+| `MAX_UPLOAD_MB` | `10` | Maximum upload size (413 above this) |
+| `MAX_PIXELS` | `40000000` | Decompression-bomb guard |
+| `MAX_OUTPUT_DIMENSION` | `8000` | Largest allowed resize target |
+| `ALLOWED_FORMATS` | `["JPEG","PNG","WEBP","GIF","BMP","TIFF"]` | Accepted input formats |
+| `STORAGE_DIR` | `./data/images` | Where `POST /images` writes originals |
+| `VISION_PROVIDER` | `fake` | `fake`, `openai` (any OpenAI-compatible API) or `disabled` |
+| `LLM_BASE_URL` / `LLM_API_KEY` | unset | Endpoint and key |
+| `LLM_VISION_MODEL` | `gpt-4o-mini` | Vision-capable model name |
+| `VISION_MAX_SIDE` | `1024` | Downscale before sending to the model (cost and latency) |
+| `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | `30` / `2` | Client resilience |
+| `OCR_LANGUAGES` | `eng` | Tesseract languages |
+| `DETECTION_MODEL` / `DETECTION_CONFIDENCE` | `yolo11n.pt` / `0.35` | YOLO settings (`detection` extra) |
+| `CORS_ORIGINS`, `LOG_LEVEL`, `LOG_JSON` | | Standard service settings |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables tracing (requires the `otel` extra) |
 
-```bash
-# Application
-APP_NAME="Image Processing Service"
-DEBUG=false
-WORKERS=4
+## GenAI design
 
-# Database
-DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db"
-REDIS_URL="redis://host:6379"
+- **Port and adapters.** `VisionAnalyzer` is a `Protocol`. `OpenAICompatibleVisionAnalyzer` sends a downscaled JPEG data URL through the Chat Completions API with `response_format=json_object`, which works with OpenAI, Azure OpenAI, Ollama, vLLM or a LiteLLM gateway. `FakeVisionAnalyzer` derives captions from measured colour, brightness, sharpness and shape, so it is deterministic and free.
+- **Structured, validated output.** The model's JSON is parsed into `VisionResult`, with length limits and deduplicated lowercase tags. Malformed output becomes a 502 instead of leaking to clients.
+- **Safety and cost.** The prompt describes only visible content, refuses identification of people and ignores instructions embedded in the image (prompt-injection hardening). Images are downscaled before upload, and metadata never leaves the service.
 
-# Storage
-S3_ENDPOINT_URL="https://s3.amazonaws.com"
-S3_BUCKET_NAME="my-bucket"
+## Design decisions
 
-# Rate Limiting
-RATE_LIMIT_PER_MINUTE=60
-RATE_LIMIT_BURST=10
+- **The CPU-bound work runs in a thread pool** (`asyncio.to_thread`), so the event loop stays responsive. Pillow and OpenCV release the GIL for most operations.
+- **Validation happens before processing.** All user-controlled limits are checked up front. Errors map to 413/422, never 500.
+- **Heavy ML is opt-in.** The default image ships without PyTorch or Tesseract. `WITH_OCR=true` adds Tesseract, and the `detection` extra enables YOLO.
+- **Content-addressed storage** gives deduplication and safe, immutable caching for free. The `Storage` port leaves room for an object-store adapter.
+- **What the old version had and this one drops.** It listed Kafka, RabbitMQ, Celery, PostgreSQL and S3 integrations with no working wiring. This version is a smaller service that actually runs, with the extension points kept explicit.
 
-# Image Processing
-MAX_IMAGE_SIZE_MB=50
-MAX_WORKERS=4
-PROCESSING_TIMEOUT=300
-```
+## Known limitations
 
-### Scaling Configuration
-```yaml
-# Horizontal Pod Autoscaler
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-spec:
-  minReplicas: 3
-  maxReplicas: 20
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-```
-
-## Development
-
-### Running Tests
-```bash
-# All tests
-make test
-
-# Unit tests only
-make test-unit
-
-# Integration tests
-make test-integration
-
-# With coverage
-make test-coverage
-```
-
-### Code Quality
-```bash
-# Linting and formatting
-make lint
-make format
-
-# Type checking
-make type-check
-
-# Security checks
-make security-check
-
-# All quality checks
-make full-check
-```
-
-### Adding New Features
-1. **Image Processing**: Add new filters/operations in `app/services/image_processor.py`
-2. **AI Models**: Extend `app/services/object_detection.py` or `app/services/ocr_service.py`
-3. **API Endpoints**: Add routes in `app/api/routes/`
-4. **Workers**: Extend task processing in `app/workers/task_processor.py`
-
-## Performance Tuning
-
-### Scaling Workers
-```bash
-# Scale workers in Kubernetes
-kubectl scale deployment image-processing-worker --replicas=10
-
-# Scale API servers
-kubectl scale deployment image-processing-app --replicas=5
-```
-
-### Resource Limits
-```yaml
-resources:
-  requests:
-    memory: "512Mi"
-    cpu: "250m"
-  limits:
-    memory: "2Gi"
-    cpu: "1000m"
-```
-
-### Caching Strategy
-- **Redis**: Rate limiting, session data, temporary results
-- **CDN**: Static assets and processed images
-- **Application**: In-memory caching for model weights
-
-## Monitoring
-
-### Prometheus Metrics
-Key metrics exposed:
-- `http_requests_total` - HTTP request counter
-- `image_processing_duration_seconds` - Processing time histogram
-- `tasks_queued_total` - Queue depth gauge
-- `ocr_confidence_score` - OCR confidence histogram
-- `objects_detected_total` - Object detection counter
-
-### Grafana Dashboards
-Pre-configured dashboards available in `monitoring/grafana/`:
-- Application Performance
-- System Resources
-- Queue Metrics
-- Error Rates
-
-### Log Analysis
-Structured JSON logs with correlation IDs:
-```json
-{
-  "timestamp": "2023-01-01T12:00:00Z",
-  "level": "INFO",
-  "correlation_id": "abc-123",
-  "service": "image-processing",
-  "message": "Image processed successfully",
-  "task_id": "task-456",
-  "processing_time": 1.23
-}
-```
-
-## Security
-
-### API Security
-- **Rate Limiting**: Per-user/API key limits
-- **Input Validation**: Comprehensive request validation
-- **File Type Validation**: Strict image format checking
-- **Size Limits**: Configurable file size limits
-
-### Infrastructure Security
-- **Network Policies**: Kubernetes network isolation
-- **Non-root Containers**: Security-hardened container images
-- **Secret Management**: Kubernetes secrets for sensitive data
-- **TLS/SSL**: End-to-end encryption
-
-### Dependency Security
-```bash
-# Security scanning
-make security-check
-
-# Dependency updates
-pip-audit
-safety check
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Service Won't Start**
-```bash
-# Check logs
-make logs
-
-# Health check
-make health-check
-
-# Database connectivity
-make db-migrate
-```
-
-**High Memory Usage**
-```bash
-# Monitor resources
-make monitor-memory
-
-# Check worker count
-kubectl get pods -n image-processing
-
-# Scale down if needed
-kubectl scale deployment image-processing-worker --replicas=3
-```
-
-**Queue Backlog**
-```bash
-# Check queue status
-make queue-status
-
-# Clear queue if needed
-make clear-queue
-
-# Scale workers
-make k8s-scale-workers REPLICAS=10
-```
-
-### Performance Issues
-1. **CPU Bound**: Scale worker replicas
-2. **Memory Bound**: Increase worker memory limits
-3. **I/O Bound**: Optimize storage configuration
-4. **Network Bound**: Implement CDN for static assets
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/new-feature`
-3. Make changes and add tests
-4. Run quality checks: `make full-check`
-5. Commit changes: `git commit -am 'Add new feature'`
-6. Push to branch: `git push origin feature/new-feature`
-7. Create Pull Request
-
-### Development Workflow
-```bash
-# Setup development environment
-make setup-dev
-
-# Run in development mode
-make dev
-
-# Run tests continuously
-pytest-watch
-
-# Check code quality before commit
-make pre-commit
-```
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## License
-
-MIT License - see LICENSE file for details.
-
-## Support
-
-- **Documentation**: /docs endpoint when running
-- **Health Status**: /health endpoint
-- **Metrics**: /metrics endpoint for monitoring
-- **Logs**: Structured logging with correlation IDs
-
-For issues and feature requests, please use the GitHub issue tracker.
+- Processing is synchronous per request; there is no background job queue or batch endpoint.
+- Only local filesystem storage is implemented. Multi-replica deployments need a shared volume or a future object-store adapter.
+- Object detection (`detection` extra, which pulls in PyTorch) is not exercised in CI.

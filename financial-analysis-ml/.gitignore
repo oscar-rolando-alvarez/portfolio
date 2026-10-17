@@ -172,7 +172,6 @@ data/
 Thumbs.db
 
 # Docker
-.dockerignore
 
 # Testing
 .coverage
@@ -205,3 +204,5 @@ uploads/
 downloads/
 cache/
 tmp/
+# Ruff
+.ruff_cache/

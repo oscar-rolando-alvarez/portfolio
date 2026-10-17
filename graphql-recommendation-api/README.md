@@ -1,505 +1,246 @@
 # GraphQL Recommendation API
 
-A high-performance, scalable GraphQL API for building advanced recommendation systems with support for multiple algorithms, real-time updates, and enterprise features.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/graphql-recommendation-api.yml/badge.svg)
 
-## 🚀 Features
+A recommendation service exposed through **GraphQL** (Strawberry on FastAPI). It combines classic recommender techniques (item-item collaborative filtering, TF-IDF content similarity, popularity) with **embedding-based semantic recommendations and natural-language search**. The embeddings come through a provider-agnostic interface: any OpenAI-compatible endpoint, or a deterministic offline fake.
 
-### Core Functionality
-- **Multiple Recommendation Algorithms**
-  - Collaborative Filtering (User-based & Item-based)
-  - Content-based Filtering
-  - Matrix Factorization (SVD & Implicit)
-  - Hybrid Recommendation Engine
-  - Ensemble Methods
+> Problem: product teams want "more like this", "because you liked X" and "search by meaning" features. Those usually mean stitching together a recommender, a vector database and an LLM provider. This service puts all three behind one typed GraphQL API with clear ports. Each backing service (embedding provider, vector store, cache) can be swapped through configuration.
 
-- **GraphQL API with Strawberry**
-  - Type-safe GraphQL schema
-  - Async/await support
-  - Real-time subscriptions via WebSocket
-  - DataLoader pattern for N+1 query optimization
-  - Comprehensive error handling
+## Key features
 
-### Enterprise Features
-- **Multi-tenant Architecture**
-  - Complete data isolation between tenants
-  - Tenant-specific configurations
-  - Subscription tier-based features
+- **Hybrid recommendations** (`recommendations(strategy: HYBRID)`): a weighted blend of collaborative, content, semantic and popularity scores. Scores are min-max normalized per engine, and every result carries a human-readable `reason`. Users with no history (cold start) fall back to popularity automatically.
+- **Single strategies** for comparison: `COLLABORATIVE`, `CONTENT`, `SEMANTIC`, `POPULARITY`.
+- **Semantic search** (`semanticSearch(query: "...")`): natural-language queries over item embeddings.
+- **Similar items** (`similarItems(itemId)`): a blend of embedding similarity, TF-IDF similarity and co-engagement.
+- **Feedback loop**: `recordInteraction` (view, click, like, purchase, 1–5 rating) marks the models stale. Engines refit lazily on the next request. Results are cached per model version in Redis, or in an in-process TTL cache.
+- **GraphQL hardening**: query depth limit, alias limit, result-size clamping, permission classes, masked internal errors, and a DataLoader that batches item lookups (no N+1 queries).
+- **Operations**: JWT auth, structured JSON logs with request ids, Prometheus `/metrics` (HTTP and recommendation latency), `/health` checking the database and cache, optional OpenTelemetry tracing, Alembic migrations, a non-root Docker image, and Kubernetes manifests (Kustomize).
 
-- **Authentication & Authorization**
-  - JWT-based authentication
-  - Multi-tenant user management
-  - Role-based access control
-  - Secure password handling
+## Tech stack
 
-- **Performance & Scalability**
-  - Redis Cluster for distributed caching
-  - Vector database integration (Pinecone/Weaviate/Qdrant)
-  - Advanced rate limiting per user/tenant
-  - Sub-second recommendation response times
-  - Horizontal scaling support
+| Area | Technology | Version |
+|---|---|---|
+| Language / packaging | Python, uv + `pyproject.toml` (PEP 621) | 3.13 / uv 0.13 |
+| API | FastAPI, Strawberry GraphQL, Uvicorn | 0.143 / 0.336 / 0.54 |
+| Persistence | SQLAlchemy 2 async (typed ORM), asyncpg / aiosqlite, Alembic | 2.1 / 0.32 / 1.20 |
+| Recommenders | NumPy, SciPy sparse, scikit-learn (TF-IDF) | 2.5 / 1.18 / 1.9 |
+| GenAI | `openai` SDK against any OpenAI-compatible `/embeddings` endpoint | 3.33 |
+| Vector store | In-process NumPy index (default) or Qdrant (`qdrant` extra) | qdrant-client 1.19 |
+| Cache | Redis (`redis.asyncio`) or in-process TTL | redis-py 8.1 |
+| Observability | structlog, prometheus-client, OpenTelemetry (`otel` extra) | 26.1 / 0.26 / 1.45 |
+| Quality | Ruff, mypy (strict), pytest + coverage, pip-audit | 0.17 / 2.4 / 9.1 |
+| Runtime | Docker `python:3.13.16-slim-trixie`, PostgreSQL 18, Redis 8.8, Qdrant 1.19 | |
 
-- **Monitoring & Observability**
-  - Prometheus metrics collection
-  - Grafana dashboards
-  - Jaeger distributed tracing
-  - Real-time performance monitoring
-  - Health checks and alerting
+## Architecture
 
-## 🏗️ Architecture
+### Container view
 
-### System Overview
+```mermaid
+flowchart LR
+    client["GraphQL client / GraphiQL"]
+    subgraph svc["graphql-recommendation-api"]
+        gql["Strawberry schema<br/>queries, mutations, permissions, DataLoader"]
+        rs["RecommendationService<br/>lazy refit + versioned cache"]
+        eng["Engines<br/>collaborative, content, semantic, popularity, hybrid"]
+        emb["EmbeddingProvider port<br/>hashing fake or OpenAI-compatible"]
+        vs["VectorStore port<br/>NumPy or Qdrant"]
+    end
+    pg[("PostgreSQL<br/>users, items, interactions")]
+    redis[("Redis<br/>result cache")]
+    qdrant[("Qdrant<br/>item vectors")]
+    llm["OpenAI-compatible embeddings<br/>OpenAI, Azure OpenAI, Ollama, vLLM, LiteLLM"]
+    prom["Prometheus"]
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Web Client    │    │   Mobile App     │    │   Admin Panel   │
-└─────────┬───────┘    └────────┬─────────┘    └─────────┬───────┘
-          │                     │                        │
-          └─────────────────────┼────────────────────────┘
-                                │
-                    ┌───────────▼────────────┐
-                    │    Load Balancer       │
-                    │      (Nginx)           │
-                    └───────────┬────────────┘
-                                │
-                    ┌───────────▼────────────┐
-                    │   GraphQL API Server   │
-                    │    (FastAPI + Strawberry)   │
-                    └───────────┬────────────┘
-                                │
-          ┌─────────────────────┼─────────────────────┐
-          │                     │                     │
-┌─────────▼───────┐   ┌─────────▼────────┐   ┌────────▼────────┐
-│   PostgreSQL    │   │  Redis Cluster   │   │ Vector Database │
-│   (Primary DB)  │   │   (Caching)      │   │ (Similarity)    │
-└─────────────────┘   └──────────────────┘   └─────────────────┘
-                                │
-                    ┌───────────▼────────────┐
-                    │  Recommendation Engine │
-                    │   - Collaborative      │
-                    │   - Content-based      │
-                    │   - Matrix Factorization│
-                    │   - Hybrid             │
-                    └────────────────────────┘
+    client -->|"POST /graphql + JWT"| gql
+    gql --> rs --> eng
+    rs --> emb
+    eng --> vs
+    rs -->|"snapshot"| pg
+    gql -->|"DataLoader batch"| pg
+    rs -.-> redis
+    vs -.->|"when VECTOR_STORE=qdrant"| qdrant
+    emb -.->|"when EMBEDDING_PROVIDER=openai"| llm
+    prom -->|"scrape /metrics"| svc
 ```
 
-### Component Architecture
+### Hybrid recommendation flow
 
-#### API Layer
-- **FastAPI + Strawberry GraphQL**: High-performance async GraphQL server
-- **Authentication Middleware**: JWT-based auth with multi-tenant support
-- **Rate Limiting**: Advanced rate limiting with Redis backend
-- **DataLoaders**: Efficient batching and caching to prevent N+1 queries
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Client
+    participant G as GraphQL recommendations
+    participant S as RecommendationService
+    participant C as Cache
+    participant H as HybridRecommender
+    participant V as VectorStore
 
-#### Recommendation Engine
-- **Multiple Algorithms**: Pluggable recommendation algorithms
-- **Hybrid Engine**: Combines multiple algorithms with adaptive weights
-- **Vector Similarity**: Fast similarity search using vector databases
-- **Real-time Training**: Incremental model updates
-
-#### Data Layer
-- **PostgreSQL**: Primary data store with multi-tenant schema
-- **Redis Cluster**: Distributed caching and session storage
-- **Vector Database**: Similarity search and embeddings storage
-
-#### Monitoring & Operations
-- **Prometheus + Grafana**: Metrics collection and visualization
-- **Jaeger**: Distributed tracing
-- **Structured Logging**: Comprehensive logging with correlation IDs
-
-## 🛠️ Technology Stack
-
-### Backend
-- **Python 3.11+**: Core language
-- **FastAPI**: Web framework
-- **Strawberry GraphQL**: GraphQL library
-- **SQLAlchemy 2.0**: ORM with async support
-- **Alembic**: Database migrations
-- **Uvicorn**: ASGI server
-
-### Databases
-- **PostgreSQL 15+**: Primary database
-- **Redis 7+**: Caching and sessions
-- **Qdrant/Pinecone/Weaviate**: Vector databases
-
-### Machine Learning
-- **scikit-learn**: Basic ML algorithms
-- **implicit**: Matrix factorization for implicit feedback
-- **surprise**: Collaborative filtering algorithms
-- **numpy/scipy**: Numerical computing
-
-### Infrastructure
-- **Docker & Docker Compose**: Containerization
-- **Kubernetes**: Orchestration
-- **Prometheus**: Metrics
-- **Grafana**: Monitoring dashboards
-- **Jaeger**: Distributed tracing
-- **Nginx**: Load balancing
-
-### Development
-- **pytest**: Testing framework
-- **Black**: Code formatting
-- **mypy**: Type checking
-- **pre-commit**: Git hooks
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Docker & Docker Compose
-- Python 3.11+ (for local development)
-- 8GB+ RAM recommended
-
-### 1. Clone and Start
-
-```bash
-git clone <repository-url>
-cd graphql-recommendation-api
-
-# Start all services
-docker-compose up -d
-
-# Check health
-curl http://localhost:8000/health
+    U->>G: recommendations with strategy HYBRID and limit 10, Bearer token
+    G->>S: recommend user_id
+    S->>S: refit engines if catalog or interactions changed
+    S->>C: get rec v-N user HYBRID 10
+    alt cache hit
+        C-->>S: cached ids, scores, reasons
+    else cache miss
+        S->>H: recommend user, limit
+        par per engine
+            H->>H: collaborative item-item cosine
+            H->>H: content TF-IDF similarity
+            H->>V: semantic search with user profile vector
+            H->>H: popularity
+        end
+        H-->>S: normalized weighted blend + strongest reason
+        S->>C: set with TTL
+    end
+    S-->>G: scored ids
+    G->>G: DataLoader batch-loads items
+    G-->>U: item, score, reason
 ```
 
-### 2. Access the API
+### Data model
 
-- **GraphQL Playground**: http://localhost:8000/graphql
-- **API Documentation**: http://localhost:8000/docs
-- **Monitoring Dashboard**: http://localhost:3000 (admin/admin)
-- **Metrics**: http://localhost:9090
+```mermaid
+erDiagram
+    USERS ||--o{ INTERACTIONS : records
+    ITEMS ||--o{ INTERACTIONS : receives
+    USERS {
+        uuid id PK
+        string email UK
+        string username
+        string password_hash
+    }
+    ITEMS {
+        uuid id PK
+        string title
+        text description
+        string category
+        json tags
+    }
+    INTERACTIONS {
+        uuid id PK
+        uuid user_id FK
+        uuid item_id FK
+        string type
+        float value
+    }
+```
 
-### 3. Create Your First Tenant and User
+## Example queries
 
 ```graphql
-mutation {
-  register(input: {
-    email: "admin@example.com"
-    username: "admin"
-    password: "secure_password_123"
-    tenantDomain: "example.com"
-  }) {
-    accessToken
-    user {
-      id
-      email
-    }
-  }
-}
+mutation { register(email: "ada@example.com", username: "ada", password: "s3cret-pass") { token } }
+
+query { semanticSearch(query: "books about LLMs and retrieval", limit: 3) { score item { title } } }
+
+# with header  Authorization: Bearer <token>
+mutation { recordInteraction(itemId: "<item-id>", type: RATING, value: 5) { id } }
+query { recommendations(strategy: HYBRID, limit: 5) { score reason item { title category } } }
 ```
 
-### 4. Start Making Recommendations
+## Project structure
 
-See the [Getting Started Guide](docs/guides/getting-started.md) for detailed setup instructions.
+```text
+graphql-recommendation-api/
+├── src/recommender/
+│   ├── main.py               # App factory, lifespan, /health, /metrics
+│   ├── config.py             # pydantic-settings
+│   ├── models.py, db.py      # SQLAlchemy 2 models + engine lifecycle
+│   ├── security.py           # bcrypt + JWT
+│   ├── cache.py              # Cache port: memory / Redis (fail-open)
+│   ├── observability.py      # structlog, Prometheus middleware, OpenTelemetry
+│   ├── seed.py               # Demo catalog
+│   ├── genai/
+│   │   ├── embeddings.py     # EmbeddingProvider port + hashing fake + OpenAI-compatible adapter
+│   │   └── vectorstore.py    # VectorStore port + NumPy / Qdrant adapters
+│   ├── recommendation/
+│   │   ├── base.py           # Snapshot, Scored, Strategy
+│   │   ├── engines.py        # Popularity, item-CF, TF-IDF content, semantic
+│   │   ├── hybrid.py         # Weighted blend
+│   │   └── service.py        # Orchestration, lazy refit, caching, metrics
+│   └── graphql/              # Strawberry types, schema, context, DataLoader
+├── alembic/                  # Migrations
+├── k8s/                      # Kustomize: deployment, service, HPA, ingress, config
+├── tests/{unit,integration}
+├── Dockerfile, docker-compose.yml
+└── pyproject.toml / uv.lock
+```
 
-## 📊 Performance Benchmarks
+## Running locally
 
-### Recommendation Performance
-- **Cold Start**: < 100ms response time
-- **Warm Cache**: < 10ms response time
-- **Concurrent Users**: 10,000+ simultaneous users
-- **Throughput**: 50,000+ recommendations/second
-
-### Scalability
-- **Database**: Tested with 100M+ interactions
-- **Cache**: Redis cluster handles 1M+ ops/second
-- **API**: Auto-scaling from 1-100+ instances
-
-### Resource Usage
-- **Memory**: ~512MB per API instance
-- **CPU**: 2 cores recommended per instance
-- **Storage**: Dependent on data size (PostgreSQL + Redis)
-
-## 📚 Documentation
-
-### API Documentation
-- [GraphQL Schema Reference](docs/api/graphql-schema.md)
-- [Basic Usage Examples](docs/examples/basic-usage.md)
-- [Advanced Usage Examples](docs/examples/advanced-examples.md)
-
-### Guides
-- [Getting Started Guide](docs/guides/getting-started.md)
-- [Deployment Guide](docs/guides/deployment.md)
-- [Performance Tuning](docs/guides/performance.md)
-
-### Architecture
-- [System Architecture](docs/architecture/system-design.md)
-- [Database Schema](docs/architecture/database-schema.md)
-- [API Design](docs/architecture/api-design.md)
-
-## 🧪 Testing
-
-### Run Tests
+### With uv (SQLite, in-memory vectors, demo catalog)
 
 ```bash
-# All tests
-pytest
-
-# Unit tests only
-pytest tests/unit/
-
-# Integration tests
-pytest tests/integration/
-
-# E2E tests
-pytest tests/e2e/
-
-# With coverage
-pytest --cov=app --cov-report=html
-```
-
-### Test Categories
-- **Unit Tests**: Component-level testing
-- **Integration Tests**: API and database integration
-- **E2E Tests**: Complete user workflows
-- **Performance Tests**: Load and stress testing
-
-## 🚀 Deployment
-
-### Docker Compose (Development)
-
-```bash
-docker-compose up -d
-```
-
-### Kubernetes (Production)
-
-```bash
-# Apply all manifests
-kubectl apply -k k8s/
-
-# Or step by step
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/api/
-kubectl apply -f k8s/database/
-kubectl apply -f k8s/cache/
-kubectl apply -f k8s/monitoring/
-```
-
-### Environment Configuration
-
-Key environment variables:
-
-```bash
-# Database
-DATABASE_URL=postgresql+asyncpg://user:pass@host/db
-
-# Redis Cluster
-REDIS_NODES=redis://node1:6379,redis://node2:6379
-
-# Vector Database
-VECTOR_DB_PROVIDER=qdrant  # or pinecone, weaviate
-QDRANT_URL=http://qdrant:6333
-
-# Authentication
-SECRET_KEY=your-secret-key
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Rate Limiting
-RATE_LIMIT_AUTHENTICATED=5000/hour
-
-# Monitoring
-ENABLE_PROMETHEUS=true
-JAEGER_ENDPOINT=http://jaeger:14268/api/traces
-```
-
-## 🔧 Configuration
-
-### Recommendation Engine
-
-```python
-# Algorithm weights for hybrid recommendations
-COLLABORATIVE_WEIGHT = 0.4
-CONTENT_WEIGHT = 0.3
-MATRIX_FACTORIZATION_WEIGHT = 0.3
-
-# Matrix factorization parameters
-MF_FACTORS = 100
-MF_ITERATIONS = 50
-
-# Similarity thresholds
-CONTENT_SIMILARITY_THRESHOLD = 0.7
-COLLABORATIVE_MIN_INTERACTIONS = 5
-```
-
-### Performance Tuning
-
-```python
-# Database connection pool
-DATABASE_POOL_SIZE = 20
-DATABASE_MAX_OVERFLOW = 30
-
-# Redis cluster
-REDIS_NODES = 3  # Minimum for cluster
-REDIS_POOL_SIZE = 50
-
-# Rate limiting
-RATE_LIMIT_WINDOW = 3600  # 1 hour
-RATE_LIMIT_PREMIUM = 10000  # requests per hour
-
-# Caching TTL
-RECOMMENDATION_TTL = 1800  # 30 minutes
-USER_DATA_TTL = 7200       # 2 hours
-```
-
-## 🤝 Contributing
-
-### Development Setup
-
-```bash
-# Clone repository
-git clone <repository-url>
 cd graphql-recommendation-api
-
-# Setup virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-
-# Setup pre-commit hooks
-pre-commit install
-
-# Run tests
-pytest
+uv sync
+uv run uvicorn recommender.main:app --reload
+# GraphiQL at http://localhost:8000/graphql
 ```
 
-### Code Standards
-- **Python**: Follow PEP 8, use Black for formatting
-- **Type Hints**: Required for all functions
-- **Documentation**: Docstrings for all public functions
-- **Testing**: Minimum 80% code coverage
+### With Docker Compose (PostgreSQL + Redis + Qdrant)
 
-### Pull Request Process
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for new functionality
-4. Ensure all tests pass
-5. Submit pull request with description
+```bash
+docker compose up --build     # runs `alembic upgrade head`, then starts the API on :8000
+docker compose down -v
+```
 
-## 📈 Monitoring and Alerting
+### Using a real embedding model
 
-### Metrics Collected
-- **API Performance**: Response times, error rates, throughput
-- **Recommendation Quality**: Click-through rates, conversion rates
-- **System Health**: Memory usage, CPU utilization, database performance
-- **Business Metrics**: User engagement, recommendation effectiveness
+```bash
+export EMBEDDING_PROVIDER=openai
+export LLM_BASE_URL=http://localhost:11434/v1   # e.g. Ollama; omit for the OpenAI default
+export LLM_API_KEY=...                          # any value for local servers
+export EMBEDDING_MODEL=nomic-embed-text EMBEDDING_DIMENSIONS=768 EMBEDDING_SEND_DIMENSIONS=false
+```
 
-### Grafana Dashboards
-- **API Overview**: Request rates, response times, error rates
-- **Recommendation Performance**: Algorithm performance, cache hit rates
-- **System Health**: Resource utilization, database connections
-- **Business Intelligence**: User behavior, recommendation success
+Vectors are rebuilt from the database at startup (`reindex_all`). When you change the model or the dimensions with Qdrant, use a new `QDRANT_COLLECTION`.
 
-### Alerts
-- **High Error Rate**: > 5% error rate
-- **Slow Response Time**: > 2s average response time
-- **High Memory Usage**: > 80% memory utilization
-- **Database Issues**: Connection pool exhaustion
+## Testing and quality
 
-## 🔒 Security
+```bash
+uv run ruff check . && uv run ruff format --check .
+uv run mypy                 # strict
+uv run pytest               # unit + GraphQL integration tests, coverage gate 90%
+```
 
-### Authentication
-- **JWT Tokens**: Secure token-based authentication
-- **Password Hashing**: BCrypt with salt
-- **Token Expiration**: Configurable token lifetimes
-- **Refresh Tokens**: Secure token renewal
+Tests run fully offline. They use SQLite, the hashing embedding fake, the in-memory cache, and both vector stores: NumPy, plus Qdrant in its embedded `:memory:` mode, so no server is needed. CI also applies the Alembic migrations, verifies they match the models (`alembic check`), builds the Docker image and smoke-tests `/health`. `pip-audit` runs as an **advisory** job (`continue-on-error`).
 
-### Data Protection
-- **Multi-tenant Isolation**: Complete data separation
-- **Input Validation**: Comprehensive input sanitization
-- **Rate Limiting**: Protection against abuse
-- **CORS Configuration**: Proper cross-origin settings
+## Configuration
 
-### Infrastructure Security
-- **Network Segmentation**: Isolated networks
-- **TLS Encryption**: End-to-end encryption
-- **Secret Management**: Encrypted secrets storage
-- **Access Controls**: RBAC for all components
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `sqlite+aiosqlite:///./recommender.db` | Async SQLAlchemy URL (`postgresql+asyncpg://…` in production) |
+| `SEED_DEMO_DATA` | `true` | Insert a 12-item demo catalog when the database is empty |
+| `REDIS_URL` | unset | Enables the Redis result cache; otherwise an in-process TTL cache is used |
+| `CACHE_TTL_SECONDS` | `300` | Recommendation cache TTL |
+| `JWT_SECRET_KEY` / `ACCESS_TOKEN_EXPIRE_MINUTES` | `change-me-in-production` / `60` | Auth |
+| `CORS_ORIGINS` | `["http://localhost:3000"]` | JSON list |
+| `GRAPHQL_MAX_DEPTH` / `GRAPHQL_IDE` | `8` / `true` | Query depth limit, GraphiQL on or off |
+| `EMBEDDING_PROVIDER` | `fake` | `fake` (hashing) or `openai` (any OpenAI-compatible API) |
+| `LLM_BASE_URL` / `LLM_API_KEY` | unset | Endpoint and key for the embeddings API |
+| `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | `text-embedding-3-small` / `512` | Model and vector size |
+| `EMBEDDING_SEND_DIMENSIONS` | `true` | Send the `dimensions` parameter (turn off for servers that reject it) |
+| `VECTOR_STORE` | `memory` | `memory` or `qdrant` |
+| `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` | unset / unset / `items` | Qdrant connection |
+| `WEIGHT_COLLABORATIVE` / `WEIGHT_CONTENT` / `WEIGHT_SEMANTIC` / `WEIGHT_POPULARITY` | `0.4` / `0.2` / `0.3` / `0.1` | Hybrid blend weights |
+| `LOG_LEVEL` / `LOG_JSON` | `INFO` / `true` | Logging |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables tracing (requires the `otel` extra) |
 
-## 📊 Use Cases
+## GenAI design
 
-### E-commerce
-- **Product Recommendations**: "Customers who bought this also bought"
-- **Personalized Homepage**: User-specific product suggestions
-- **Search Enhancement**: Improved search results ranking
-- **Cross-selling**: Complementary product suggestions
+- **Ports, not vendors.** `EmbeddingProvider` and `VectorStore` are `Protocol`s. The OpenAI-compatible adapter talks to OpenAI, Azure OpenAI, Ollama, vLLM, LM Studio or a LiteLLM gateway by changing `LLM_BASE_URL` and `EMBEDDING_MODEL`. No provider SDK leaks into the engines.
+- **Deterministic fake.** `HashingEmbeddingProvider` hashes unigrams and bigrams into a fixed-size vector with light stop-word removal and plural folding, then normalizes it. It needs no network, gives reproducible results in tests and CI, and still ranks texts with overlapping vocabulary as similar, so the semantic features can be demonstrated offline. With a real embedding model the same code paths capture synonyms and meaning.
+- **Semantic personalization.** A user's profile vector is the strength-weighted mean of the vectors of items they engaged with. Recommendations are a nearest-neighbour search that excludes items already seen.
+- **Resilience.** Embedding calls have timeouts, bounded retries and shape validation. Errors surface as `EmbeddingError`, and unexpected errors are masked in GraphQL responses.
 
-### Content Platforms
-- **Content Discovery**: Articles, videos, music recommendations
-- **User Engagement**: Personalized content feeds
-- **Content Curation**: Editorial recommendation assistance
-- **Related Content**: Similar content suggestions
+## Design decisions
 
-### SaaS Applications
-- **Feature Recommendations**: Suggest relevant features to users
-- **Usage Optimization**: Recommend workflow improvements
-- **Resource Suggestions**: Relevant templates, tools
-- **User Onboarding**: Guided feature discovery
+- **Snapshot-based engines.** Engines are pure functions over an immutable snapshot of items and interactions. That makes them easy to unit test, and the service refits them in a worker thread when data changes. The versioned cache key means stale results are never served after an interaction.
+- **Exact NumPy search by default.** It is good enough for catalogs up to tens of thousands of items. Qdrant uses the same port when scale or persistence matters, and its embedded mode keeps the adapter tested in CI.
+- **Lean dependency set.** The previous version pulled in `surprise`, `implicit`, three vector-database SDKs and Redis Cluster code it never used. Item-item CF on SciPy sparse matrices, together with TF-IDF and embeddings, covers the same features with wheels that install in seconds on Python 3.13.
+- **App factory + lifespan.** `create_app(settings)` makes configuration explicit and lets tests build isolated apps.
 
-## 🛣️ Roadmap
+## Known limitations
 
-### Short Term (Q1 2024)
-- [ ] Advanced A/B testing framework
-- [ ] Real-time model updates
-- [ ] Enhanced explainable AI features
-- [ ] Mobile SDK development
-
-### Medium Term (Q2-Q3 2024)
-- [ ] Multi-armed bandit algorithms
-- [ ] Deep learning integration
-- [ ] Advanced analytics dashboard
-- [ ] API versioning support
-
-### Long Term (Q4 2024+)
-- [ ] AutoML for algorithm selection
-- [ ] Edge computing support
-- [ ] Blockchain integration for data privacy
-- [ ] Advanced federated learning
-
-## 💡 Support
-
-### Documentation
-- **API Reference**: Complete GraphQL schema documentation
-- **Examples**: Comprehensive usage examples
-- **Guides**: Step-by-step implementation guides
-- **Architecture**: Detailed system design documentation
-
-### Community
-- **GitHub Issues**: Bug reports and feature requests
-- **Discussions**: Community Q&A and discussions
-- **Wiki**: Community-contributed documentation
-- **Examples Repository**: Real-world implementation examples
-
-### Enterprise Support
-- **Professional Services**: Implementation assistance
-- **Custom Development**: Feature development services
-- **Training**: Team training and workshops
-- **24/7 Support**: Production support packages
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **FastAPI**: For the excellent async Python framework
-- **Strawberry GraphQL**: For the modern GraphQL library
-- **scikit-learn**: For machine learning algorithms
-- **Redis**: For high-performance caching
-- **PostgreSQL**: For robust data storage
-- **The Open Source Community**: For the amazing tools and libraries
-
----
-
-**Built with ❤️ for the developer community**
-
-For questions, suggestions, or contributions, please reach out through GitHub issues or discussions.
+- Single-tenant. The earlier multi-tenant tables were dropped in favour of a coherent, tested core.
+- Models live in process memory, so each replica refits independently. That is fine for moderate catalogs; large deployments would precompute item similarities offline.
+- There are no GraphQL subscriptions or refresh tokens.

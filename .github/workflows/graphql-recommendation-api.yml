@@ -1,0 +1,108 @@
+name: graphql-recommendation-api
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "graphql-recommendation-api/**"
+      - ".github/workflows/graphql-recommendation-api.yml"
+  pull_request:
+    paths:
+      - "graphql-recommendation-api/**"
+      - ".github/workflows/graphql-recommendation-api.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: graphql-recommendation-api
+
+jobs:
+  quality:
+    name: Lint, type-check and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0  # no floating major tag is published
+        with:
+          version: "0.13.1"
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: graphql-recommendation-api/uv.lock
+
+      - name: Install dependencies (locked; dev group includes qdrant-client for embedded-mode tests)
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy
+
+      - name: Pytest with coverage
+        run: uv run pytest --cov-report=xml
+
+      - name: Alembic migrations apply cleanly
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci-migrations.db
+        run: uv run alembic upgrade head && uv run alembic check
+
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory only: a newly published CVE should not block unrelated PRs.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0  # no floating major tag is published
+        with:
+          version: "0.13.1"
+          python-version: "3.13"
+
+      - name: pip-audit on locked runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements-audit.txt
+          uvx pip-audit@2.10.1 --strict -r requirements-audit.txt
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: graphql-recommendation-api
+          push: false
+          load: true
+          tags: graphql-recommendation-api:ci
+          cache-from: type=gha,scope=graphql-recommendation-api
+          cache-to: type=gha,mode=max,scope=graphql-recommendation-api
+
+      - name: Smoke test container health
+        working-directory: .
+        run: |
+          docker run -d --name app -p 8000:8000 graphql-recommendation-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs app
+          exit 1

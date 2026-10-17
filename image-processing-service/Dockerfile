@@ -1,124 +1,41 @@
-# Multi-stage Dockerfile for Image Processing Service
+# syntax=docker/dockerfile:1.7
+# Build with OCR support:  docker build --build-arg WITH_OCR=true -t image-processing-service .
+ARG WITH_OCR=false
 
-# Stage 1: Build dependencies and install packages
-FROM python:3.11-slim as builder
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies required for building
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    pkg-config \
-    libjpeg-dev \
-    libpng-dev \
-    libtiff-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libv4l-dev \
-    libxvidcore-dev \
-    libx264-dev \
-    libgtk-3-dev \
-    libatlas-base-dev \
-    gfortran \
-    libhdf5-dev \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-spa \
-    tesseract-ocr-fra \
-    tesseract-ocr-deu \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Upgrade pip and install build tools
-RUN pip install --upgrade pip setuptools wheel
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Download YOLO model
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
-
-# Stage 2: Runtime image
-FROM python:3.11-slim as runtime
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH" \
-    PYTHONPATH="/app:$PYTHONPATH"
-
-# Install only runtime dependencies
-RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-spa \
-    tesseract-ocr-fra \
-    tesseract-ocr-deu \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    libgomp1 \
-    libjpeg62-turbo \
-    libpng16-16 \
-    libtiff5 \
-    libavcodec58 \
-    libavformat58 \
-    libswscale5 \
-    libgtk-3-0 \
-    libatlas3-base \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-
-# Copy YOLO model
-COPY --from=builder /root/.cache/ultralytics /root/.cache/ultralytics
-
-# Create app user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Create app directory and set permissions
-RUN mkdir -p /app /tmp/uploads /data
+# ---- builder: resolve and install locked dependencies with uv ----
+FROM python:3.13.16-slim-trixie AS builder
+ARG WITH_OCR
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 
-# Copy application code
-COPY app/ /app/app/
-COPY --chown=appuser:appuser . /app/
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    EXTRAS=$([ "$WITH_OCR" = "true" ] && echo "--extra ocr" || true) && \
+    uv sync --frozen --no-dev --no-install-project $EXTRAS
 
-# Create necessary directories and set permissions
-RUN chown -R appuser:appuser /app /tmp/uploads /data && \
-    chmod -R 755 /app && \
-    chmod -R 777 /tmp/uploads /data
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    EXTRAS=$([ "$WITH_OCR" = "true" ] && echo "--extra ocr" || true) && \
+    uv sync --frozen --no-dev --no-editable $EXTRAS
 
-# Switch to non-root user
-USER appuser
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health/live || exit 1
-
-# Expose port
+# ---- runtime: slim, non-root ----
+FROM python:3.13.16-slim-trixie AS runtime
+ARG WITH_OCR
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH" \
+    STORAGE_DIR=/app/data/images
+RUN if [ "$WITH_OCR" = "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi \
+    && groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home app \
+    && mkdir -p /app/data/images && chown -R app:app /app/data
+WORKDIR /app
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+USER app
+VOLUME ["/app/data"]
 EXPOSE 8000
-
-# Run the application
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+CMD ["uvicorn", "image_service.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
