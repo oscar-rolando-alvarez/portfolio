@@ -1,0 +1,161 @@
+name: agentic-claims-orchestrator
+
+on:
+  pull_request:
+    paths:
+      - 'agentic-claims-orchestrator/**'
+      - '.github/workflows/agentic-claims-orchestrator.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'agentic-claims-orchestrator/**'
+      - '.github/workflows/agentic-claims-orchestrator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: agentic-claims-orchestrator
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  quality:
+    name: Lint, typecheck, unit tests, eval gate, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agentic-claims-orchestrator/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run format:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests (with coverage)
+        run: npm run coverage
+      - name: Eval gate (golden claims, deterministic fake LLM)
+        run: npm run eval
+      - name: Offline CLI demo smoke test
+        run: npm run demo -- --scenario S13
+      - name: Dependency audit (all deps, fail on high)
+        run: npm audit --audit-level=high
+      - name: Dependency audit (production deps, fail on any)
+        run: npm audit --omit=dev --audit-level=low
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-report
+          path: agentic-claims-orchestrator/evals-report/
+          if-no-files-found: ignore
+
+  integration:
+    name: Integration tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24
+        env:
+          POSTGRES_USER: claims
+          POSTGRES_PASSWORD: claims
+          POSTGRES_DB: claims
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U claims -d claims"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://claims:claims@localhost:5432/claims
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: agentic-claims-orchestrator/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Migrations apply cleanly
+        run: npm run db:migrate
+      - name: Integration tests
+        run: npm run test:integration
+
+  ml:
+    name: Fraud model reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: agentic-claims-orchestrator/ml
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: agentic-claims-orchestrator/ml/uv.lock
+      - run: uv sync --locked --python 3.13
+      - name: Retrain and compare with the committed artifact
+        run: uv run python train_fraud_model.py --check
+
+  docker:
+    name: Docker build (no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: agentic-claims-orchestrator
+          push: false
+          load: true
+          tags: agentic-claims-orchestrator:ci
+          cache-from: type=gha,scope=agentic-claims-orchestrator
+          cache-to: type=gha,mode=max,scope=agentic-claims-orchestrator
+      - name: Container boots and serves health (in-memory mode)
+        run: |
+          docker run -d --name aco -p 8080:8080 \
+            -e NODE_ENV=development -e STORAGE=memory agentic-claims-orchestrator:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/readyz; then exit 0; fi
+            sleep 1
+          done
+          docker logs aco
+          exit 1
+
+  helm:
+    name: Helm chart validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KUBECONFORM_VERSION: v0.8.0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.1
+      - name: Chart policy is identical to the application policy
+        run: diff -u config/claims-policy.json deploy/helm/claims-orchestrator/files/claims-policy.json
+      - name: helm lint
+        run: helm lint --strict deploy/helm/claims-orchestrator
+      - name: Render and validate against Kubernetes schemas
+        run: |
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz -C /tmp kubeconform
+          helm template ci deploy/helm/claims-orchestrator > /tmp/rendered.yaml
+          /tmp/kubeconform -strict -summary -kubernetes-version 1.34.0 /tmp/rendered.yaml
