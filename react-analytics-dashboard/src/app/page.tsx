@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { DashboardOverview } from '@/components/Dashboard/DashboardOverview';
 import { MetricsCards } from '@/components/Dashboard/MetricsCards';
 import { ChartGrid } from '@/components/Dashboard/ChartGrid';
+import { AIInsights } from '@/components/Dashboard/AIInsights';
 import { RecentActivity } from '@/components/Dashboard/RecentActivity';
 import { LoadingSpinner } from '@/components/UI/LoadingSpinner';
 import { ErrorBoundary } from '@/components/Error/ErrorBoundary';
@@ -24,6 +25,10 @@ export default function HomePage() {
         <Suspense fallback={<LoadingSpinner size="lg" />}>
           <MetricsCards />
         </Suspense>
+      </ErrorBoundary>
+
+      <ErrorBoundary>
+        <AIInsights />
       </ErrorBoundary>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

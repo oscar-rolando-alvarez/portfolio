@@ -9,73 +9,13 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
 } from '@heroicons/react/24/outline';
-import { Metric } from '@/types';
+import { getMetrics } from '@/lib/analytics/mockData';
 import { formatCurrency, formatNumber, formatPercentage } from '@/utils/helpers';
-import { LoadingSpinner } from '@/components/UI/LoadingSpinner';
 
-// Mock data fetching function
 async function fetchMetrics() {
-  // Simulate API call
-  await new Promise(resolve => setTimeout(resolve, 800));
-  
-  return [
-    {
-      id: 'total-visitors',
-      name: 'Total Visitors',
-      value: 142580,
-      previousValue: 128430,
-      unit: '',
-      format: 'number',
-      trend: 'up' as const,
-      changePercent: 11.0,
-      description: 'Unique visitors this month',
-      category: 'Traffic',
-      icon: 'users',
-      color: '#3b82f6',
-    },
-    {
-      id: 'page-views',
-      name: 'Page Views',
-      value: 425670,
-      previousValue: 398250,
-      unit: '',
-      format: 'number',
-      trend: 'up' as const,
-      changePercent: 6.9,
-      description: 'Total page views this month',
-      category: 'Engagement',
-      icon: 'eye',
-      color: '#22c55e',
-    },
-    {
-      id: 'revenue',
-      name: 'Revenue',
-      value: 87420,
-      previousValue: 82350,
-      unit: '$',
-      format: 'currency',
-      trend: 'up' as const,
-      changePercent: 6.2,
-      description: 'Total revenue this month',
-      category: 'Sales',
-      icon: 'currency',
-      color: '#f59e0b',
-    },
-    {
-      id: 'conversion-rate',
-      name: 'Conversion Rate',
-      value: 4.2,
-      previousValue: 3.8,
-      unit: '%',
-      format: 'percentage',
-      trend: 'up' as const,
-      changePercent: 10.5,
-      description: 'Conversion rate this month',
-      category: 'Performance',
-      icon: 'chart',
-      color: '#8b5cf6',
-    },
-  ] as Metric[];
+  // Simulated network latency for the demo dataset.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  return getMetrics();
 }
 
 const iconMap = {
