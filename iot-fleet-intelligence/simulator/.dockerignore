@@ -1,3 +1,4 @@
 *.jsonl
 coverage.out
 /fleetsim
+/bin

@@ -3,6 +3,7 @@ SHELL := /bin/bash
 
 SIM_BIN := $(CURDIR)/simulator/bin/fleetsim
 DEMO_DEVICES ?= 100000
+UP_FLAGS ?= --build
 
 .PHONY: help
 help: ## Show targets
@@ -57,7 +58,7 @@ tf-validate: ## terraform fmt + validate (no credentials needed)
 # ---------------------------------------------------------------- local stack
 .PHONY: up
 up: ## Start Kafka, moto-server (DynamoDB+SQS), Jaeger and the platform
-	docker compose up -d --build --wait
+	docker compose up -d --wait $(UP_FLAGS)
 
 .PHONY: demo
 demo: up ## Simulate 100k devices with a cell outage and print incident, enrichment and diagnosis
