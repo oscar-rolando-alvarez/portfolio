@@ -117,7 +117,7 @@ jobs:
       - name: Integration test actually ran
         env:
           KAFKA_BOOTSTRAP: localhost:9092
-        run: uv run pytest -m integration -q -rA | tee it.txt && grep -q "1 passed" it.txt
+        run: uv run pytest -m integration -rA | tee it.txt && grep -q "PASSED tests/test_integration_kafka.py" it.txt
 
   cost:
     name: Cost estimator - exact tests + report drift
