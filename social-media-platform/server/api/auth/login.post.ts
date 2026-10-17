@@ -1,92 +1,24 @@
-import { z } from 'zod'
-import { authService } from '../../utils/auth'
-import { usePrisma } from '../../utils/prisma'
+import bcrypt from 'bcryptjs'
 
-const loginSchema = z.object({
-  identifier: z.string().min(1, 'Email or username is required'),
-  password: z.string().min(1, 'Password is required')
-})
+// Constant-time-ish failure path: always run bcrypt even for unknown users.
+const DUMMY_HASH = '$2b$12$9Lz1AQR6kSOm5c7Be7PGT..NmBHlTDGD2JIhBmHnKbAUiWEG5wDju'
 
 export default defineEventHandler(async (event) => {
-  try {
-    const body = await readBody(event)
-    const { identifier, password } = loginSchema.parse(body)
+  const { identifier, password } = await readValidatedBody(event, loginSchema.parse)
 
-    const { prisma } = usePrisma()
+  const user = await usePrisma().user.findFirst({
+    where: identifier.includes('@')
+      ? { email: identifier.toLowerCase() }
+      : { username: { equals: identifier, mode: 'insensitive' } },
+    select: { ...userSummarySelect, email: true, bio: true, password: true }
+  })
 
-    // Find user by email or username
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: identifier },
-          { username: identifier }
-        ]
-      }
-    })
-
-    if (!user || !user.password) {
-      throw createError({
-        statusCode: 401,
-        statusMessage: 'Invalid credentials'
-      })
-    }
-
-    // Verify password
-    const isValidPassword = await authService.verifyPassword(password, user.password)
-    
-    if (!isValidPassword) {
-      throw createError({
-        statusCode: 401,
-        statusMessage: 'Invalid credentials'
-      })
-    }
-
-    // Generate tokens
-    const { accessToken, refreshToken } = authService.generateTokenPair(user)
-
-    // Store refresh token
-    await prisma.refreshToken.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-      }
-    })
-
-    // Update last active session
-    const clientIP = getClientIP(event) || ''
-    const userAgent = getHeader(event, 'user-agent') || ''
-    await authService.createSession(user.id, clientIP, userAgent)
-
-    // Set secure httpOnly cookie for refresh token
-    setCookie(event, 'refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 // 7 days
-    })
-
-    // Return user data without password
-    const { password: _, ...userWithoutPassword } = user
-
-    return {
-      success: true,
-      message: 'Login successful',
-      data: {
-        user: userWithoutPassword,
-        accessToken
-      }
-    }
-
-  } catch (error) {
-    if (error.statusCode) {
-      throw error
-    }
-
-    console.error('Login error:', error)
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Internal server error'
-    })
+  const valid = await bcrypt.compare(password, user?.password ?? DUMMY_HASH)
+  if (!user || !valid) {
+    throw createError({ statusCode: 401, statusMessage: 'Invalid credentials' })
   }
+
+  await startSession(event, user)
+  const { password: _password, ...publicUser } = user
+  return { user: publicUser }
 })

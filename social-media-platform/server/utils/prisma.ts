@@ -1,24 +1,25 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { PrismaClient } from '../generated/prisma/client'
 
-declare global {
-  var __prisma: PrismaClient | undefined
-}
+let client: PrismaClient | undefined
 
-let prisma: PrismaClient
-
-if (process.env.NODE_ENV === 'production') {
-  prisma = new PrismaClient()
-} else {
-  if (!global.__prisma) {
-    global.__prisma = new PrismaClient({
-      log: ['query', 'error', 'warn'],
-    })
+/** Lazily creates a single Prisma client per server process (node-postgres driver adapter). */
+export function usePrisma(): PrismaClient {
+  if (!client) {
+    const databaseUrl = useRuntimeConfig().databaseUrl || process.env.DATABASE_URL
+    if (!databaseUrl) {
+      throw createError({ statusCode: 503, statusMessage: 'DATABASE_URL is not configured' })
+    }
+    client = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) })
   }
-  prisma = global.__prisma
+  return client
 }
 
-export function usePrisma() {
-  return { prisma }
-}
-
-export { prisma }
+/** Prisma `select` for the public author/user card. */
+export const userSummarySelect = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatar: true,
+  verified: true
+} as const

@@ -1,0 +1,153 @@
+name: social-media-platform
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "social-media-platform/**"
+      - ".github/workflows/social-media-platform.yml"
+  pull_request:
+    paths:
+      - "social-media-platform/**"
+      - ".github/workflows/social-media-platform.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: social-media-platform
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  build-test:
+    name: Lint, typecheck, test, build, e2e smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24
+        env:
+          POSTGRES_DB: socialconnect
+          POSTGRES_USER: social
+          POSTGRES_PASSWORD: social
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U social -d socialconnect"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://social:social@localhost:5432/socialconnect
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: social-media-platform/package-lock.json
+
+      - name: Install dependencies (also generates the Prisma client)
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and component tests
+        run: npm run test:coverage
+
+      - name: Apply migrations and check for schema drift
+        run: |
+          npx prisma migrate deploy
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
+      - name: Seed demo data
+        run: npx prisma db seed
+
+      - name: Build
+        run: npm run build
+
+      - name: End-to-end smoke test against the production build
+        env:
+          NODE_ENV: production
+          NUXT_JWT_SECRET: ci-smoke-test-secret-not-used-anywhere-else
+          NUXT_COOKIE_SECURE: "false"
+          PORT: "3000"
+        run: |
+          node .output/server/index.mjs > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3000/api/health > /dev/null && break; sleep 1; done
+          ./scripts/smoke-test.sh || { cat server.log; exit 1; }
+
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: npm audit (production dependencies)
+        id: audit
+        # Advisory only: remaining high findings are in Nuxt/Nitro build tooling with no patched release yet.
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+      - name: Report audit result
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning title=npm audit::High-severity advisories reported for production dependencies (see the audit step log)."
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Throwaway values for the CI-only Compose stack
+      NUXT_JWT_SECRET: ci-compose-secret-0123456789abcdef
+      NUXT_COOKIE_SECURE: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: social-media-platform
+          target: runtime
+          push: false
+          load: true
+          tags: social-media-platform:local
+          cache-from: type=gha,scope=social-media-platform
+          cache-to: type=gha,mode=max,scope=social-media-platform
+      - name: Build migration image
+        uses: docker/build-push-action@v7
+        with:
+          context: social-media-platform
+          target: migrate
+          push: false
+          load: true
+          tags: social-media-platform-migrate:local
+          cache-from: type=gha,scope=social-media-platform
+      - name: Compose stack health check
+        run: |
+          docker compose up -d --wait --wait-timeout 120 db
+          docker compose run --rm migrate
+          docker compose up -d app
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:3000/api/health && exit 0; sleep 2; done
+          docker compose logs app
+          exit 1
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

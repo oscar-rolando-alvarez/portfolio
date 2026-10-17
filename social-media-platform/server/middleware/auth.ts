@@ -1,43 +1,13 @@
-import { authService } from '../utils/auth'
+const SKIP_PREFIXES = ['/_nuxt/', '/api/health', '/api/_nuxt_icon']
 
+// Populates event.context.auth for every request. Authorization is enforced per route
+// with requireAuth(), so public routes (health, login, register) need no allow-list.
 export default defineEventHandler(async (event) => {
-  // Skip auth middleware for public routes
-  const publicRoutes = [
-    '/api/auth/login',
-    '/api/auth/register',
-    '/api/auth/refresh',
-    '/api/health',
-    '/api/public'
-  ]
+  if (SKIP_PREFIXES.some(prefix => event.path.startsWith(prefix))) return
 
-  const url = getRequestURL(event)
-  const isPublicRoute = publicRoutes.some(route => url.pathname.startsWith(route))
-  
-  if (isPublicRoute || !url.pathname.startsWith('/api/')) {
-    return
-  }
+  const hasCredentials = getCookie(event, ACCESS_COOKIE) || getCookie(event, REFRESH_COOKIE) || getHeader(event, 'authorization')
+  if (!hasCredentials) return
 
-  // Extract token from Authorization header
-  const authHeader = getHeader(event, 'authorization')
-  const token = authService.extractTokenFromHeader(authHeader)
-
-  if (!token) {
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'Access token required'
-    })
-  }
-
-  // Verify token and get user
-  const user = await authService.getUserFromToken(token)
-  
-  if (!user) {
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'Invalid or expired token'
-    })
-  }
-
-  // Add user to event context
-  event.context.user = user
+  const auth = await resolveAuth(event)
+  if (auth) event.context.auth = auth
 })

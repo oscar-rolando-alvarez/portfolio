@@ -1,65 +1,30 @@
-# Build stage
-FROM node:18-alpine AS builder
+# syntax=docker/dockerfile:1.7
 
-# Set working directory
+# ---- Build stage -----------------------------------------------------------
+FROM node:24.22.0-alpine3.24 AS build
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-
-# Copy source code
 COPY . .
+RUN npx nuxt prepare && npm run build
 
-# Build the application
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine AS production
-
-# Set working directory
+# ---- Runtime stage ---------------------------------------------------------
+# Nitro bundles the server into .output, so the runtime image needs no node_modules.
+FROM node:24.22.0-alpine3.24 AS runtime
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nuxt -u 1001
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000
 
-# Copy built application from builder stage
-COPY --from=builder --chown=nuxt:nodejs /app/.output ./
+COPY --from=build --chown=node:node /app/.output ./.output
 
-# Set environment variables
-ENV NODE_ENV=production
-ENV NUXT_HOST=0.0.0.0
-ENV NUXT_PORT=3000
-
-# Expose port
+USER node
 EXPOSE 3000
 
-# Switch to non-root user
-USER nuxt
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node --eval "
-    const http = require('http');
-    const options = {
-      host: '0.0.0.0',
-      port: 3000,
-      timeout: 2000,
-      path: '/health'
-    };
-    const request = http.request(options, (res) => {
-      if (res.statusCode === 200) {
-        process.exit(0);
-      } else {
-        process.exit(1);
-      }
-    });
-    request.on('error', () => process.exit(1));
-    request.end();
-  "
-
-# Start the application
-CMD ["node", "server/index.mjs"]
+CMD ["node", ".output/server/index.mjs"]

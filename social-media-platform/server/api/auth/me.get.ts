@@ -1,29 +1,11 @@
-export default defineEventHandler(async (event) => {
-  try {
-    // User is already available from auth middleware
-    const user = event.context.user
+import type { CurrentUser } from '#shared/types'
 
-    if (!user) {
-      throw createError({
-        statusCode: 401,
-        statusMessage: 'Unauthorized'
-      })
-    }
-
-    return {
-      success: true,
-      data: { user }
-    }
-
-  } catch (error) {
-    if (error.statusCode) {
-      throw error
-    }
-
-    console.error('Get user error:', error)
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Internal server error'
-    })
-  }
+export default defineEventHandler(async (event): Promise<{ user: CurrentUser }> => {
+  const { userId } = requireAuth(event)
+  const user = await usePrisma().user.findUnique({
+    where: { id: userId },
+    select: { ...userSummarySelect, email: true, bio: true }
+  })
+  if (!user) throw createError({ statusCode: 401, statusMessage: 'Account no longer exists' })
+  return { user }
 })

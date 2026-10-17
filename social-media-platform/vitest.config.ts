@@ -1,33 +1,37 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
-import vue from '@vitejs/plugin-vue'
-import { resolve } from 'path'
+import { defineVitestProject } from '@nuxt/test-utils/config'
 
 export default defineConfig({
-  plugins: [vue()],
   test: {
-    globals: true,
-    environment: 'happy-dom',
+    projects: [
+      {
+        resolve: {
+          alias: { '#shared': fileURLToPath(new URL('./shared', import.meta.url)) }
+        },
+        test: {
+          name: 'unit',
+          include: ['test/unit/**/*.test.ts'],
+          environment: 'node'
+        }
+      },
+      await defineVitestProject({
+        test: {
+          name: 'nuxt',
+          include: ['test/nuxt/**/*.test.ts'],
+          environment: 'nuxt',
+          environmentOptions: {
+            nuxt: {
+              domEnvironment: 'happy-dom'
+            }
+          }
+        }
+      })
+    ],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: [
-        'node_modules/',
-        'dist/',
-        '.output/',
-        '.nuxt/',
-        'coverage/',
-        '**/*.d.ts',
-        '**/*.config.*',
-        'tests/**'
-      ]
-    }
-  },
-  resolve: {
-    alias: {
-      '~': resolve(__dirname, '.'),
-      '@': resolve(__dirname, '.'),
-      '~~': resolve(__dirname, '.'),
-      '@@': resolve(__dirname, '.')
+      include: ['app/**', 'server/**', 'shared/**'],
+      exclude: ['server/generated/**']
     }
   }
 })
