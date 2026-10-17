@@ -1,428 +1,322 @@
-# 🚀 High-Performance Rust Web Server
+# Rust Web Server
 
-A production-ready, high-performance web server built with Rust and Actix-Web, designed to handle 10k+ concurrent connections efficiently.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/rust-web-server.yml/badge.svg)
 
-## ✨ Features
+A production-grade asynchronous HTTP server written in Rust on top of Actix Web. It
+packages the pieces most backend services end up needing (JWT authentication with
+refresh-token rotation, per-client rate limiting, file uploads, real-time WebSocket and
+Server-Sent Events, health probes, Prometheus metrics and OpenTelemetry tracing) into a
+small, well-tested codebase that can serve as a reference or a starting point.
 
-### Core Server Features
-- **Actix-Web Framework** with async/await support
-- **Advanced Connection Pooling** (Database and Redis)
-- **Custom Middleware** for rate limiting, authentication, and CORS
-- **WebSocket Support** for real-time communication
-- **Server-Sent Events (SSE)** for streaming data
-- **Graceful Shutdown** handling
-- **Health Checks** and readiness probes
-- **Comprehensive Metrics** collection (Prometheus format)
-- **Structured Logging** with tracing
+## The problem it solves
 
-### Performance Features
-- **10k+ Concurrent Connections** support
-- **Connection Pooling** with r2d2/deadpool
-- **Optimized Response Caching**
-- **HTTP/2 Support**
-- **Static File Serving** with compression
-- **Request/Response Compression** (gzip, brotli)
-- **Load Balancing** ready
+Teams starting a new service in Rust usually spend their first weeks wiring the same
+cross-cutting concerns: configuration, auth, observability, graceful shutdown, container
+image, CI. This project shows one coherent, idiomatic way to do all of that with current
+crates, and proves it works with tests that run against real PostgreSQL and Redis in CI.
 
-### Advanced Features
-- **JWT Authentication** middleware
-- **Rate Limiting** with token bucket algorithm
-- **Request Validation** and sanitization
-- **File Upload Handling** with streaming
-- **GraphQL Endpoint** support (optional)
-- **OpenAPI Documentation** generation
-- **Database Migrations** with sqlx
-- **Background Task Processing**
+## Key features
 
-## 🏗️ Architecture
+- **Authentication**: registration and login with Argon2id password hashing, short-lived
+  JWT access tokens and long-lived refresh tokens (stored only as SHA-256 hashes),
+  audience separation so a refresh token can never be used as an access token, and
+  logout that deny-lists the current access token in Redis until it expires.
+- **Authorization**: role-based permissions (`admin`, `moderator`, `user`, `guest`),
+  admin-only endpoints.
+- **Rate limiting**: GCRA token bucket per client IP (`governor`), with `Retry-After`
+  headers; health and metrics endpoints are exempt.
+- **File uploads**: streaming multipart uploads with a size cap, server-generated file
+  names, owner-scoped download and delete.
+- **Real time**: room-based WebSocket chat (`actix-ws`) with heartbeats, and SSE with
+  named broadcast channels plus periodic metrics/status streams.
+- **Operations**: liveness/readiness/detailed health probes, Prometheus metrics in a
+  dedicated registry, structured JSON logs (`tracing`), optional OTLP trace export,
+  graceful shutdown, embedded SQL migrations, a non-root container image with a built-in
+  health check command.
+
+## Tech stack
+
+| Area | Technology | Version |
+|------|------------|---------|
+| Language | Rust (edition 2024) | 1.99.1 (pinned in `rust-toolchain.toml`), MSRV 1.94 |
+| HTTP framework | actix-web, actix-ws, actix-multipart, actix-cors | 4.17 / 0.4 / 0.8 / 0.7 |
+| Async runtime | Tokio | 1.53 |
+| Database | PostgreSQL via sqlx (rustls) | PostgreSQL 18, sqlx 0.9 |
+| Cache / deny-list | Redis via redis-rs `ConnectionManager` | Redis 8, redis 1.7 |
+| Auth | jsonwebtoken, argon2 | 11.1, 0.6 |
+| Rate limiting | governor + dashmap | 0.10, 6.2 |
+| Observability | tracing, tracing-subscriber, prometheus, OpenTelemetry OTLP | 0.1, 0.3, 0.14, 0.33 |
+| Config | config + dotenvy | 0.15, 0.15 |
+| Validation | validator | 0.21 |
+| Tooling | rustfmt, clippy, cargo-deny, criterion | 1.99.1, 0.8 |
+| Container | Debian trixie slim, non-root | `rust:1.99.1-slim-trixie` builder |
+
+## Architecture
+
+### Container view
+
+```mermaid
+flowchart LR
+    client["Web / mobile client"]
+    ops["Prometheus / OTLP collector"]
+
+    subgraph server["rust-web-server (Actix Web)"]
+        mw["Middleware: tracing, security headers, compression, CORS, metrics, rate limit"]
+        public["Public routes: /api/health, /api/auth, /api/events"]
+        protected["Protected routes: /api/v1 (JWT)"]
+        admin["Admin routes: /admin (JWT + admin role)"]
+        ws["WebSocket hub: /ws"]
+        sse["SSE hub: named channels"]
+    end
+
+    pg[("PostgreSQL: users, refresh tokens, files")]
+    redis[("Redis: revoked access tokens")]
+    disk[("Upload volume")]
+
+    client -->|"HTTPS / WebSocket"| mw
+    mw --> public
+    mw --> protected
+    mw --> admin
+    mw --> ws
+    public --> sse
+    protected --> sse
+    public --> pg
+    protected --> pg
+    protected --> redis
+    protected --> disk
+    ops -->|"scrape /api/metrics"| mw
+    server -.->|"OTLP/HTTP traces"| ops
+```
+
+### Login and authenticated request
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Client
+    participant A as Actix Web
+    participant DB as PostgreSQL
+    participant R as Redis
+
+    C->>A: POST /api/auth/login (email, password)
+    A->>DB: SELECT user by email
+    A->>A: Verify Argon2id hash (blocking pool)
+    A->>DB: INSERT refresh token hash
+    A-->>C: access token (aud=api) + refresh token (aud=refresh)
+
+    C->>A: GET /api/v1/user/profile (Bearer access token)
+    A->>A: Verify signature, exp, nbf, iss, aud
+    A->>R: EXISTS auth:revoked:{jti}
+    R-->>A: 0
+    A->>DB: SELECT user by id
+    A-->>C: 200 profile
+
+    C->>A: POST /api/v1/user/logout
+    A->>DB: Revoke refresh tokens
+    A->>R: SET auth:revoked:{jti} with TTL = remaining lifetime
+    A-->>C: 200
+```
+
+### Data model
+
+```mermaid
+erDiagram
+    USERS ||--o{ REFRESH_TOKENS : has
+    USERS ||--o{ FILES : uploads
+    USERS ||--o{ SESSIONS : owns
+    USERS {
+        uuid id PK
+        text email UK
+        text password_hash
+        text_array roles
+        bool is_active
+        timestamptz last_login
+    }
+    REFRESH_TOKENS {
+        uuid id PK
+        uuid user_id FK
+        text token_hash
+        timestamptz expires_at
+        bool is_revoked
+    }
+    FILES {
+        uuid id PK
+        uuid user_id FK
+        text filename
+        text original_name
+        bigint size
+        text content_type
+    }
+```
+
+## API overview
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/health`, `/api/health/live` | - | Process is up |
+| GET | `/api/health/ready` | - | Postgres and Redis reachable (503 otherwise) |
+| GET | `/api/health/detailed` | - | Dependency latency, pool stats, uptime |
+| GET | `/api/metrics` | - | Prometheus exposition |
+| GET | `/api/system`, `/api/config` | - | Build/runtime info, non-secret config |
+| POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/refresh` | - | Auth flows |
+| GET | `/api/events/stream?channel=name` | - | SSE subscription |
+| GET | `/api/events/metrics`, `/api/events/system` | - | Periodic SSE streams |
+| GET | `/api/v1/user/profile` | Bearer | Current user |
+| PUT | `/api/v1/user/password` | Bearer | Change password (revokes refresh tokens) |
+| POST | `/api/v1/user/logout` | Bearer | Revoke tokens |
+| POST | `/api/v1/upload/file` | Bearer | Multipart upload (10 MiB cap) |
+| GET / DELETE | `/api/v1/upload/files/{id}` | Bearer | Download / delete own file |
+| POST | `/api/v1/events/publish` | Bearer | Publish to an SSE channel |
+| GET | `/admin/metrics/detailed`, `/admin/system/stats` | Bearer + admin | Operational detail |
+| GET | `/ws`, `/ws/chat` | - | WebSocket chat (`join_room`, `leave_room`, `send_message`, `ping`) |
+
+## Project structure
 
 ```
+rust-web-server/
 ├── src/
-│   ├── main.rs              # Application entry point
-│   ├── config.rs            # Configuration management
-│   ├── error.rs             # Error handling
-│   ├── handlers/            # Request handlers
-│   │   ├── auth.rs          # Authentication endpoints
-│   │   ├── health.rs        # Health check endpoints
-│   │   ├── metrics.rs       # Metrics endpoints
-│   │   ├── upload.rs        # File upload handling
-│   │   ├── websocket.rs     # WebSocket handlers
-│   │   └── sse.rs           # Server-Sent Events
-│   ├── middleware/          # Custom middleware
-│   │   ├── auth.rs          # JWT authentication
-│   │   ├── rate_limit.rs    # Rate limiting
-│   │   └── metrics.rs       # Metrics collection
-│   ├── models/              # Data models
-│   │   ├── auth.rs          # Authentication models
-│   │   └── user.rs          # User models
-│   ├── routes/              # Route definitions
-│   ├── services/            # Business logic services
-│   │   ├── database.rs      # Database service
-│   │   ├── cache.rs         # Redis cache service
-│   │   └── metrics.rs       # Metrics service
-│   └── utils/               # Utility functions
-├── migrations/              # Database migrations
-├── k8s/                     # Kubernetes manifests
-├── load-tests/              # Load testing scripts
-├── benches/                 # Benchmark tests
-└── tests/                   # Integration tests
+│   ├── main.rs            # Binary: config, telemetry, HTTP server, healthcheck subcommand
+│   ├── lib.rs             # AppState and route registration (used by tests)
+│   ├── config.rs          # Layered configuration (defaults, TOML file, APP_* env)
+│   ├── error.rs           # AppError -> HTTP status + JSON body
+│   ├── telemetry.rs       # tracing subscriber, optional OTLP exporter
+│   ├── handlers/          # auth, health, metrics, sse, upload, websocket
+│   ├── middleware/        # JWT validator + AuthUser extractor, metrics, rate limit
+│   ├── models/            # Claims, roles/permissions, request/response DTOs, rows
+│   ├── routes/            # public, protected (/api/v1), admin, websocket
+│   └── services/          # Postgres, Redis, Prometheus registry, password/JWT helpers
+├── migrations/            # sqlx migrations, embedded into the binary
+├── tests/                 # HTTP integration tests
+├── benches/               # criterion micro-benchmarks
+├── load-tests/            # k6 / wrk scripts for end-to-end load testing
+├── k8s/                   # Example Kubernetes manifests
+├── Dockerfile             # Multi-stage, non-root runtime image
+└── docker-compose.yml     # API + PostgreSQL + Redis
 ```
 
-## 🚀 Quick Start
+## Running locally
 
-### Prerequisites
+### With Docker
 
-- Rust 1.75+ 
-- PostgreSQL 15+
-- Redis 7+
-- Docker (optional)
-- Kubernetes (optional)
-
-### Local Development
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd rust-web-server
-   ```
-
-2. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Install dependencies**
-   ```bash
-   cargo build
-   ```
-
-4. **Set up database**
-   ```bash
-   # Start PostgreSQL and Redis (using Docker)
-   docker-compose up -d postgres redis
-   
-   # Run migrations
-   cargo run -- migrate
-   ```
-
-5. **Start the server**
-   ```bash
-   cargo run
-   ```
-
-The server will start on `http://localhost:8080`
-
-### Docker Deployment
-
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
-
-# Or build Docker image manually
-docker build -t rust-web-server .
-docker run -p 8080:8080 rust-web-server
+```sh
+cp .env.example .env            # adjust secrets
+docker compose up --build
+curl http://localhost:8080/api/health/ready
 ```
 
-### Kubernetes Deployment
+### Without Docker
 
-```bash
-# Apply Kubernetes manifests
-kubectl apply -f k8s/
+Requirements: Rust (the pinned toolchain is installed automatically by `rustup`),
+PostgreSQL 13+ and Redis 6+.
 
-# Check deployment status
-kubectl get pods -n rust-web-server
+```sh
+cp .env.example .env
+docker compose up -d postgres redis   # or use your own instances
+cargo run --release
 ```
 
-## 📊 Performance Tuning Guide
+Migrations run automatically at startup.
 
-### 🔧 Server Configuration
+Quick tour:
 
-#### Worker Threads
-```bash
-# Environment variable
-export APP_WORKERS=8  # Number of CPU cores
-
-# In production, set to number of CPU cores
-# For I/O intensive: cores * 2
-# For CPU intensive: cores
+```sh
+curl -s -X POST localhost:8080/api/auth/register -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com","password":"correct-horse","first_name":"Ada","last_name":"Lovelace"}'
+TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com","password":"correct-horse"}' | jq -r .access_token)
+curl -s localhost:8080/api/v1/user/profile -H "Authorization: Bearer $TOKEN"
 ```
 
-#### Connection Limits
-```bash
-export APP_MAX_CONNECTIONS=25000  # Max concurrent connections
-export APP_REQUEST_TIMEOUT=30     # Request timeout in seconds
+## Testing
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test                                   # unit tests + HTTP tests that need no services
+
+# Full suite, including tests against real PostgreSQL and Redis
+docker compose up -d postgres redis
+APP_DATABASE__URL=postgres://postgres:postgres@localhost:5432/rust_web_server \
+APP_REDIS__URL=redis://localhost:6379 \
+cargo test -- --include-ignored
+
+cargo bench                                  # criterion micro-benchmarks
+cargo deny check                             # advisories, licenses, sources
 ```
 
-#### Database Pool Tuning
-```bash
-export APP_DATABASE__MAX_CONNECTIONS=20    # Max DB connections
-export APP_DATABASE__MIN_CONNECTIONS=5     # Min DB connections
-export APP_DATABASE__ACQUIRE_TIMEOUT=30    # Connection acquire timeout
-export APP_DATABASE__IDLE_TIMEOUT=600      # Idle connection timeout
-export APP_DATABASE__MAX_LIFETIME=1800     # Connection max lifetime
-```
+The service-backed tests are marked `#[ignore = "requires Postgres and Redis"]` so a
+plain `cargo test` works anywhere; CI always runs them with `--include-ignored` against
+PostgreSQL and Redis service containers. They cover the full auth lifecycle (including
+token revocation), validation errors, role checks, upload/download/delete with ownership,
+readiness, metrics, SSE publishing and rate limiting.
 
-#### Redis Configuration
-```bash
-export APP_REDIS__MAX_CONNECTIONS=10  # Max Redis connections
-export APP_REDIS__TIMEOUT=5           # Redis operation timeout
-```
+CI (`.github/workflows/rust-web-server.yml`) runs formatting, clippy with and without
+default features, the full test suite, cargo-deny, and builds the Docker image and
+smoke-tests it against real PostgreSQL and Redis containers.
 
-### 🚀 Performance Optimizations
+## Configuration
 
-#### 1. Compilation Optimizations
-```toml
-# Cargo.toml
-[profile.release]
-lto = true                # Link-time optimization
-codegen-units = 1         # Single codegen unit for better optimization
-panic = "abort"           # Smaller binary size
-opt-level = 3             # Maximum optimization
-```
-
-#### 2. Runtime Optimizations
-```bash
-# Use jemalloc allocator for better memory management
-export MALLOC_CONF="background_thread:true,metadata_thp:auto"
-
-# Increase file descriptor limits
-ulimit -n 65536
-
-# TCP tuning
-echo 'net.core.somaxconn = 65536' >> /etc/sysctl.conf
-echo 'net.ipv4.tcp_max_syn_backlog = 65536' >> /etc/sysctl.conf
-```
-
-#### 3. Database Optimizations
-```sql
--- PostgreSQL optimizations
--- shared_buffers = 25% of RAM
--- effective_cache_size = 75% of RAM
--- work_mem = RAM / max_connections
--- maintenance_work_mem = RAM / 16
-
--- Add indexes for frequently queried columns
-CREATE INDEX CONCURRENTLY idx_users_email ON users(email);
-CREATE INDEX CONCURRENTLY idx_refresh_tokens_user_id ON refresh_tokens(user_id);
-```
-
-#### 4. Redis Optimizations
-```bash
-# Redis configuration
-maxmemory 2gb
-maxmemory-policy allkeys-lru
-tcp-keepalive 60
-timeout 300
-```
-
-### 📈 Monitoring and Metrics
-
-#### Prometheus Metrics
-The server exposes metrics at `/api/metrics`:
-- HTTP request metrics
-- Database connection pool metrics
-- Cache hit/miss rates
-- System resource usage
-- Custom business metrics
-
-#### Health Checks
-- `/api/health` - Basic health check
-- `/api/health/detailed` - Detailed health with dependencies
-- `/api/health/ready` - Readiness probe
-- `/api/health/live` - Liveness probe
-
-#### Logging
-```bash
-# Configure logging
-export RUST_LOG=info                    # Log level
-export LOG_FORMAT=json                  # JSON format for production
-export APP_LOGGING__LEVEL=info          # Application log level
-export APP_LOGGING__FORMAT=json         # Application log format
-```
-
-## 🧪 Testing and Benchmarking
-
-### Running Tests
-```bash
-# Unit tests
-cargo test
-
-# Integration tests
-cargo test --test integration_tests
-
-# Benchmarks
-cargo bench
-```
-
-### Load Testing
-```bash
-# Using provided load test scripts
-cd load-tests
-./run-tests.sh
-
-# Using wrk directly
-wrk -t12 -c400 -d30s -s wrk-script.lua http://localhost:8080
-
-# Using k6
-k6 run k6-load-test.js
-```
-
-### Expected Performance
-
-On a modern 8-core server with 16GB RAM:
-- **Throughput**: 50,000+ requests/second
-- **Latency (P95)**: < 10ms
-- **Concurrent Connections**: 10,000+
-- **Memory Usage**: < 100MB base
-- **CPU Usage**: < 50% at full load
-
-## 🔒 Security Features
-
-### Authentication & Authorization
-- JWT-based authentication
-- Role-based access control (RBAC)
-- Permission-based authorization
-- Secure password hashing with Argon2
-- Token blacklisting support
-
-### Rate Limiting
-- Token bucket algorithm
-- Per-IP rate limiting
-- Global rate limiting
-- Configurable limits and burst sizes
-
-### Security Headers
-- CORS protection
-- Request validation
-- Input sanitization
-- Secure cookie handling
-
-## 🛠️ Development
-
-### Adding New Endpoints
-1. Create handler in `src/handlers/`
-2. Add route in `src/routes/`
-3. Add authentication if needed
-4. Add tests
-5. Update documentation
-
-### Database Migrations
-```bash
-# Create new migration
-sqlx migrate add <migration_name>
-
-# Run migrations
-sqlx migrate run
-
-# Revert migration
-sqlx migrate revert
-```
-
-### Custom Middleware
-```rust
-// Example middleware
-use actix_web::{dev::ServiceRequest, Error, HttpMessage};
-
-pub async fn custom_middleware(
-    req: ServiceRequest,
-    // ... implementation
-) -> Result<ServiceRequest, (Error, ServiceRequest)> {
-    // Middleware logic here
-    Ok(req)
-}
-```
-
-## 📋 Environment Variables
+All settings can be provided as environment variables with the `APP_` prefix (nested
+keys separated by `__`), in a `.env` file, or in a TOML file referenced by `CONFIG_FILE`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_HOST` | `0.0.0.0` | Server bind address |
-| `APP_PORT` | `8080` | Server port |
-| `APP_WORKERS` | CPU cores | Number of worker threads |
-| `APP_MAX_CONNECTIONS` | `25000` | Maximum connections |
-| `APP_DATABASE__URL` | - | PostgreSQL URL |
-| `APP_REDIS__URL` | - | Redis URL |
-| `APP_JWT__SECRET` | - | JWT signing secret |
-| `RUST_LOG` | `info` | Rust log level |
+| `APP_HOST` / `APP_PORT` | `0.0.0.0` / `8080` | Listen address |
+| `APP_WORKERS` | number of CPUs | Actix worker threads |
+| `APP_MAX_CONNECTIONS` | `25000` | Max concurrent connections per worker |
+| `APP_REQUEST_TIMEOUT` | `30` | Client request header timeout (s) |
+| `APP_SHUTDOWN_TIMEOUT` | `30` | Graceful shutdown drain time (s) |
+| `APP_ENVIRONMENT` | `development` | `production` enforces a strong JWT secret |
+| `APP_UPLOAD_DIR` / `APP_STATIC_DIR` | `./uploads` / `./static` | File storage / static assets (served at `/static` if present) |
+| `APP_CORS_ALLOWED_ORIGINS` | `*` | Comma-separated origins |
+| `APP_DATABASE__URL` | `postgres://postgres:postgres@localhost:5432/rust_web_server` | PostgreSQL URL |
+| `APP_DATABASE__MAX_CONNECTIONS` / `__MIN_CONNECTIONS` | `20` / `2` | Pool size |
+| `APP_REDIS__URL` | `redis://localhost:6379` | Redis URL |
+| `APP_JWT__SECRET` | insecure placeholder | HMAC secret, at least 32 chars in production |
+| `APP_JWT__EXPIRATION` / `__REFRESH_EXPIRATION` | `3600` / `604800` | Token lifetimes (s) |
+| `APP_JWT__ALGORITHM` | `HS256` | `HS256`, `HS384` or `HS512` |
+| `APP_RATE_LIMIT__ENABLED` | `true` | Toggle the rate limiter |
+| `APP_RATE_LIMIT__REQUESTS_PER_MINUTE` / `__BURST_SIZE` | `120` / `30` | Per-IP quota |
+| `APP_LOGGING__LEVEL` / `__FORMAT` | `info` / `json` | Log level and `json`, `pretty` or `compact` |
+| `RUST_LOG` | - | Overrides the log filter |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | - | Enables OTLP/HTTP trace export (standard `OTEL_*` variables apply) |
 
-See `src/config.rs` for all available configuration options.
+## Design decisions
 
-## 🐳 Container Deployment
+- **Actix Web over a rewrite to another framework**: the code base was already Actix-based
+  and Actix 4 remains actively maintained and among the fastest Rust HTTP stacks, so the
+  upgrade focused on correctness and current idioms (`middleware::from_fn`, `actix-ws`
+  instead of the deprecated actor-based WebSockets).
+- **Library plus thin binary**: all routes are registered through `configure_app`, so
+  integration tests drive the real router in-process with `actix_web::test`.
+- **Stateless access tokens with a small deny-list**: JWTs keep request authentication
+  free of database round-trips; Redis only stores the ids of tokens revoked before expiry,
+  with a TTL equal to their remaining lifetime. Validation fails closed if Redis is down.
+- **Refresh tokens are hashed at rest** and bound to their user; changing the password
+  revokes all of them in the same transaction.
+- **Dedicated Prometheus registry** instead of the global one, so multiple app instances
+  (for example in tests) never collide on metric registration.
+- **CPU-bound Argon2 runs on the blocking pool** to keep the async workers responsive.
+- **Server errors never leak internals**: 5xx responses carry a generic message while the
+  detail goes to structured logs.
+- **HTTP/1.1 in the app, HTTP/2 and TLS at the edge**: actix-web's `http2` feature is
+  disabled because TLS/HTTP/2 termination belongs to the ingress or load balancer, and
+  doing so removes the `h2` 0.3 line flagged by RustSec from the dependency tree.
+- **Supply-chain policy as code**: `deny.toml` enforces advisories, licenses and crate
+  sources. The single ignored advisory (RUSTSEC-2023-0071, `rsa`) is documented there: the
+  crate is linked by jsonwebtoken but only HMAC algorithms are ever used.
+- **No curl in the image**: the binary ships a `healthcheck` subcommand used by the
+  Docker `HEALTHCHECK`, keeping the runtime image minimal.
 
-### Docker
-```dockerfile
-# Multi-stage build for optimized production image
-FROM rust:1.75-slim as builder
-# ... build steps
+## Known limitations
 
-FROM debian:bullseye-slim
-# ... runtime setup
-```
+- The rate limiter is in-memory per instance; use a shared store (for example Redis)
+  when running several replicas behind a load balancer.
+- WebSocket and SSE hubs are in-process; horizontal scaling would need a pub/sub backbone
+  such as Redis Streams or NATS.
+- The client IP for rate limiting honours `Forwarded`/`X-Forwarded-For`; deploy behind a
+  proxy that overwrites those headers.
 
-### Kubernetes
-- Horizontal Pod Autoscaler (HPA)
-- Service monitors for Prometheus
-- Persistent volumes for data
-- Health checks and probes
-- Resource limits and requests
+## License
 
-## 📚 API Documentation
-
-### Authentication Endpoints
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-- `POST /api/auth/refresh` - Refresh token
-- `POST /api/v1/user/logout` - Logout (authenticated)
-
-### Health Endpoints
-- `GET /api/health` - Basic health check
-- `GET /api/health/detailed` - Detailed health status
-- `GET /api/health/ready` - Readiness probe
-- `GET /api/health/live` - Liveness probe
-
-### Metrics Endpoints
-- `GET /api/metrics` - Prometheus metrics
-- `GET /api/system` - System information
-
-### Real-time Endpoints
-- `GET /ws/` - WebSocket connection
-- `GET /api/events/stream` - Server-Sent Events
-- `GET /api/events/metrics` - Metrics SSE stream
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🔗 Related Projects
-
-- [Actix Web](https://actix.rs/) - Web framework
-- [SQLx](https://github.com/launchbadge/sqlx) - Async SQL toolkit
-- [Redis](https://redis.io/) - In-memory data structure store
-- [Prometheus](https://prometheus.io/) - Monitoring system
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 📞 Support
-
-For technical support and questions:
-- Create an issue on GitHub
-- Check the documentation
-- Review the examples in the codebase
-
----
-
-**Built with ❤️ in Rust** 🦀
+MIT
