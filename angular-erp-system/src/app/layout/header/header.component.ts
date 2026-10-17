@@ -1,314 +1,164 @@
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
-import { MatToolbarModule } from '@angular/material/toolbar';
-import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
-import { MatMenuModule } from '@angular/material/menu';
+import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { MatBadgeModule } from '@angular/material/badge';
+import { MatButtonModule } from '@angular/material/button';
+import { MatDividerModule } from '@angular/material/divider';
+import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
 
-import { User } from '@core/models/user.model';
-import { ThemeService } from '@core/services/theme.service';
-import { AuthService } from '@core/services/auth.service';
 import { NotificationService } from '@core/services/notification.service';
+import { ThemeService } from '@core/services/theme.service';
+import * as AuthActions from '@core/store/auth/auth.actions';
 import { selectCurrentUser } from '@core/store/auth/auth.selectors';
-import { selectUnreadNotificationsCount } from '@core/store/notification/notification.selectors';
+import {
+  selectAllNotifications,
+  selectUnreadNotificationsCount,
+} from '@core/store/notification/notification.selectors';
 
 @Component({
   selector: 'app-header',
-  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
-    RouterModule,
-    MatToolbarModule,
-    MatIconModule,
-    MatButtonModule,
-    MatMenuModule,
+    RouterLink,
     MatBadgeModule,
-    MatTooltipModule
+    MatButtonModule,
+    MatDividerModule,
+    MatIconModule,
+    MatMenuModule,
+    MatToolbarModule,
+    MatTooltipModule,
   ],
   template: `
-    <mat-toolbar color="primary" class="header-toolbar">
-      @if (isHandset) {
-        <button
-          type="button"
-          aria-label="Toggle sidenav"
-          mat-icon-button
-          (click)="menuToggle.emit()">
-          <mat-icon aria-label="Side nav toggle icon">menu</mat-icon>
+    <mat-toolbar class="toolbar">
+      @if (isHandset()) {
+        <button mat-icon-button type="button" aria-label="Toggle navigation" (click)="menuToggle.emit()">
+          <mat-icon>menu</mat-icon>
         </button>
       }
-      
-      <span class="app-title">{{ appTitle }}</span>
-      
-      <div class="header-spacer"></div>
-      
-      <!-- Search -->
-      <button 
-        mat-icon-button 
-        class="header-action-btn"
-        matTooltip="Search"
-        aria-label="Search">
-        <mat-icon>search</mat-icon>
-      </button>
-      
-      <!-- Notifications -->
-      <button 
-        mat-icon-button 
-        class="header-action-btn"
+      <span class="title">ERP System</span>
+      <span class="spacer"></span>
+
+      <button
+        mat-icon-button
+        type="button"
         [matMenuTriggerFor]="notificationMenu"
         matTooltip="Notifications"
-        aria-label="Notifications">
-        <mat-icon [matBadge]="unreadNotificationsCount$ | async" 
-                  [matBadgeHidden]="(unreadNotificationsCount$ | async) === 0"
-                  matBadgeColor="warn">
+        aria-label="Notifications"
+      >
+        <mat-icon [matBadge]="unreadCount()" [matBadgeHidden]="unreadCount() === 0" matBadgeColor="warn">
           notifications
         </mat-icon>
       </button>
-      
-      <!-- Theme Toggle -->
-      <button 
-        mat-icon-button 
-        class="header-action-btn"
-        (click)="toggleTheme()"
+
+      <button
+        mat-icon-button
+        type="button"
+        (click)="theme.toggleTheme()"
         matTooltip="Toggle theme"
-        aria-label="Toggle theme">
-        <mat-icon>{{ (isDarkTheme$ | async) ? 'light_mode' : 'dark_mode' }}</mat-icon>
+        aria-label="Toggle theme"
+      >
+        <mat-icon>{{ theme.isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
       </button>
-      
-      <!-- User Menu -->
-      <button 
-        mat-icon-button 
-        class="header-action-btn"
-        [matMenuTriggerFor]="userMenu"
-        matTooltip="User menu"
-        aria-label="User menu">
-        @if (currentUser$ | async; as user) {
-          @if (user.avatar) {
-            <img [src]="user.avatar" [alt]="user.firstName + ' ' + user.lastName" class="user-avatar">
-          } @else {
-            <mat-icon>account_circle</mat-icon>
-          }
-        } @else {
-          <mat-icon>account_circle</mat-icon>
-        }
+
+      <button mat-icon-button type="button" [matMenuTriggerFor]="userMenu" aria-label="User menu">
+        <mat-icon>account_circle</mat-icon>
       </button>
     </mat-toolbar>
 
-    <!-- Notification Menu -->
-    <mat-menu #notificationMenu="matMenu" class="notification-menu">
-      <div class="notification-header">
-        <h3>Notifications</h3>
-        <button mat-button color="primary" (click)="markAllAsRead()">Mark all as read</button>
+    <mat-menu #notificationMenu="matMenu" xPosition="before">
+      <div class="menu-header">
+        <strong>Notifications</strong>
+        <button mat-button type="button" (click)="$event.stopPropagation(); notifications.markAllAsRead()">
+          Mark all read
+        </button>
       </div>
-      <div class="notification-list">
-        <!-- Notification items will be implemented with proper component -->
-        <div class="notification-item">
-          <div class="notification-content">
-            <p class="notification-title">System Update</p>
-            <p class="notification-message">New features are available</p>
-            <span class="notification-time">2 hours ago</span>
-          </div>
-        </div>
-      </div>
-      <div class="notification-footer">
-        <button mat-button routerLink="/notifications">View all notifications</button>
-      </div>
+      @for (n of recent(); track n.id) {
+        <a mat-menu-item [routerLink]="n.actionUrl ?? null" [class.unread]="!n.isRead">
+          <span class="n-title">{{ n.title }}</span>
+          <span class="n-message">{{ n.message }}</span>
+        </a>
+      } @empty {
+        <p class="empty">You're all caught up.</p>
+      }
     </mat-menu>
 
-    <!-- User Menu -->
-    <mat-menu #userMenu="matMenu" class="user-menu">
-      @if (currentUser$ | async; as user) {
+    <mat-menu #userMenu="matMenu" xPosition="before">
+      @if (user(); as u) {
         <div class="user-info">
-          <p class="user-name">{{ user.firstName }} {{ user.lastName }}</p>
-          <p class="user-email">{{ user.email }}</p>
+          <strong>{{ u.firstName }} {{ u.lastName }}</strong>
+          <span>{{ u.email }}</span>
         </div>
-        <mat-divider></mat-divider>
+        <mat-divider />
       }
-      
-      <button mat-menu-item routerLink="/profile">
-        <mat-icon>person</mat-icon>
-        <span>Profile</span>
-      </button>
-      
-      <button mat-menu-item routerLink="/settings">
-        <mat-icon>settings</mat-icon>
-        <span>Settings</span>
-      </button>
-      
-      <button mat-menu-item routerLink="/help">
-        <mat-icon>help</mat-icon>
-        <span>Help</span>
-      </button>
-      
-      <mat-divider></mat-divider>
-      
-      <button mat-menu-item (click)="logout()">
-        <mat-icon>exit_to_app</mat-icon>
-        <span>Logout</span>
+      <button mat-menu-item type="button" (click)="logout()">
+        <mat-icon>logout</mat-icon>
+        <span>Sign out</span>
       </button>
     </mat-menu>
   `,
-  styles: [`
-    .header-toolbar {
+  styles: `
+    .toolbar {
       position: sticky;
       top: 0;
-      z-index: 100;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      z-index: 10;
+      background: var(--mat-sys-surface-container);
     }
-
-    .app-title {
-      font-size: 1.25rem;
+    .title {
       font-weight: 500;
-      margin-left: 8px;
     }
-
-    .header-spacer {
-      flex: 1 1 auto;
+    .spacer {
+      flex: 1;
     }
-
-    .header-action-btn {
-      margin-left: 8px;
-    }
-
-    .user-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      object-fit: cover;
-    }
-
-    .notification-menu {
-      width: 320px;
-      max-height: 400px;
-    }
-
-    .notification-header {
+    .menu-header,
+    .user-info {
       display: flex;
+      padding: 8px 16px;
+      gap: 8px;
+    }
+    .menu-header {
       justify-content: space-between;
       align-items: center;
-      padding: 16px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+      min-width: 300px;
     }
-
-    .notification-header h3 {
-      margin: 0;
-      font-size: 1.1rem;
-      font-weight: 500;
-    }
-
-    .notification-list {
-      max-height: 250px;
-      overflow-y: auto;
-    }
-
-    .notification-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-
-    .notification-item:hover {
-      background-color: rgba(0, 0, 0, 0.04);
-    }
-
-    .notification-content {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .notification-title {
-      font-weight: 500;
-      margin: 0;
-      font-size: 0.9rem;
-    }
-
-    .notification-message {
-      margin: 0;
-      font-size: 0.8rem;
-      color: rgba(0, 0, 0, 0.7);
-    }
-
-    .notification-time {
-      font-size: 0.75rem;
-      color: rgba(0, 0, 0, 0.5);
-    }
-
-    .notification-footer {
-      padding: 8px 16px;
-      border-top: 1px solid rgba(0, 0, 0, 0.12);
-      text-align: center;
-    }
-
-    .user-menu {
-      width: 200px;
-    }
-
     .user-info {
-      padding: 16px;
-      text-align: center;
+      flex-direction: column;
+      gap: 2px;
     }
-
-    .user-name {
-      margin: 0;
-      font-weight: 500;
-      font-size: 1rem;
+    .user-info span,
+    .n-message {
+      font-size: 0.8rem;
+      opacity: 0.7;
     }
-
-    .user-email {
-      margin: 4px 0 0 0;
-      font-size: 0.875rem;
-      color: rgba(0, 0, 0, 0.7);
+    .n-title,
+    .n-message {
+      display: block;
+      line-height: 1.3;
     }
-
-    :host-context(.dark-theme) {
-      .notification-header,
-      .notification-item:hover,
-      .notification-footer {
-        border-color: rgba(255, 255, 255, 0.12);
-      }
-
-      .notification-item:hover {
-        background-color: rgba(255, 255, 255, 0.04);
-      }
-
-      .notification-message,
-      .notification-time,
-      .user-email {
-        color: rgba(255, 255, 255, 0.7);
-      }
+    .unread .n-title {
+      font-weight: 600;
     }
-  `]
+    .empty {
+      padding: 0 16px;
+      opacity: 0.7;
+    }
+  `,
 })
 export class HeaderComponent {
-  private store = inject(Store);
-  private themeService = inject(ThemeService);
-  private authService = inject(AuthService);
-  private notificationService = inject(NotificationService);
+  private readonly store = inject(Store);
+  protected readonly theme = inject(ThemeService);
+  protected readonly notifications = inject(NotificationService);
 
-  @Input() isHandset: boolean | null = false;
-  @Output() menuToggle = new EventEmitter<void>();
+  readonly isHandset = input(false);
+  readonly menuToggle = output<void>();
 
-  appTitle = 'ERP System';
-  
-  currentUser$: Observable<User | null> = this.store.select(selectCurrentUser);
-  unreadNotificationsCount$: Observable<number> = this.store.select(selectUnreadNotificationsCount);
-  isDarkTheme$: Observable<boolean> = this.themeService.isDarkTheme$;
+  protected readonly user = this.store.selectSignal(selectCurrentUser);
+  protected readonly unreadCount = this.store.selectSignal(selectUnreadNotificationsCount);
+  protected readonly recent = this.store.selectSignal(selectAllNotifications);
 
-  toggleTheme(): void {
-    this.themeService.toggleTheme();
-  }
-
-  markAllAsRead(): void {
-    this.notificationService.markAllAsRead();
-  }
-
-  logout(): void {
-    this.authService.logout();
+  protected logout(): void {
+    this.store.dispatch(AuthActions.logout());
   }
 }

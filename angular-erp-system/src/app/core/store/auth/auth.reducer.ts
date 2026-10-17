@@ -200,10 +200,21 @@ export const authReducer = createReducer(
   })),
 
   // Session Management
-  on(AuthActions.sessionExpired, (state) => ({
+  on(AuthActions.sessionExpired, () => ({
     ...initialState,
     error: 'Your session has expired. Please log in again.'
   })),
+
+  on(AuthActions.sessionRestored, (state, { user, token, refreshToken }) => ({
+    ...state,
+    user,
+    token,
+    refreshToken: refreshToken ?? null,
+    isAuthenticated: true,
+    error: null
+  })),
+
+  on(AuthActions.sessionCleared, () => initialState),
 
   on(AuthActions.sessionExtended, (state) => ({
     ...state,

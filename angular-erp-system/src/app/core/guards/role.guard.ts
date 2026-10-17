@@ -3,7 +3,7 @@ import { Router, CanActivateFn } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { map, take } from 'rxjs/operators';
 
-import { selectHasAnyRole, selectCurrentUser } from '@core/store/auth/auth.selectors';
+import { selectCurrentUser } from '@core/store/auth/auth.selectors';
 import { NotificationService } from '@core/services/notification.service';
 
 export const roleGuard: CanActivateFn = (route, state) => {

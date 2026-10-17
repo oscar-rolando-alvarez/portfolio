@@ -53,8 +53,13 @@ export class AuthEffects {
         // Show success notification
         this.notificationService.showSuccess(`Welcome back, ${user.firstName}!`);
         
-        // Navigate to dashboard
-        this.router.navigate(['/dashboard']);
+        // Return to the page the guard redirected from (same-origin paths only).
+        const returnUrl = this.router.parseUrl(this.router.url).queryParams['returnUrl'];
+        const target =
+          typeof returnUrl === 'string' && returnUrl.startsWith('/') && !returnUrl.startsWith('//')
+            ? returnUrl
+            : '/dashboard';
+        this.router.navigateByUrl(target);
       })
     ),
     { dispatch: false }
@@ -192,7 +197,7 @@ export class AuthEffects {
       ofType(AuthActions.refreshTokenFailure),
       tap(() => {
         // Clear stored data and redirect to login
-        localStorage.clear();
+        ['token', 'refreshToken', 'user'].forEach((key) => localStorage.removeItem(key));
         this.notificationService.showError('Session expired. Please log in again.');
         this.router.navigate(['/auth/login']);
       })
@@ -300,7 +305,7 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.sessionExpired),
       tap(() => {
-        localStorage.clear();
+        ['token', 'refreshToken', 'user'].forEach((key) => localStorage.removeItem(key));
         this.notificationService.showWarning('Your session has expired. Please log in again.');
         this.router.navigate(['/auth/login']);
       })

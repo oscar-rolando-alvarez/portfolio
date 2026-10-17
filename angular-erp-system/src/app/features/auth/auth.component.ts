@@ -1,11 +1,9 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-auth',
-  standalone: true,
-  imports: [CommonModule, RouterOutlet],
+  imports: [RouterOutlet],
   template: `
     <div class="auth-container">
       <div class="auth-content">
@@ -28,7 +26,7 @@ import { RouterOutlet } from '@angular/router';
     }
 
     .auth-content {
-      background: white;
+      background: var(--mat-sys-surface);
       border-radius: 12px;
       padding: 48px;
       box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
@@ -51,7 +49,7 @@ import { RouterOutlet } from '@angular/router';
     .auth-header p {
       font-size: 0.875rem;
       margin: 0;
-      color: rgba(0, 0, 0, 0.6);
+      color: var(--mat-sys-on-surface-variant);
     }
 
     @media (max-width: 768px) {

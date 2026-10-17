@@ -35,7 +35,7 @@ export const clearAllNotifications = createAction('[Notification] Clear All Noti
 export const showNotification = createAction(
   '[Notification] Show Notification',
   props<{ 
-    type: 'info' | 'success' | 'warning' | 'error';
+    level: 'info' | 'success' | 'warning' | 'error';
     title: string;
     message: string;
     duration?: number;

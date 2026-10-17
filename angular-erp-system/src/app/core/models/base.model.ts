@@ -32,13 +32,13 @@ export interface ApiError {
   code: string;
   message: string;
   field?: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 export interface FilterCriteria {
   field: string;
   operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'nin' | 'contains' | 'startsWith' | 'endsWith';
-  value: any;
+  value: unknown;
 }
 
 export interface SortCriteria {
@@ -58,8 +58,8 @@ export interface AuditLog extends BaseEntity {
   entityType: string;
   entityId: string;
   action: 'create' | 'update' | 'delete' | 'view';
-  oldValues?: Record<string, any>;
-  newValues?: Record<string, any>;
+  oldValues?: Record<string, unknown>;
+  newValues?: Record<string, unknown>;
   userId: string;
   userEmail: string;
   ipAddress: string;
@@ -77,7 +77,7 @@ export interface FileUpload {
   url: string;
   uploadedBy: string;
   uploadedAt: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Notification {
@@ -91,5 +91,5 @@ export interface Notification {
   expiresAt?: Date;
   actionUrl?: string;
   actionText?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }

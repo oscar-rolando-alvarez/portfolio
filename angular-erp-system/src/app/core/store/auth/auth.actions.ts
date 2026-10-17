@@ -115,6 +115,15 @@ export const updateUserProfileFailure = createAction(
 // Session Management
 export const checkAuthStatus = createAction('[Auth] Check Auth Status');
 
+/** A persisted session was found at startup; no navigation or toast should follow. */
+export const sessionRestored = createAction(
+  '[Auth] Session Restored',
+  props<{ user: User; token: string; refreshToken?: string }>()
+);
+
+/** The persisted session was rejected by the server and has been discarded. */
+export const sessionCleared = createAction('[Auth] Session Cleared');
+
 export const sessionExpired = createAction('[Auth] Session Expired');
 
 export const sessionExtended = createAction('[Auth] Session Extended');

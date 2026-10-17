@@ -1,258 +1,122 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CurrencyPipe } from '@angular/common';
+import { httpResource } from '@angular/common/http';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
-import { MatGridListModule } from '@angular/material/grid-list';
-import { RouterModule } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
 
-import { selectCurrentUser } from '@core/store/auth/auth.selectors';
-import { User } from '@core/models/user.model';
+import { apiUrl, unwrap } from '@core/http/api';
+import { selectCurrentUser, selectUserRoles } from '@core/store/auth/auth.selectors';
+import { NAVIGATION, visibleNavigation } from '@core/navigation/navigation';
 
-interface DashboardCard {
-  title: string;
-  value: string | number;
-  icon: string;
-  color: string;
-  route: string;
-  description: string;
+export interface DashboardSummary {
+  products: number;
+  lowStock: number;
+  inventoryValue: number;
+  unreadNotifications: number;
 }
 
 @Component({
   selector: 'app-dashboard',
-  standalone: true,
-  imports: [
-    CommonModule,
-    RouterModule,
-    MatCardModule,
-    MatIconModule,
-    MatButtonModule,
-    MatGridListModule
-  ],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RouterLink, MatButtonModule, MatCardModule, MatIconModule],
   template: `
-    <div class="dashboard-container">
-      <!-- Welcome Section -->
-      @if (currentUser$ | async; as user) {
-        <div class="welcome-section">
-          <h1>Welcome back, {{ user.firstName }}!</h1>
-          <p>Here's what's happening in your organization today.</p>
-        </div>
-      }
+    <section class="welcome">
+      <h1>Welcome back{{ user()?.firstName ? ', ' + user()?.firstName : '' }}</h1>
+      <p>Here is what is happening in your organization today.</p>
+    </section>
 
-      <!-- Dashboard Cards -->
-      <div class="dashboard-grid">
-        @for (card of dashboardCards; track card.title) {
-          <mat-card class="dashboard-card" [routerLink]="card.route">
-            <mat-card-header>
-              <div mat-card-avatar [class]="'avatar-' + card.color">
-                <mat-icon>{{ card.icon }}</mat-icon>
-              </div>
-              <mat-card-title>{{ card.title }}</mat-card-title>
-              <mat-card-subtitle>{{ card.description }}</mat-card-subtitle>
-            </mat-card-header>
-            
-            <mat-card-content>
-              <div class="card-value">{{ card.value }}</div>
-            </mat-card-content>
-            
-            <mat-card-actions align="end">
-              <button mat-button color="primary">
-                VIEW DETAILS
-                <mat-icon>arrow_forward</mat-icon>
-              </button>
-            </mat-card-actions>
-          </mat-card>
+    @if (summary.error()) {
+      <p role="alert" class="error">Dashboard metrics are unavailable right now.</p>
+    }
+
+    <section class="cards" aria-label="Key metrics">
+      @for (card of cards(); track card.title) {
+        <mat-card appearance="outlined">
+          <mat-card-header>
+            <mat-icon mat-card-avatar>{{ card.icon }}</mat-icon>
+            <mat-card-title>{{ card.title }}</mat-card-title>
+            <mat-card-subtitle>{{ card.subtitle }}</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <span class="value">{{ summary.isLoading() ? '...' : card.value }}</span>
+          </mat-card-content>
+        </mat-card>
+      }
+    </section>
+
+    <section class="modules">
+      <h2>Modules</h2>
+      <div class="module-links">
+        @for (item of modules(); track item.route) {
+          <a mat-stroked-button [routerLink]="item.route">
+            <mat-icon>{{ item.icon }}</mat-icon>
+            {{ item.label }}
+          </a>
         }
       </div>
-
-      <!-- Quick Actions -->
-      <div class="quick-actions-section">
-        <h2>Quick Actions</h2>
-        <div class="quick-actions-grid">
-          <button mat-raised-button color="primary" routerLink="/hr/employees">
-            <mat-icon>person_add</mat-icon>
-            Add Employee
-          </button>
-          
-          <button mat-raised-button color="accent" routerLink="/finance/invoicing">
-            <mat-icon>receipt</mat-icon>
-            Create Invoice
-          </button>
-          
-          <button mat-raised-button routerLink="/inventory/products">
-            <mat-icon>add_box</mat-icon>
-            Add Product
-          </button>
-          
-          <button mat-raised-button routerLink="/crm/customers">
-            <mat-icon>person_outline</mat-icon>
-            New Customer
-          </button>
-        </div>
-      </div>
-    </div>
+    </section>
   `,
-  styles: [`
-    .dashboard-container {
-      padding: 24px;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    .welcome-section {
-      margin-bottom: 32px;
-    }
-
-    .welcome-section h1 {
-      font-size: 2rem;
+  styles: `
+    .welcome h1 {
+      margin: 0 0 4px;
       font-weight: 400;
-      margin: 0 0 8px 0;
-      color: rgba(0, 0, 0, 0.87);
     }
-
-    .welcome-section p {
-      font-size: 1rem;
+    .welcome p {
       margin: 0;
-      color: rgba(0, 0, 0, 0.6);
+      opacity: 0.7;
     }
-
-    .dashboard-grid {
+    .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 24px;
-      margin-bottom: 32px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin: 24px 0;
     }
-
-    .dashboard-card {
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-
-    .dashboard-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-    }
-
-    .avatar-primary {
-      background-color: #1976d2;
-      color: white;
-    }
-
-    .avatar-accent {
-      background-color: #e91e63;
-      color: white;
-    }
-
-    .avatar-warn {
-      background-color: #f44336;
-      color: white;
-    }
-
-    .avatar-success {
-      background-color: #4caf50;
-      color: white;
-    }
-
-    .card-value {
+    .value {
+      display: block;
       font-size: 2rem;
       font-weight: 500;
-      color: #1976d2;
-      margin: 16px 0;
+      margin-top: 8px;
     }
-
-    .quick-actions-section h2 {
-      font-size: 1.5rem;
-      font-weight: 400;
-      margin: 0 0 16px 0;
-      color: rgba(0, 0, 0, 0.87);
-    }
-
-    .quick-actions-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-    }
-
-    .quick-actions-grid button {
-      height: 64px;
+    .module-links {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
+      flex-wrap: wrap;
+      gap: 12px;
     }
-
-    :host-context(.dark-theme) .welcome-section h1,
-    :host-context(.dark-theme) .quick-actions-section h2 {
-      color: rgba(255, 255, 255, 0.87);
+    .error {
+      color: var(--mat-sys-error);
     }
-
-    :host-context(.dark-theme) .welcome-section p {
-      color: rgba(255, 255, 255, 0.6);
-    }
-
-    @media (max-width: 768px) {
-      .dashboard-container {
-        padding: 16px;
-      }
-
-      .dashboard-grid {
-        grid-template-columns: 1fr;
-        gap: 16px;
-      }
-
-      .quick-actions-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .welcome-section h1 {
-        font-size: 1.5rem;
-      }
-    }
-  `]
+  `,
 })
-export class DashboardComponent implements OnInit {
-  private store = inject(Store);
-  
-  currentUser$: Observable<User | null> = this.store.select(selectCurrentUser);
-  
-  dashboardCards: DashboardCard[] = [
-    {
-      title: 'Employees',
-      value: '145',
-      icon: 'people',
-      color: 'primary',
-      route: '/hr/employees',
-      description: 'Active employees'
-    },
-    {
-      title: 'Revenue',
-      value: '$52,340',
-      icon: 'trending_up',
-      color: 'success',
-      route: '/finance/reports',
-      description: 'This month'
-    },
-    {
-      title: 'Projects',
-      value: '23',
-      icon: 'work',
-      color: 'accent',
-      route: '/projects/list',
-      description: 'Active projects'
-    },
-    {
-      title: 'Inventory',
-      value: '1,247',
-      icon: 'inventory',
-      color: 'warn',
-      route: '/inventory/stock',
-      description: 'Items in stock'
-    }
-  ];
+export class DashboardComponent {
+  private readonly store = inject(Store);
+  private readonly currency = new CurrencyPipe('en-US');
 
-  ngOnInit(): void {
-    // Load dashboard data
-  }
+  protected readonly user = this.store.selectSignal(selectCurrentUser);
+  private readonly roles = this.store.selectSignal(selectUserRoles);
+
+  protected readonly summary = httpResource<DashboardSummary>(() => apiUrl('dashboard/summary'), {
+    parse: (raw) => unwrap<DashboardSummary>(raw),
+  });
+
+  protected readonly modules = computed(() =>
+    visibleNavigation(NAVIGATION, this.roles()).filter((item) => item.route !== '/dashboard'),
+  );
+
+  protected readonly cards = computed(() => {
+    const s = this.summary.value();
+    return [
+      { title: 'Products', subtitle: 'Active SKUs', icon: 'inventory_2', value: s?.products ?? '-' },
+      { title: 'Needs reorder', subtitle: 'At or below reorder point', icon: 'warning', value: s?.lowStock ?? '-' },
+      {
+        title: 'Stock value',
+        subtitle: 'At unit cost',
+        icon: 'payments',
+        value: s ? this.currency.transform(s.inventoryValue, 'USD', 'symbol', '1.0-0') : '-',
+      },
+      { title: 'Unread alerts', subtitle: 'Notifications inbox', icon: 'notifications', value: s?.unreadNotifications ?? '-' },
+    ];
+  });
 }

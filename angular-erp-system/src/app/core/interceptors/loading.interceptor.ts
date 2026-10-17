@@ -4,35 +4,14 @@ import { finalize } from 'rxjs/operators';
 
 import { LoadingService } from '@core/services/loading.service';
 
+const SILENT_ENDPOINTS = ['/auth/validate', '/notifications', '/health'];
+
 export const loadingInterceptor: HttpInterceptorFn = (req, next) => {
-  const loadingService = inject(LoadingService);
-
-  // Skip loading for certain endpoints
-  const skipLoadingEndpoints = [
-    '/auth/validate',
-    '/notifications',
-    '/heartbeat',
-    '/health'
-  ];
-
-  const shouldSkipLoading = skipLoadingEndpoints.some(endpoint => 
-    req.url.includes(endpoint)
-  );
-
-  if (shouldSkipLoading) {
+  if (SILENT_ENDPOINTS.some((endpoint) => req.url.includes(endpoint))) {
     return next(req);
   }
 
-  // Generate a unique scope for this request
-  const scope = `${req.method}-${req.url}-${Date.now()}`;
-  
-  // Show loading for this scope
-  loadingService.showScoped(scope);
-
-  return next(req).pipe(
-    finalize(() => {
-      // Hide loading when request completes (success or error)
-      loadingService.hideScoped(scope);
-    })
-  );
+  const loading = inject(LoadingService);
+  loading.start();
+  return next(req).pipe(finalize(() => loading.stop()));
 };

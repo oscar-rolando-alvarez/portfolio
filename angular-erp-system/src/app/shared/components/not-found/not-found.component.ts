@@ -1,15 +1,12 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 
 @Component({
   selector: 'app-not-found',
-  standalone: true,
   imports: [
-    CommonModule,
-    RouterModule,
+    RouterLink,
     MatButtonModule,
     MatIconModule
   ],
@@ -27,7 +24,7 @@ import { MatIconModule } from '@angular/material/icon';
         </p>
         
         <div class="action-buttons">
-          <button mat-raised-button color="primary" routerLink="/dashboard">
+          <button mat-flat-button routerLink="/dashboard">
             <mat-icon>home</mat-icon>
             Go to Dashboard
           </button>
@@ -82,7 +79,7 @@ import { MatIconModule } from '@angular/material/icon';
     .error-description {
       font-size: 1rem;
       margin: 0 0 2rem 0;
-      color: rgba(0, 0, 0, 0.6);
+      color: var(--mat-sys-on-surface-variant);
       line-height: 1.5;
     }
 

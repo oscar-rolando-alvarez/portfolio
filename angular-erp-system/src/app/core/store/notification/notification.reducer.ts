@@ -66,23 +66,7 @@ export const notificationReducer = createReducer(
   on(NotificationActions.clearAllNotifications, (state) => ({
     ...state,
     notifications: []
-  })),
-
-  on(NotificationActions.showNotification, (state, { type, title, message, actionUrl, actionText }) => {
-    const notification: Notification = {
-      id: Date.now().toString(),
-      type,
-      title,
-      message,
-      isRead: false,
-      createdAt: new Date(),
-      actionUrl,
-      actionText
-    };
-
-    return {
-      ...state,
-      notifications: [notification, ...state.notifications]
-    };
-  })
+  }))
+  // Transient toasts (showNotification) are rendered by NotificationEffects and
+  // intentionally not persisted in the inbox.
 );

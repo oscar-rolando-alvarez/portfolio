@@ -1,126 +1,69 @@
-import { Component, OnInit, inject, ViewChild } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterOutlet } from '@angular/router';
-import { MatSidenav, MatSidenavModule } from '@angular/material/sidenav';
-import { MatToolbarModule } from '@angular/material/toolbar';
-import { MatIconModule } from '@angular/material/icon';
-import { MatButtonModule } from '@angular/material/button';
-import { MatListModule } from '@angular/material/list';
-import { MatMenuModule } from '@angular/material/menu';
-import { MatBadgeModule } from '@angular/material/badge';
 import { BreakpointObserver, Breakpoints } from '@angular/cdk/layout';
-import { Observable } from 'rxjs';
-import { map, shareReplay } from 'rxjs/operators';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { MatSidenavModule } from '@angular/material/sidenav';
+import { map } from 'rxjs/operators';
 
-import { SidenavComponent } from './sidenav/sidenav.component';
-import { HeaderComponent } from './header/header.component';
 import { FooterComponent } from './footer/footer.component';
+import { HeaderComponent } from './header/header.component';
+import { SidenavComponent } from './sidenav/sidenav.component';
 
 @Component({
   selector: 'app-layout',
-  standalone: true,
-  imports: [
-    CommonModule,
-    RouterOutlet,
-    MatSidenavModule,
-    MatToolbarModule,
-    MatIconModule,
-    MatButtonModule,
-    MatListModule,
-    MatMenuModule,
-    MatBadgeModule,
-    SidenavComponent,
-    HeaderComponent,
-    FooterComponent
-  ],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [MatSidenavModule, SidenavComponent, HeaderComponent, FooterComponent],
   template: `
-    <div class="layout-container">
-      <mat-sidenav-container class="sidenav-container">
-        <mat-sidenav
-          #drawer
-          class="sidenav"
-          fixedInViewport
-          [attr.role]="(isHandset$ | async) ? 'dialog' : 'navigation'"
-          [mode]="(isHandset$ | async) ? 'over' : 'side'"
-          [opened]="(isHandset$ | async) === false">
-          <app-sidenav (closeSidenav)="drawer.close()"></app-sidenav>
-        </mat-sidenav>
-        
-        <mat-sidenav-content>
-          <app-header 
-            (menuToggle)="drawer.toggle()"
-            [isHandset]="isHandset$ | async">
-          </app-header>
-          
-          <main class="main-content">
-            <div class="content-wrapper">
-              <ng-content></ng-content>
-            </div>
-          </main>
-          
-          <app-footer></app-footer>
-        </mat-sidenav-content>
-      </mat-sidenav-container>
-    </div>
+    <mat-sidenav-container class="sidenav-container">
+      <mat-sidenav
+        #drawer
+        class="sidenav"
+        [attr.role]="isHandset() ? 'dialog' : 'navigation'"
+        [mode]="isHandset() ? 'over' : 'side'"
+        [opened]="!isHandset()"
+      >
+        <app-sidenav (navigate)="isHandset() && drawer.close()" />
+      </mat-sidenav>
+
+      <mat-sidenav-content class="content">
+        <app-header [isHandset]="isHandset()" (menuToggle)="drawer.toggle()" />
+        <main class="main-content">
+          <ng-content />
+        </main>
+        <app-footer />
+      </mat-sidenav-content>
+    </mat-sidenav-container>
   `,
-  styles: [`
-    .layout-container {
+  styles: `
+    .sidenav-container {
       height: 100vh;
+    }
+    .sidenav {
+      width: 260px;
+    }
+    .content {
       display: flex;
       flex-direction: column;
     }
-
-    .sidenav-container {
-      flex: 1;
-    }
-
-    .sidenav {
-      width: 280px;
-      background: white;
-      border-right: 1px solid rgba(0, 0, 0, 0.12);
-    }
-
-    :host-context(.dark-theme) .sidenav {
-      background: #424242;
-      border-right: 1px solid rgba(255, 255, 255, 0.12);
-    }
-
     .main-content {
       flex: 1;
-      overflow: auto;
-      background: #fafafa;
-      min-height: calc(100vh - 64px - 60px); // header height - footer height
-    }
-
-    :host-context(.dark-theme) .main-content {
-      background: #303030;
-    }
-
-    .content-wrapper {
-      padding: 20px;
-      max-width: 1200px;
+      padding: 24px;
+      width: 100%;
+      max-width: 1280px;
       margin: 0 auto;
+      box-sizing: border-box;
     }
-
     @media (max-width: 768px) {
-      .content-wrapper {
+      .main-content {
         padding: 16px;
       }
     }
-  `]
+  `,
 })
-export class LayoutComponent implements OnInit {
-  private breakpointObserver = inject(BreakpointObserver);
-
-  @ViewChild('drawer') drawer!: MatSidenav;
-
-  isHandset$: Observable<boolean> = this.breakpointObserver.observe(Breakpoints.Handset)
-    .pipe(
-      map(result => result.matches),
-      shareReplay()
-    );
-
-  ngOnInit(): void {
-    // Initialize layout-specific logic
-  }
+export class LayoutComponent {
+  protected readonly isHandset = toSignal(
+    inject(BreakpointObserver)
+      .observe(Breakpoints.Handset)
+      .pipe(map((result) => result.matches)),
+    { initialValue: false },
+  );
 }
