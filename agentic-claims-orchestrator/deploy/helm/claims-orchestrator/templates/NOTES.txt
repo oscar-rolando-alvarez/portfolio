@@ -1,0 +1,6 @@
+Claims orchestrator {{ .Chart.AppVersion }} deployed as {{ include "claims.fullname" . }}.
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "claims.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/readyz
+
+Secrets are read from Secret "{{ .Values.existingSecret }}" (DATABASE_URL, PII_ENCRYPTION_KEY, PII_TOKEN_SECRET, API_KEYS, LLM_API_KEY).
