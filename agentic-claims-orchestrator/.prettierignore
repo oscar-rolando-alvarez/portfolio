@@ -1,0 +1,11 @@
+node_modules
+coverage
+dist
+package-lock.json
+packages/infra/drizzle
+packages/core/src/ml/*.json
+ml/.venv
+ml/uv.lock
+deploy/helm/**/templates
+evals-report
+*.md

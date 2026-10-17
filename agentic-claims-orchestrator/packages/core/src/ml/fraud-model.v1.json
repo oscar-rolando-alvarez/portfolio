@@ -1,0 +1,199 @@
+{
+  "modelVersion": "fraud-lr-1.0.0",
+  "algorithm": "standardized logistic regression (L2, lbfgs)",
+  "intercept": -3.687474704426562,
+  "features": [
+    {
+      "name": "log_claim_amount",
+      "description": "ln(1 + claimed amount in USD)",
+      "mean": 8.299729780349873,
+      "scale": 0.8955092157873892,
+      "coefficient": 0.3641585178399588
+    },
+    {
+      "name": "amount_to_limit",
+      "description": "claimed amount / policy coverage limit, capped at 3",
+      "mean": 0.22663607829478016,
+      "scale": 0.29542110631325136,
+      "coefficient": 0.47407714310171506
+    },
+    {
+      "name": "policy_tenure_log",
+      "description": "ln(1 + days between policy start and loss date)",
+      "mean": 6.477829791449553,
+      "scale": 1.634321438282512,
+      "coefficient": -0.9120703421208811
+    },
+    {
+      "name": "report_delay_days",
+      "description": "days between loss and first notice, capped at 365",
+      "mean": 9.463266666666666,
+      "scale": 21.832947212768474,
+      "coefficient": 0.4132768091243561
+    },
+    {
+      "name": "prior_claims_24m",
+      "description": "claims on the same policy in the previous 24 months, capped at 10",
+      "mean": 0.40686666666666665,
+      "scale": 0.63654760143199,
+      "coefficient": 0.24419592553761799
+    },
+    {
+      "name": "night_incident",
+      "description": "1 if the incident happened between 00:00 and 04:59",
+      "mean": 0.11773333333333333,
+      "scale": 0.3222920966383217,
+      "coefficient": 0.25015883249358173
+    },
+    {
+      "name": "missing_police_report",
+      "description": "1 if theft/collision/vandalism was not reported to police",
+      "mean": 0.256,
+      "scale": 0.43642181430355753,
+      "coefficient": 0.4755755255810629
+    },
+    {
+      "name": "documentation_gap",
+      "description": "1 if no amount-bearing document, else |claimed - documented| / claimed (max 1)",
+      "mean": 0.17274354517862825,
+      "scale": 0.3024251479930744,
+      "coefficient": 0.6750065582306674
+    }
+  ],
+  "bands": {
+    "medium": 0.3,
+    "high": 0.7
+  },
+  "metrics": {
+    "rocAuc": 0.8777,
+    "brier": 0.0456,
+    "atMedium": {
+      "threshold": 0.3,
+      "precision": 0.5109,
+      "recall": 0.3589,
+      "flagRate": 0.0458
+    },
+    "atHigh": {
+      "threshold": 0.7,
+      "precision": 0.7963,
+      "recall": 0.1319,
+      "flagRate": 0.0108
+    }
+  },
+  "training": {
+    "dataset": "synthetic (see ml/train_fraud_model.py::synthesize)",
+    "samples": 20000,
+    "testFraction": 0.25,
+    "positiveRate": 0.0652,
+    "seed": 20261017,
+    "dataHash": "94c95838824b442c",
+    "sklearnVersion": "1.9.1",
+    "numpyVersion": "2.5.4"
+  },
+  "parityVectors": [
+    {
+      "features": {
+        "log_claim_amount": 9.089603184046814,
+        "amount_to_limit": 0.35446674024575614,
+        "policy_tenure_log": 6.059123195581797,
+        "report_delay_days": 1.0,
+        "prior_claims_24m": 0.0,
+        "night_incident": 0.0,
+        "missing_police_report": 1.0,
+        "documentation_gap": 0.13837357906678344
+      },
+      "probability": 0.06906754509207765
+    },
+    {
+      "features": {
+        "log_claim_amount": 7.884321017686658,
+        "amount_to_limit": 0.10617285990047617,
+        "policy_tenure_log": 7.25063551189868,
+        "report_delay_days": 3.0,
+        "prior_claims_24m": 1.0,
+        "night_incident": 0.0,
+        "missing_police_report": 0.0,
+        "documentation_gap": 1.0
+      },
+      "probability": 0.05216694509463491
+    },
+    {
+      "features": {
+        "log_claim_amount": 9.372770698028477,
+        "amount_to_limit": 0.7841775690036773,
+        "policy_tenure_log": 2.3978952727983707,
+        "report_delay_days": 5.0,
+        "prior_claims_24m": 1.0,
+        "night_incident": 0.0,
+        "missing_police_report": 0.0,
+        "documentation_gap": 1.0
+      },
+      "probability": 0.8234090401945393
+    },
+    {
+      "features": {
+        "log_claim_amount": 7.7355495397925536,
+        "amount_to_limit": 0.09149063407880349,
+        "policy_tenure_log": 7.5652752818989315,
+        "report_delay_days": 106.0,
+        "prior_claims_24m": 2.0,
+        "night_incident": 1.0,
+        "missing_police_report": 0.0,
+        "documentation_gap": 0.017168423530997155
+      },
+      "probability": 0.09590849206172147
+    },
+    {
+      "features": {
+        "log_claim_amount": 8.080324481965386,
+        "amount_to_limit": 0.12917124938444077,
+        "policy_tenure_log": 7.57095858316901,
+        "report_delay_days": 2.0,
+        "prior_claims_24m": 0.0,
+        "night_incident": 0.0,
+        "missing_police_report": 0.0,
+        "documentation_gap": 0.05322954849517324
+      },
+      "probability": 0.00416192153323836
+    },
+    {
+      "features": {
+        "log_claim_amount": 8.024793254505369,
+        "amount_to_limit": 0.030547894617458146,
+        "policy_tenure_log": 7.733245646529795,
+        "report_delay_days": 0.0,
+        "prior_claims_24m": 0.0,
+        "night_incident": 0.0,
+        "missing_police_report": 1.0,
+        "documentation_gap": 0.0024854155521445345
+      },
+      "probability": 0.008078593853959082
+    },
+    {
+      "features": {
+        "log_claim_amount": 9.164381141882673,
+        "amount_to_limit": 0.3819923599823787,
+        "policy_tenure_log": 7.202661196523238,
+        "report_delay_days": 0.0,
+        "prior_claims_24m": 0.0,
+        "night_incident": 0.0,
+        "missing_police_report": 0.0,
+        "documentation_gap": 0.0621918764527532
+      },
+      "probability": 0.011619542194929106
+    },
+    {
+      "features": {
+        "log_claim_amount": 8.006868452870213,
+        "amount_to_limit": 0.12002012128206971,
+        "policy_tenure_log": 6.035481432524756,
+        "report_delay_days": 0.0,
+        "prior_claims_24m": 0.0,
+        "night_incident": 1.0,
+        "missing_police_report": 1.0,
+        "documentation_gap": 0.13615972149443978
+      },
+      "probability": 0.0658588568229044
+    }
+  ]
+}

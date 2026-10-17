@@ -1,0 +1,94 @@
+# -- Container image (build from the project Dockerfile and push to your registry)
+image:
+  repository: ghcr.io/example/agentic-claims-orchestrator
+  tag: '0.1.0'
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+serviceAccount:
+  create: true
+  # e.g. eks.amazonaws.com/role-arn / azure.workload.identity/client-id for KMS / secret access
+  annotations: {}
+
+# Non-secret configuration rendered into a ConfigMap (see .env.example for all keys).
+config:
+  NODE_ENV: production
+  LOG_LEVEL: info
+  STORAGE: postgres
+  LLM_PROVIDER: openai_compatible
+  LLM_BASE_URL: 'https://llm-gateway.internal/v1'
+  LLM_MODEL: 'gpt-4o-mini'
+  LLM_PROVIDER_NAME: openai_compatible
+  LLM_AUTH_HEADER: authorization
+  LLM_INPUT_PRICE_PER_MTOK: '0.15'
+  LLM_OUTPUT_PRICE_PER_MTOK: '0.60'
+  BUDGET_MAX_ITERATIONS: '20'
+  BUDGET_MAX_LLM_TOKENS: '24000'
+  BUDGET_MAX_COST_USD: '0.25'
+  BUDGET_MAX_TOOL_CALLS: '40'
+  STEP_TIMEOUT_MS: '30000'
+  STEP_MAX_ATTEMPTS: '3'
+  MCP_TRANSPORT: in-process
+  OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector.observability:4318'
+  OTEL_SERVICE_NAME: agentic-claims-orchestrator
+  RECOVERY_INTERVAL_MS: '30000'
+
+# Secrets are never templated from values: reference a pre-provisioned Secret
+# (External Secrets Operator / CSI driver / sealed-secrets). Required keys:
+#   DATABASE_URL, PII_ENCRYPTION_KEY, PII_TOKEN_SECRET, API_KEYS, LLM_API_KEY
+existingSecret: claims-orchestrator-secrets
+
+# Guardrail policy is mounted from files/claims-policy.json (kept identical to config/ by CI).
+policy:
+  mountPath: /etc/claims/policy
+
+migrations:
+  # Runs `cli.ts migrate` as a pre-install/pre-upgrade hook; the app itself runs with RUN_MIGRATIONS=false.
+  enabled: true
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  # Namespaces allowed to call the API (e.g. the ingress controller / API gateway).
+  ingressNamespaces: ['ingress']
+  # CIDR(s) for PostgreSQL and the LLM gateway egress.
+  egressCidrs: ['10.0.0.0/8']
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ['ALL']
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,51 @@
+# Full local stack: API + PostgreSQL + Jaeger (OTLP traces). Runs fully offline with the fake LLM.
+#   docker compose up --build
+#   open http://localhost:16686 for traces
+name: agentic-claims-orchestrator
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: claims
+      POSTGRES_PASSWORD: claims
+      POSTGRES_DB: claims
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U claims -d claims']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0@sha256:836b967b5abcf1f7758066aa6b348619267a2f1459f72d472840570f9bd88a17
+    ports:
+      - '16686:16686' # UI
+      - '4318:4318' # OTLP/HTTP
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env.example
+    environment:
+      # development mode so the deterministic fake LLM is allowed (production config refuses it)
+      NODE_ENV: development
+      STORAGE: postgres
+      DATABASE_URL: postgres://claims:claims@postgres:5432/claims
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports:
+      - '8080:8080'
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp
+
+volumes:
+  pgdata:

@@ -1,0 +1,14 @@
+{
+  "name": "@aco/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Domain model, orchestration runtime, policy engine, agents and fraud-risk scorer (no I/O).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "zod": "4.6.7"
+  }
+}
