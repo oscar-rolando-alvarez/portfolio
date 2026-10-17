@@ -1,33 +1,37 @@
 [package]
 name = "marketplace"
-version = "0.1.0"
-description = "Advanced NFT Marketplace with comprehensive trading features"
-edition = "2021"
+description = "NFT marketplace: escrowed fixed-price listings and SOL offers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]
 name = "marketplace"
 
-[[bin]]
-name = "marketplace"
-path = "src/bin/cli.rs"
-
 [features]
+default = []
+cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-cpi = ["no-entrypoint"]
-default = []
+custom-heap = []
+custom-panic = []
+anchor-debug = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
-anchor-lang = { workspace = true }
-anchor-spl = { workspace = true }
-solana-program = { workspace = true }
-mpl-token-metadata = { workspace = true }
-spl-token = { workspace = true }
-spl-associated-token-account = { workspace = true }
-borsh = { workspace = true }
-thiserror = { workspace = true }
-num-derive = { workspace = true }
-num-traits = { workspace = true }
-arrayref = { workspace = true }
+anchor-lang.workspace = true
+anchor-spl.workspace = true
+
+[dev-dependencies]
+litesvm.workspace = true
+solana-keypair.workspace = true
+solana-signer.workspace = true
+solana-transaction.workspace = true
+solana-account.workspace = true
+
+[lints]
+workspace = true

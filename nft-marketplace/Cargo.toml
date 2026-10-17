@@ -1,31 +1,28 @@
 [workspace]
-members = [
-    "programs/marketplace",
-    "programs/nft-minting",
-    "programs/auction-system", 
-    "programs/royalty-distribution",
-    "programs/collection-manager",
-    "programs/escrow-system"
-]
-resolver = "2"
+members = ["programs/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/oscar-rolando-alvarez/portfolio"
 
 [workspace.dependencies]
-anchor-lang = "0.29.0"
-anchor-spl = "0.29.0"
-solana-program = "~1.16.0"
-mpl-token-metadata = "3.2.1"
-mpl-candy-machine = "6.0.1"
-spl-token = "4.0.0"
-spl-associated-token-account = "2.2.0"
-spl-token-2022 = "1.0.0"
-arrayref = "0.3.7"
-borsh = { version = "0.10.3", features = ["derive"] }
-thiserror = "1.0.50"
-num-derive = "0.4.1"
-num-traits = "0.2.17"
-hex = "0.4.3"
-sha2 = "0.10.8"
-bs58 = "0.5.0"
+anchor-lang = { version = "1.2.1", default-features = false, features = ["derive", "solana-v3", "init-if-needed"] }
+anchor-spl = { version = "1.2.1", default-features = false, features = ["token", "token_2022", "token_2022_extensions", "associated_token", "solana-v3"] }
+litesvm = "0.18.0"
+solana-keypair = "3"
+solana-signer = "3"
+solana-transaction = "4"
+solana-account = "4"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[workspace.lints.clippy]
+result_large_err = "allow"
 
 [profile.release]
 overflow-checks = true
