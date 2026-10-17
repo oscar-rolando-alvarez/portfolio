@@ -106,7 +106,9 @@ export interface AppConfig extends RawConfig {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = ConfigSchema.safeParse(env);
+  // Empty strings mean "unset" (common with docker/helm templating).
+  const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined && v !== ''));
+  const parsed = ConfigSchema.safeParse(cleaned);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`invalid configuration: ${issues}`);
