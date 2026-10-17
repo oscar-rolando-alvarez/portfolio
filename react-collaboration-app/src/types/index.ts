@@ -1,4 +1,4 @@
-import { fabric } from 'fabric';
+import type * as fabric from 'fabric';
 
 // User types
 export interface User {
@@ -7,6 +7,7 @@ export interface User {
   color: string;
   avatar?: string;
   isOnline: boolean;
+  lastActive?: number;
   cursor?: {
     x: number;
     y: number;
@@ -34,6 +35,16 @@ export interface CanvasState {
 }
 
 // Drawing tools
+export interface ToolOptions {
+  color: string;
+  strokeColor: string;
+  fillColor: string;
+  strokeWidth: number;
+  fontSize: number;
+  fontFamily: string;
+  brushWidth: number;
+}
+
 export type ToolType = 
   | 'select'
   | 'rectangle'
@@ -193,7 +204,7 @@ export interface CollaborationStore {
   
   // Tools
   activeTool: ToolType;
-  toolOptions: Record<string, any>;
+  toolOptions: ToolOptions;
   
   // Layers
   layers: Layer[];
@@ -245,14 +256,20 @@ export interface CollaborationStore {
   setGridSize: (size: number) => void;
 }
 
-// Fabric.js extensions
+// Fabric.js extensions: collaboration metadata carried by every canvas object.
+export interface CollaborativeObjectProps {
+  id?: string;
+  name?: string;
+  userId?: string;
+  version?: number;
+  lastModified?: number;
+}
+
 declare module 'fabric' {
-  namespace fabric {
-    interface Object {
-      id?: string;
-      userId?: string;
-      version?: number;
-      lastModified?: number;
-    }
-  }
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface FabricObject extends CollaborativeObjectProps {}
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface FabricObjectProps extends CollaborativeObjectProps {}
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface SerializedObjectProps extends CollaborativeObjectProps {}
 }

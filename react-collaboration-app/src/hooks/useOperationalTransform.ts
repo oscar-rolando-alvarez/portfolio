@@ -1,11 +1,115 @@
-import { useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { getOTManager } from '@/lib/ot';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { Operation } from '@/types';
+import * as fabric from 'fabric';
+import type { Operation } from '@/types';
+import { remotelyRemoved } from '@/lib/fabricSetup';
 
 export const useOperationalTransform = () => {
   const otManager = getOTManager();
   const { canvas, addOperation: addStoreOperation } = useCollaborationStore();
+
+  // Add object to canvas. Fabric revives any serialised object type
+  // (rect, circle, line, text, path, ...) from its toObject() payload.
+  const addObjectToCanvas = useCallback((operation: Operation) => {
+    if (!canvas) return;
+    if (canvas.getObjects().some((obj) => obj.id === operation.objectId)) return;
+
+    void fabric.util
+      .enlivenObjects<fabric.FabricObject>([operation.data])
+      .then(([fabricObject]) => {
+        if (!fabricObject) return;
+        fabricObject.set({
+          id: operation.objectId,
+          userId: operation.userId,
+          version: operation.version,
+          lastModified: operation.timestamp,
+          selectable: true,
+          evented: true,
+        });
+        canvas.add(fabricObject);
+        canvas.requestRenderAll();
+      })
+      .catch((error: unknown) => console.error('Failed to revive remote object:', error));
+  }, [canvas]);
+
+  // Update object on canvas
+  const updateObjectOnCanvas = useCallback((operation: Operation) => {
+    if (!canvas) return;
+
+    const object = canvas.getObjects().find(obj => obj.id === operation.objectId);
+    if (!object) {
+      console.warn('Object not found for update:', operation.objectId);
+      return;
+    }
+
+    // Apply updates (the class "type" is immutable and must not be re-set)
+    const { type: _type, ...props } = operation.data ?? {};
+    object.set({
+      ...props,
+      version: operation.version,
+      lastModified: operation.timestamp,
+    });
+
+    object.setCoords();
+  }, [canvas]);
+
+  // Delete object from canvas
+  const deleteObjectFromCanvas = useCallback((operation: Operation) => {
+    if (!canvas) return;
+
+    const object = canvas.getObjects().find(obj => obj.id === operation.objectId);
+    if (object) {
+      remotelyRemoved.add(object);
+      canvas.remove(object);
+    }
+  }, [canvas]);
+
+  // Transform object on canvas
+  const transformObjectOnCanvas = useCallback((operation: Operation) => {
+    if (!canvas) return;
+
+    const object = canvas.getObjects().find(obj => obj.id === operation.objectId);
+    if (!object) return;
+
+    const data = operation.data;
+
+    // Apply transformation
+    if (data.left !== undefined) object.set('left', data.left);
+    if (data.top !== undefined) object.set('top', data.top);
+    if (data.scaleX !== undefined) object.set('scaleX', data.scaleX);
+    if (data.scaleY !== undefined) object.set('scaleY', data.scaleY);
+    if (data.angle !== undefined) object.set('angle', data.angle);
+
+    object.set({
+      version: operation.version,
+      lastModified: operation.timestamp,
+    });
+
+    object.setCoords();
+  }, [canvas]);
+
+  // Apply operation to Fabric.js canvas
+  const applyOperationToCanvas = useCallback((operation: Operation) => {
+    if (!canvas) return;
+
+    switch (operation.type) {
+      case 'add':
+        addObjectToCanvas(operation);
+        break;
+      case 'update':
+        updateObjectOnCanvas(operation);
+        break;
+      case 'delete':
+        deleteObjectFromCanvas(operation);
+        break;
+      case 'transform':
+        transformObjectOnCanvas(operation);
+        break;
+    }
+
+    canvas.renderAll();
+  }, [canvas, addObjectToCanvas, updateObjectOnCanvas, deleteObjectFromCanvas, transformObjectOnCanvas]);
 
   // Process incoming operation through OT
   const processIncomingOperation = useCallback((operation: Operation) => {
@@ -40,164 +144,16 @@ export const useOperationalTransform = () => {
     
     console.log('Applied transformed operation:', result.operation);
     return true;
-  }, [otManager, canvas]);
-
-  // Apply operation to Fabric.js canvas
-  const applyOperationToCanvas = useCallback((operation: Operation) => {
-    if (!canvas) return;
-
-    switch (operation.type) {
-      case 'add':
-        addObjectToCanvas(operation);
-        break;
-      case 'update':
-        updateObjectOnCanvas(operation);
-        break;
-      case 'delete':
-        deleteObjectFromCanvas(operation);
-        break;
-      case 'transform':
-        transformObjectOnCanvas(operation);
-        break;
-    }
-
-    canvas.renderAll();
-  }, [canvas]);
-
-  // Add object to canvas
-  const addObjectToCanvas = useCallback((operation: Operation) => {
-    if (!canvas) return;
-
-    const data = operation.data;
-    let fabricObject: fabric.Object | null = null;
-
-    switch (data.type) {
-      case 'rect':
-        fabricObject = new fabric.Rect({
-          left: data.left,
-          top: data.top,
-          width: data.width,
-          height: data.height,
-          fill: data.fill,
-          stroke: data.stroke,
-          strokeWidth: data.strokeWidth,
-        });
-        break;
-      case 'circle':
-        fabricObject = new fabric.Circle({
-          left: data.left,
-          top: data.top,
-          radius: data.radius,
-          fill: data.fill,
-          stroke: data.stroke,
-          strokeWidth: data.strokeWidth,
-        });
-        break;
-      case 'line':
-        fabricObject = new fabric.Line(
-          [data.x1, data.y1, data.x2, data.y2],
-          {
-            stroke: data.stroke,
-            strokeWidth: data.strokeWidth,
-          }
-        );
-        break;
-      case 'i-text':
-        fabricObject = new fabric.IText(data.text, {
-          left: data.left,
-          top: data.top,
-          fontSize: data.fontSize,
-          fill: data.fill,
-          fontFamily: data.fontFamily,
-        });
-        break;
-      case 'path':
-        fabricObject = new fabric.Path(data.path, {
-          left: data.left,
-          top: data.top,
-          fill: data.fill,
-          stroke: data.stroke,
-          strokeWidth: data.strokeWidth,
-        });
-        break;
-    }
-
-    if (fabricObject) {
-      fabricObject.set({
-        id: operation.objectId,
-        userId: operation.userId,
-        version: operation.version,
-        lastModified: operation.timestamp,
-        selectable: true,
-        evented: true,
-      });
-
-      canvas.add(fabricObject);
-    }
-  }, [canvas]);
-
-  // Update object on canvas
-  const updateObjectOnCanvas = useCallback((operation: Operation) => {
-    if (!canvas) return;
-
-    const object = canvas.getObjects().find(obj => obj.id === operation.objectId);
-    if (!object) {
-      console.warn('Object not found for update:', operation.objectId);
-      return;
-    }
-
-    // Apply updates
-    object.set({
-      ...operation.data,
-      version: operation.version,
-      lastModified: operation.timestamp,
-    });
-
-    object.setCoords();
-  }, [canvas]);
-
-  // Delete object from canvas
-  const deleteObjectFromCanvas = useCallback((operation: Operation) => {
-    if (!canvas) return;
-
-    const object = canvas.getObjects().find(obj => obj.id === operation.objectId);
-    if (object) {
-      canvas.remove(object);
-    }
-  }, [canvas]);
-
-  // Transform object on canvas
-  const transformObjectOnCanvas = useCallback((operation: Operation) => {
-    if (!canvas) return;
-
-    const object = canvas.getObjects().find(obj => obj.id === operation.objectId);
-    if (!object) return;
-
-    const data = operation.data;
-
-    // Apply transformation
-    if (data.left !== undefined) object.set('left', data.left);
-    if (data.top !== undefined) object.set('top', data.top);
-    if (data.scaleX !== undefined) object.set('scaleX', data.scaleX);
-    if (data.scaleY !== undefined) object.set('scaleY', data.scaleY);
-    if (data.angle !== undefined) object.set('angle', data.angle);
-
-    object.set({
-      version: operation.version,
-      lastModified: operation.timestamp,
-    });
-
-    object.setCoords();
-  }, [canvas]);
+  }, [otManager, canvas, applyOperationToCanvas]);
 
   // Create operation from canvas event
   const createOperationFromEvent = useCallback((
     type: Operation['type'],
-    object: fabric.Object,
+    object: fabric.FabricObject,
     userId: string
   ): Operation => {
     return {
-      id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: crypto.randomUUID(),
       type,
       objectId: object.id || '',
       data: object.toObject(['id', 'userId', 'version', 'lastModified']),

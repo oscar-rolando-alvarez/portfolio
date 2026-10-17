@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/Button';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
-import { User } from '@/types';
 import { cn } from '@/lib/utils';
 
 export const UsersPanel: React.FC = () => {
@@ -13,7 +12,6 @@ export const UsersPanel: React.FC = () => {
     users, 
     currentUser, 
     mediaState,
-    updateUser 
   } = useCollaborationStore();
   
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -24,16 +22,6 @@ export const UsersPanel: React.FC = () => {
     console.log('Inviting user:', inviteEmail);
     setInviteEmail('');
     setShowInviteModal(false);
-  };
-
-  const toggleUserAudio = (userId: string) => {
-    // This would typically control the user's audio stream
-    console.log('Toggle audio for user:', userId);
-  };
-
-  const toggleUserVideo = (userId: string) => {
-    // This would typically control the user's video stream
-    console.log('Toggle video for user:', userId);
   };
 
   const getUserMediaState = (userId: string) => {

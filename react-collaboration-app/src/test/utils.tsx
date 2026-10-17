@@ -1,5 +1,5 @@
-import React, { ReactElement } from 'react';
-import { render, RenderOptions } from '@testing-library/react';
+import React, { type ReactElement } from 'react';
+import { render, type RenderOptions } from '@testing-library/react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { vi } from 'vitest';
@@ -101,9 +101,9 @@ export const mockCanvas = {
   remove: vi.fn(),
   clear: vi.fn(),
   renderAll: vi.fn(),
-  getObjects: vi.fn(() => []),
+  getObjects: vi.fn((): unknown[] => []),
   setActiveObject: vi.fn(),
-  getActiveObject: vi.fn(),
+  getActiveObject: vi.fn((): unknown => undefined),
   discardActiveObject: vi.fn(),
   on: vi.fn(),
   off: vi.fn(),
@@ -117,7 +117,8 @@ export const mockCanvas = {
   getZoom: vi.fn(() => 1),
   viewportTransform: [1, 0, 0, 1, 0, 0],
   setViewportTransform: vi.fn(),
-  getPointer: vi.fn(() => ({ x: 0, y: 0 })),
+  getScenePoint: vi.fn(() => ({ x: 0, y: 0 })),
+  getViewportPoint: vi.fn(() => ({ x: 0, y: 0 })),
   getElement: vi.fn(() => ({
     getBoundingClientRect: vi.fn(() => ({
       left: 0,
@@ -126,10 +127,10 @@ export const mockCanvas = {
       height: 600,
     })),
   })),
-  bringToFront: vi.fn(),
-  sendToBack: vi.fn(),
-  bringForward: vi.fn(),
-  sendBackwards: vi.fn(),
+  bringObjectToFront: vi.fn(),
+  sendObjectToBack: vi.fn(),
+  bringObjectForward: vi.fn(),
+  sendObjectBackwards: vi.fn(),
 };
 
 // Mock fabric object
@@ -139,7 +140,7 @@ export const mockFabricObject = {
   toObject: vi.fn(() => ({})),
   toDataURL: vi.fn(() => 'data:image/png;base64,test'),
   setCoords: vi.fn(),
-  clone: vi.fn((callback) => callback(mockFabricObject)),
+  clone: vi.fn(async (): Promise<unknown> => mockFabricObject),
   getBoundingRect: vi.fn(() => ({
     left: 100,
     top: 100,
@@ -161,13 +162,13 @@ export const waitForNextTick = () => new Promise(resolve => setTimeout(resolve, 
 export const simulateDragDrop = async (
   source: HTMLElement,
   target: HTMLElement,
-  dataTransferData = {}
+  dataTransferData: Record<string, string> = {}
 ) => {
   const dragStartEvent = new Event('dragstart', { bubbles: true });
   Object.defineProperty(dragStartEvent, 'dataTransfer', {
     value: {
       setData: vi.fn(),
-      getData: vi.fn((type) => dataTransferData[type] || ''),
+      getData: vi.fn((type: string) => dataTransferData[type] || ''),
       effectAllowed: 'all',
       dropEffect: 'move',
     },
@@ -176,7 +177,7 @@ export const simulateDragDrop = async (
   const dragOverEvent = new Event('dragover', { bubbles: true });
   Object.defineProperty(dragOverEvent, 'dataTransfer', {
     value: {
-      getData: vi.fn((type) => dataTransferData[type] || ''),
+      getData: vi.fn((type: string) => dataTransferData[type] || ''),
       effectAllowed: 'all',
       dropEffect: 'move',
     },
@@ -185,7 +186,7 @@ export const simulateDragDrop = async (
   const dropEvent = new Event('drop', { bubbles: true });
   Object.defineProperty(dropEvent, 'dataTransfer', {
     value: {
-      getData: vi.fn((type) => dataTransferData[type] || ''),
+      getData: vi.fn((type: string) => dataTransferData[type] || ''),
       effectAllowed: 'all',
       dropEffect: 'move',
     },

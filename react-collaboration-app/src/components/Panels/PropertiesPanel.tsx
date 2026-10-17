@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Settings, Lock, Unlock, Eye, EyeOff, Trash2, Copy, Layers } from 'lucide-react';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import { Button } from '@/components/ui/Button';
@@ -6,41 +6,43 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Slider } from '@/components/ui/Slider';
 import { ColorPicker } from '@/components/ui/ColorPicker';
-import { fabric } from 'fabric';
+import type * as fabric from 'fabric';
+
+function readProperties(obj: fabric.FabricObject | null): Record<string, any> {
+  if (!obj) return {};
+  return {
+    left: Math.round(obj.left || 0),
+    top: Math.round(obj.top || 0),
+    width: Math.round(obj.width || 0),
+    height: Math.round(obj.height || 0),
+    scaleX: obj.scaleX || 1,
+    scaleY: obj.scaleY || 1,
+    angle: obj.angle || 0,
+    opacity: obj.opacity ?? 1,
+    fill: obj.fill || '#000000',
+    stroke: obj.stroke || '#000000',
+    strokeWidth: obj.strokeWidth || 1,
+    visible: obj.visible !== false,
+    selectable: obj.selectable !== false,
+  };
+}
 
 export const PropertiesPanel: React.FC = () => {
   const { canvas, selectedObjects } = useCollaborationStore();
-  const [selectedObject, setSelectedObject] = useState<fabric.Object | null>(null);
-  const [properties, setProperties] = useState<any>({});
-
-  // Update selected object when selection changes
-  useEffect(() => {
-    if (!canvas || selectedObjects.length === 0) {
-      setSelectedObject(null);
-      setProperties({});
-      return;
-    }
-
-    const fabricObject = canvas.getObjects().find(obj => obj.id === selectedObjects[0]);
-    if (fabricObject) {
-      setSelectedObject(fabricObject);
-      setProperties({
-        left: Math.round(fabricObject.left || 0),
-        top: Math.round(fabricObject.top || 0),
-        width: Math.round(fabricObject.width || 0),
-        height: Math.round(fabricObject.height || 0),
-        scaleX: fabricObject.scaleX || 1,
-        scaleY: fabricObject.scaleY || 1,
-        angle: fabricObject.angle || 0,
-        opacity: fabricObject.opacity || 1,
-        fill: fabricObject.fill || '#000000',
-        stroke: fabricObject.stroke || '#000000',
-        strokeWidth: fabricObject.strokeWidth || 1,
-        visible: fabricObject.visible !== false,
-        selectable: fabricObject.selectable !== false,
-      });
-    }
-  }, [canvas, selectedObjects]);
+  const selectedObject = useMemo<fabric.FabricObject | null>(
+    () =>
+      canvas && selectedObjects.length > 0
+        ? (canvas.getObjects().find((obj) => obj.id === selectedObjects[0]) ?? null)
+        : null,
+    [canvas, selectedObjects]
+  );
+  const [properties, setProperties] = useState<Record<string, any>>(() => readProperties(selectedObject));
+  const [prevObject, setPrevObject] = useState(selectedObject);
+  // Reset the editable form whenever a different object gets selected.
+  if (prevObject !== selectedObject) {
+    setPrevObject(selectedObject);
+    setProperties(readProperties(selectedObject));
+  }
 
   const updateProperty = (key: string, value: any) => {
     if (!selectedObject || !canvas) return;
@@ -74,11 +76,11 @@ export const PropertiesPanel: React.FC = () => {
   const duplicateObject = () => {
     if (!selectedObject || !canvas) return;
 
-    selectedObject.clone((cloned: fabric.Object) => {
+    void selectedObject.clone().then((cloned) => {
       cloned.set({
         left: (cloned.left || 0) + 10,
         top: (cloned.top || 0) + 10,
-        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: crypto.randomUUID(),
       });
       canvas.add(cloned);
       canvas.setActiveObject(cloned);
@@ -104,13 +106,13 @@ export const PropertiesPanel: React.FC = () => {
 
   const bringToFront = () => {
     if (!selectedObject || !canvas) return;
-    canvas.bringToFront(selectedObject);
+    canvas.bringObjectToFront(selectedObject);
     canvas.renderAll();
   };
 
   const sendToBack = () => {
     if (!selectedObject || !canvas) return;
-    canvas.sendToBack(selectedObject);
+    canvas.sendObjectToBack(selectedObject);
     canvas.renderAll();
   };
 

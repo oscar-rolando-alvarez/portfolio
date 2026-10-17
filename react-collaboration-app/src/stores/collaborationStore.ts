@@ -1,20 +1,19 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { castDraft } from 'immer';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { fabric } from 'fabric';
+import type * as fabric from 'fabric';
 import { v4 as uuidv4 } from 'uuid';
 import { 
-  CollaborationStore, 
-  User, 
-  CanvasState, 
-  Operation, 
-  Layer, 
-  Comment, 
-  HistoryEntry, 
-  ToolType, 
-  PeerConnection,
-  MediaState,
-  MediaStream as CustomMediaStream
+  type CollaborationStore, 
+  type User, 
+  type CanvasState, 
+  type Operation, 
+  type Layer, 
+  type Comment, 
+  type HistoryEntry, 
+  type ToolType, 
+  type MediaState,
 } from '@/types';
 
 const initialCanvasState: CanvasState = {
@@ -76,16 +75,16 @@ export const useCollaborationStore = create<CollaborationStore>()(
 
       // Actions
       setCanvas: (canvas: fabric.Canvas) => set((state) => {
-        state.canvas = canvas;
+        state.canvas = castDraft(canvas);
         
         // Setup canvas event handlers
         canvas.on('selection:created', (e) => {
-          const activeObjects = e.selected?.map(obj => obj.id).filter(Boolean) || [];
+          const activeObjects = e.selected?.map(obj => obj.id).filter((id): id is string => Boolean(id)) ?? [];
           get().selectObjects(activeObjects);
         });
 
         canvas.on('selection:updated', (e) => {
-          const activeObjects = e.selected?.map(obj => obj.id).filter(Boolean) || [];
+          const activeObjects = e.selected?.map(obj => obj.id).filter((id): id is string => Boolean(id)) ?? [];
           get().selectObjects(activeObjects);
         });
 
@@ -94,7 +93,7 @@ export const useCollaborationStore = create<CollaborationStore>()(
         });
 
         canvas.on('mouse:move', (e) => {
-          const pointer = canvas.getPointer(e.e);
+          const pointer = e.scenePoint;
           // Send cursor position through WebRTC/Socket
           if (get().currentUser) {
             // This would be handled by the socket hook
@@ -149,7 +148,7 @@ export const useCollaborationStore = create<CollaborationStore>()(
               version: operation.version,
             });
             break;
-          case 'update':
+          case 'update': {
             const objIndex = state.canvasState.objects.findIndex(obj => obj.id === operation.objectId);
             if (objIndex >= 0) {
               state.canvasState.objects[objIndex].data = operation.data;
@@ -157,6 +156,7 @@ export const useCollaborationStore = create<CollaborationStore>()(
               state.canvasState.objects[objIndex].timestamp = operation.timestamp;
             }
             break;
+          }
           case 'delete':
             state.canvasState.objects = state.canvasState.objects.filter(obj => obj.id !== operation.objectId);
             break;
@@ -232,7 +232,7 @@ export const useCollaborationStore = create<CollaborationStore>()(
         const historyEntry = state.history[state.historyIndex];
 
         // Re-apply the operations
-        historyEntry.operations.forEach(operation => {
+        historyEntry.operations.forEach(() => {
           // Apply operation logic here (similar to addOperation)
         });
 

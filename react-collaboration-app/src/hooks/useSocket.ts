@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import { getSocketManager } from '@/lib/socket';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { User, Operation, Comment } from '@/types';
+import { type User, type Operation, type Comment } from '@/types';
 
 export const useSocket = () => {
   const socketManager = getSocketManager();
@@ -9,7 +9,6 @@ export const useSocket = () => {
   
   const {
     currentUser,
-    setCanvas,
     addUser,
     removeUser,
     updateUser,
@@ -41,6 +40,8 @@ export const useSocket = () => {
     // Canvas events
     const handleCanvasOperation = (operation: Operation) => {
       addOperation(operation);
+      // App routes this through operational transform onto the Fabric canvas.
+      window.dispatchEvent(new CustomEvent('socket-operation', { detail: operation }));
     };
 
     const handleCanvasState = (state: any) => {
@@ -95,6 +96,10 @@ export const useSocket = () => {
           }
         });
       }
+      // Replay the workspace history so late joiners see the current board.
+      (data.operations ?? []).forEach((operation: Operation) => {
+        window.dispatchEvent(new CustomEvent('socket-operation', { detail: operation }));
+      });
     };
 
     // Register event handlers

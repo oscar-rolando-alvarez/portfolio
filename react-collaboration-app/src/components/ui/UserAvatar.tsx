@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { User } from '@/types';
+import { type User } from '@/types';
 
 export interface UserAvatarProps {
   user: User;

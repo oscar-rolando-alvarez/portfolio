@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import { useSocket } from '@/hooks/useSocket';
-import { User } from '@/types';
+import { type User } from '@/types';
 import { generateUserColor } from '@/lib/utils';
 
 interface UserPresenceProps {
@@ -9,15 +9,16 @@ interface UserPresenceProps {
 }
 
 export const UserPresence: React.FC<UserPresenceProps> = ({ children }) => {
-  const [isInitialized, setIsInitialized] = useState(false);
-  const { currentUser, addUser, updateUser } = useCollaborationStore();
+  // Join exactly once per connection lifecycle; a ref avoids an extra render.
+  const isInitialized = useRef(false);
+  const { currentUser, updateUser } = useCollaborationStore();
   const { connectionStatus, joinAsUser, sendCursorPosition, updateUser: updateSocketUser } = useSocket();
 
   // Initialize user session
   useEffect(() => {
-    if (!isInitialized && connectionStatus.isConnected) {
+    if (!isInitialized.current && connectionStatus.isConnected) {
       // Get or create user identity
-      let userData = localStorage.getItem('collaboration-user');
+      const userData = localStorage.getItem('collaboration-user');
       let user: Partial<User>;
 
       if (userData) {
@@ -32,7 +33,7 @@ export const UserPresence: React.FC<UserPresenceProps> = ({ children }) => {
 
       // Ensure user has required properties
       if (!user.id) {
-        user.id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        user.id = `user_${crypto.randomUUID()}`;
       }
       if (!user.name) {
         user.name = `User ${user.id.slice(-6)}`;
@@ -56,9 +57,9 @@ export const UserPresence: React.FC<UserPresenceProps> = ({ children }) => {
         } as User
       });
 
-      setIsInitialized(true);
+      isInitialized.current = true;
     }
-  }, [connectionStatus.isConnected, isInitialized, joinAsUser]);
+  }, [connectionStatus.isConnected, joinAsUser]);
 
   // Handle cursor movement
   useEffect(() => {
@@ -139,14 +140,8 @@ export const UserPresence: React.FC<UserPresenceProps> = ({ children }) => {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (currentUser) {
+        // The server also marks the user offline when the socket disconnects.
         updateSocketUser({ isOnline: false });
-        // Use sendBeacon for more reliable delivery
-        const data = JSON.stringify({
-          userId: currentUser.id,
-          isOnline: false,
-          timestamp: Date.now()
-        });
-        navigator.sendBeacon('/api/user-status', data);
       }
     };
 

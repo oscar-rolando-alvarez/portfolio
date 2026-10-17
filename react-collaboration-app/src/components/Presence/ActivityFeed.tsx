@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, User, Edit, MessageCircle, Eye, EyeOff } from 'lucide-react';
+import { Bell, User, Edit, MessageCircle, EyeOff } from 'lucide-react';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import { Button } from '@/components/ui/Button';
 import { UserAvatar } from '@/components/ui/UserAvatar';
@@ -20,7 +20,14 @@ export const ActivityFeed: React.FC = () => {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const { users, currentUser } = useCollaborationStore();
 
-  // Listen to store changes and create activity items
+  const addActivity = (activity: Omit<ActivityItem, 'id'>) => {
+    const newActivity: ActivityItem = {
+      ...activity,
+      id: crypto.randomUUID(),
+    };
+    setActivities((prev) => [newActivity, ...prev].slice(0, 50)); // keep the last 50
+  };
+
   useEffect(() => {
     const unsubscribeUsers = useCollaborationStore.subscribe(
       (state) => state.users,
@@ -130,17 +137,6 @@ export const ActivityFeed: React.FC = () => {
     };
   }, [users, currentUser]);
 
-  const addActivity = (activity: Omit<ActivityItem, 'id'>) => {
-    const newActivity: ActivityItem = {
-      ...activity,
-      id: `${activity.timestamp}_${Math.random().toString(36).substr(2, 9)}`,
-    };
-
-    setActivities(prev => {
-      const updated = [newActivity, ...prev].slice(0, 50); // Keep last 50 activities
-      return updated;
-    });
-  };
 
   const getActivityIcon = (type: ActivityItem['type']) => {
     switch (type) {

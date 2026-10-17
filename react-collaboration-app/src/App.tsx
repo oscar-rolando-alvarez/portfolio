@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Toolbar } from '@/components/Toolbar/Toolbar';
 import { CanvasContainer } from '@/components/Canvas/CanvasContainer';
 import { PropertiesPanel } from '@/components/Panels/PropertiesPanel';

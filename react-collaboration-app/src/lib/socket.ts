@@ -1,12 +1,15 @@
-import { io, Socket } from 'socket.io-client';
-import { User, Operation, CanvasState, Comment, SocketEvents } from '@/types';
+import { io, type Socket } from 'socket.io-client';
+import { type User, type Operation, type CanvasState, type Comment } from '@/types';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type EventHandler = (...args: any[]) => void;
 
 export class SocketManager {
   private socket: Socket | null = null;
   private isConnected = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private eventHandlers = new Map<string, Function[]>();
+  private eventHandlers = new Map<string, EventHandler[]>();
 
   constructor() {
     this.connect();
@@ -16,8 +19,11 @@ export class SocketManager {
   }
 
   private connect() {
-    const serverUrl = process.env.VITE_SERVER_URL || 'http://localhost:3001';
-    
+    // Dev: Vite (3000) talks to the API (3001). Prod: the server hosts the SPA,
+    // so connecting to the page origin is correct unless overridden.
+    const serverUrl =
+      import.meta.env.VITE_SERVER_URL ?? (import.meta.env.DEV ? 'http://localhost:3001' : window.location.origin);
+
     this.socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       upgrade: true,
@@ -227,7 +233,7 @@ export class SocketManager {
     this.eventHandlers.get(event)!.push(handler);
   }
 
-  public off(event: string, handler?: Function) {
+  public off(event: string, handler?: EventHandler) {
     const handlers = this.eventHandlers.get(event);
     if (!handlers) return;
 

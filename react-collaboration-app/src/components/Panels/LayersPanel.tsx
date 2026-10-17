@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Layers, 
   Eye, 
@@ -7,7 +7,6 @@ import {
   Unlock, 
   Plus, 
   Trash2, 
-  MoreVertical,
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
@@ -15,7 +14,7 @@ import { useDrag, useDrop } from 'react-dnd';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Layer } from '@/types';
+import { type Layer } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface LayerItemProps {
@@ -81,7 +80,9 @@ const LayerItem: React.FC<LayerItemProps> = ({
 
   return (
     <div
-      ref={(node) => drag(drop(node))}
+      ref={(node) => {
+        drag(drop(node));
+      }}
       className={cn(
         "layer-item group cursor-pointer border-l-2 transition-all",
         isActive ? "selected border-l-blue-500 bg-blue-50" : "border-l-transparent",
@@ -210,11 +211,14 @@ export const LayersPanel: React.FC = () => {
     canvas 
   } = useCollaborationStore();
 
-  const [layerList, setLayerList] = useState(layers);
-
-  useEffect(() => {
-    setLayerList([...layers].sort((a, b) => b.order - a.order));
-  }, [layers]);
+  const sortLayers = (list: Layer[]) => [...list].sort((a, b) => b.order - a.order);
+  const [layerList, setLayerList] = useState(() => sortLayers(layers));
+  const [prevLayers, setPrevLayers] = useState(layers);
+  // Re-derive the local (drag-reorderable) list whenever the store changes.
+  if (layers !== prevLayers) {
+    setPrevLayers(layers);
+    setLayerList(sortLayers(layers));
+  }
 
   const createNewLayer = () => {
     const newLayer: Layer = {

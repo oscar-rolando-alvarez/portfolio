@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { cloneElement, isValidElement, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface TooltipProps {
@@ -17,7 +17,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
   className,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
-  const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
+  const [timeoutId, setTimeoutId] = useState<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const showTooltip = () => {
@@ -63,6 +63,16 @@ export const Tooltip: React.FC<TooltipProps> = ({
     }
   };
 
+  useEffect(() => () => {
+    if (timeoutId) clearTimeout(timeoutId);
+  }, [timeoutId]);
+
+  // Give icon-only triggers an accessible name derived from the tooltip text.
+  const trigger =
+    isValidElement<{ 'aria-label'?: string }>(children) && !children.props['aria-label']
+      ? cloneElement(children, { 'aria-label': content })
+      : children;
+
   return (
     <div
       ref={containerRef}
@@ -72,7 +82,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
       onFocus={showTooltip}
       onBlur={hideTooltip}
     >
-      {children}
+      {trigger}
       
       {isVisible && content && (
         <div

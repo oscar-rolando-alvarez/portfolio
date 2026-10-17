@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { Download, Upload, Copy, Settings, FileImage, FileType, FilePlus, Archive } from 'lucide-react';
+import { Download, Upload, Copy, FileImage, FileType, FilePlus, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
-import { Slider } from '@/components/ui/Slider';
-import { Input } from '@/components/ui/Input';
 import { useExport } from '@/hooks/useExport';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { ExportFormat, ExportOptions } from '@/types';
+import { type ExportFormat, type ExportOptions } from '@/types';
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -61,7 +59,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ isOpen, onClose }) =
 
     try {
       const result = await exportCanvas(options);
-      
+      if (!result) throw new Error('Canvas is not ready');
+
       if (result.success) {
         setExportResult(`✅ Exported successfully as ${result.filename}`);
       } else {

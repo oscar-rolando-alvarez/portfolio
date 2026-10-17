@@ -1,11 +1,67 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { fabric } from 'fabric';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as fabric from 'fabric';
 import { v4 as uuidv4 } from 'uuid';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { ToolType, Operation } from '@/types';
+import type { Operation, User } from '@/types';
+import { remotelyRemoved } from '@/lib/fabricSetup';
+import { getSocketManager } from '@/lib/socket';
 
-export const useCanvas = (containerRef: React.RefObject<HTMLDivElement>) => {
+const GRID_NAME = 'grid';
+
+function removeGrid(canvas: fabric.Canvas) {
+  canvas
+    .getObjects()
+    .filter((obj) => obj.name === GRID_NAME)
+    .forEach((obj) => canvas.remove(obj));
+}
+
+function drawGrid(canvas: fabric.Canvas, size: number) {
+  removeGrid(canvas);
+  const width = canvas.getWidth();
+  const height = canvas.getHeight();
+  const style = { stroke: '#e0e0e0', strokeWidth: 1, selectable: false, evented: false, name: GRID_NAME };
+
+  const lines: fabric.Line[] = [];
+  for (let x = 0; x <= width; x += size) lines.push(new fabric.Line([x, 0, x, height], style));
+  for (let y = 0; y <= height; y += size) lines.push(new fabric.Line([0, y, width, y], style));
+
+  canvas.add(...lines);
+  lines.forEach((line) => canvas.sendObjectToBack(line));
+  canvas.requestRenderAll();
+}
+
+function stampObject(obj: fabric.FabricObject, user: User | null) {
+  obj.set({ id: uuidv4(), userId: user?.id, version: 1, lastModified: Date.now() });
+}
+
+function toOperation(obj: fabric.FabricObject, type: Operation['type'], user: User): Operation {
+  return {
+    id: uuidv4(),
+    type,
+    objectId: obj.id ?? uuidv4(),
+    data: obj.toObject(),
+    userId: user.id,
+    timestamp: Date.now(),
+    version: obj.version ?? 1,
+  };
+}
+
+function cursorFor(tool: string) {
+  if (tool === 'hand') return 'grab';
+  if (tool === 'text') return 'text';
+  if (tool === 'select') return 'default';
+  return 'crosshair';
+}
+
+/**
+ * Owns the Fabric.js canvas lifecycle: creation, resizing, grid, the active
+ * drawing tool and translation of canvas events into collaboration operations.
+ */
+export const useCanvas = (containerRef: React.RefObject<HTMLDivElement | null>) => {
+  // Fabric's canvas is a mutable external object, so it lives in a ref; the
+  // state copy only re-renders consumers and re-runs effects once it exists.
   const canvasRef = useRef<fabric.Canvas | null>(null);
+  const [canvas, setLocalCanvas] = useState<fabric.Canvas | null>(null);
   const {
     setCanvas,
     activeTool,
@@ -17,492 +73,260 @@ export const useCanvas = (containerRef: React.RefObject<HTMLDivElement>) => {
     snapToGrid,
   } = useCollaborationStore();
 
-  // Initialize canvas
+  // Latest values for long-lived Fabric event handlers.
+  const currentUserRef = useRef<User | null>(currentUser);
   useEffect(() => {
-    if (!containerRef.current) return;
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
-    const canvasElement = document.createElement('canvas');
-    canvasElement.id = 'fabric-canvas';
-    containerRef.current.appendChild(canvasElement);
+  const emitOperation = useCallback(
+    (obj: fabric.FabricObject, type: Operation['type']) => {
+      const user = currentUserRef.current;
+      if (!user) return;
+      const operation = toOperation(obj, type, user);
+      addOperation(operation);
+      getSocketManager().sendOperation(operation);
+    },
+    [addOperation]
+  );
 
-    const canvas = new fabric.Canvas(canvasElement, {
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight,
+  // Create and dispose the canvas.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const element = document.createElement('canvas');
+    container.appendChild(element);
+
+    const instance = new fabric.Canvas(element, {
+      width: container.clientWidth,
+      height: container.clientHeight,
       backgroundColor: '#ffffff',
       selection: true,
       preserveObjectStacking: true,
       enableRetinaScaling: true,
-      imageSmoothingEnabled: true,
     });
+    // Fabric 6+ no longer creates a default brush.
+    instance.freeDrawingBrush = new fabric.PencilBrush(instance);
 
-    // Enable object caching for better performance
-    fabric.Object.prototype.objectCaching = true;
-    fabric.Object.prototype.statefullCache = true;
+    const handleResize = () => {
+      instance.setDimensions({ width: container.clientWidth, height: container.clientHeight });
+      instance.requestRenderAll();
+    };
+    window.addEventListener('resize', handleResize);
 
-    canvasRef.current = canvas;
-    setCanvas(canvas);
-
-    // Setup grid
-    if (showGrid) {
-      drawGrid(canvas, gridSize);
-    }
+    canvasRef.current = instance;
+    setLocalCanvas(instance);
+    setCanvas(instance);
 
     return () => {
-      canvas.dispose();
-      if (containerRef.current?.contains(canvasElement)) {
-        containerRef.current.removeChild(canvasElement);
-      }
+      window.removeEventListener('resize', handleResize);
+      canvasRef.current = null;
+      void instance.dispose().finally(() => element.remove());
     };
   }, [containerRef, setCanvas]);
 
-  // Handle window resize
+  // Grid overlay.
   useEffect(() => {
-    const handleResize = () => {
-      if (canvasRef.current && containerRef.current) {
-        canvasRef.current.setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
-        canvasRef.current.renderAll();
-      }
+    if (!canvas) return;
+    if (showGrid) {
+      drawGrid(canvas, gridSize);
+    } else {
+      removeGrid(canvas);
+      canvas.requestRenderAll();
+    }
+  }, [canvas, showGrid, gridSize]);
+
+  // Active tool: configure the canvas and install pointer handlers.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const options = toolOptions;
+    const disposers: Array<() => void> = [];
+    type PointerHandler = (opt: fabric.TPointerEventInfo<fabric.TPointerEvent>) => void;
+    const on = (event: 'mouse:down' | 'mouse:move' | 'mouse:up', handler: PointerHandler) => {
+      disposers.push(canvas.on(event, handler));
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Draw grid helper
-  const drawGrid = useCallback((canvas: fabric.Canvas, size: number) => {
-    const width = canvas.getWidth();
-    const height = canvas.getHeight();
-
-    // Remove existing grid
-    const existingGrid = canvas.getObjects().filter(obj => obj.name === 'grid');
-    existingGrid.forEach(obj => canvas.remove(obj));
-
-    const gridLines: fabric.Line[] = [];
-
-    // Vertical lines
-    for (let i = 0; i <= width; i += size) {
-      const line = new fabric.Line([i, 0, i, height], {
-        stroke: '#e0e0e0',
-        strokeWidth: 1,
-        selectable: false,
-        evented: false,
-        name: 'grid',
-      });
-      gridLines.push(line);
-    }
-
-    // Horizontal lines
-    for (let i = 0; i <= height; i += size) {
-      const line = new fabric.Line([0, i, width, i], {
-        stroke: '#e0e0e0',
-        strokeWidth: 1,
-        selectable: false,
-        evented: false,
-        name: 'grid',
-      });
-      gridLines.push(line);
-    }
-
-    canvas.add(...gridLines);
-    canvas.sendToBack(...gridLines);
-    canvas.renderAll();
-  }, []);
-
-  // Update grid when settings change
-  useEffect(() => {
-    if (canvasRef.current) {
-      if (showGrid) {
-        drawGrid(canvasRef.current, gridSize);
-      } else {
-        const existingGrid = canvasRef.current.getObjects().filter(obj => obj.name === 'grid');
-        existingGrid.forEach(obj => canvasRef.current!.remove(obj));
-        canvasRef.current.renderAll();
-      }
-    }
-  }, [showGrid, gridSize, drawGrid]);
-
-  // Handle tool changes
-  useEffect(() => {
-    if (!canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    
-    // Clear existing event listeners
-    canvas.off('mouse:down');
-    canvas.off('mouse:move');
-    canvas.off('mouse:up');
-    canvas.off('path:created');
+    canvas.isDrawingMode = activeTool === 'pen';
+    canvas.selection = activeTool === 'select';
+    canvas.defaultCursor = cursorFor(activeTool);
 
     switch (activeTool) {
-      case 'select':
-        canvas.isDrawingMode = false;
-        canvas.selection = true;
-        canvas.defaultCursor = 'default';
+      case 'pen': {
+        canvas.freeDrawingBrush ??= new fabric.PencilBrush(canvas);
+        canvas.freeDrawingBrush.width = options.brushWidth || 5;
+        canvas.freeDrawingBrush.color = options.color || '#000000';
         break;
+      }
 
-      case 'hand':
-        canvas.isDrawingMode = false;
-        canvas.selection = false;
-        canvas.defaultCursor = 'grab';
-        setupPanTool(canvas);
+      case 'hand': {
+        const pan: { last: fabric.Point | null } = { last: null };
+        on('mouse:down', (opt) => {
+          pan.last = opt.viewportPoint;
+          canvas.defaultCursor = 'grabbing';
+        });
+        on('mouse:move', (opt) => {
+          if (!pan.last) return;
+          const vpt = [...canvas.viewportTransform] as fabric.TMat2D;
+          vpt[4] += opt.viewportPoint.x - pan.last.x;
+          vpt[5] += opt.viewportPoint.y - pan.last.y;
+          canvas.setViewportTransform(vpt);
+          pan.last = opt.viewportPoint;
+        });
+        on('mouse:up', () => {
+          pan.last = null;
+          canvas.defaultCursor = 'grab';
+        });
         break;
-
-      case 'pen':
-        canvas.isDrawingMode = true;
-        canvas.selection = false;
-        canvas.freeDrawingBrush.width = toolOptions.brushWidth || 5;
-        canvas.freeDrawingBrush.color = toolOptions.color || '#000000';
-        break;
+      }
 
       case 'rectangle':
-        canvas.isDrawingMode = false;
-        canvas.selection = false;
-        canvas.defaultCursor = 'crosshair';
-        setupShapeTool(canvas, 'rectangle');
-        break;
-
       case 'circle':
-        canvas.isDrawingMode = false;
-        canvas.selection = false;
-        canvas.defaultCursor = 'crosshair';
-        setupShapeTool(canvas, 'circle');
-        break;
+      case 'line': {
+        const draft: { origin: fabric.Point | null; shape: fabric.FabricObject | null } = {
+          origin: null,
+          shape: null,
+        };
+        const stroke = {
+          stroke: options.strokeColor || '#000000',
+          strokeWidth: options.strokeWidth || 2,
+        };
+        const fill = options.fillColor || 'transparent';
 
-      case 'line':
-        canvas.isDrawingMode = false;
-        canvas.selection = false;
-        canvas.defaultCursor = 'crosshair';
-        setupLineTool(canvas);
-        break;
+        on('mouse:down', (opt) => {
+          const { x, y } = opt.scenePoint;
+          const shape =
+            activeTool === 'rectangle'
+              ? new fabric.Rect({ left: x, top: y, width: 0, height: 0, fill, ...stroke })
+              : activeTool === 'circle'
+                ? new fabric.Circle({ left: x, top: y, radius: 0, fill, ...stroke })
+                : new fabric.Line([x, y, x, y], { ...stroke, strokeLineCap: 'round' });
+          stampObject(shape, currentUserRef.current);
+          canvas.add(shape);
+          draft.origin = opt.scenePoint;
+          draft.shape = shape;
+        });
 
-      case 'text':
-        canvas.isDrawingMode = false;
-        canvas.selection = false;
-        canvas.defaultCursor = 'text';
-        setupTextTool(canvas);
-        break;
+        on('mouse:move', (opt) => {
+          const { origin, shape } = draft;
+          if (!origin || !shape) return;
+          const p = opt.scenePoint;
+          if (shape instanceof fabric.Rect) {
+            shape.set({
+              left: Math.min(origin.x, p.x),
+              top: Math.min(origin.y, p.y),
+              width: Math.abs(origin.x - p.x),
+              height: Math.abs(origin.y - p.y),
+            });
+          } else if (shape instanceof fabric.Circle) {
+            const radius = Math.abs(origin.x - p.x) / 2;
+            shape.set({ radius, left: origin.x - radius, top: origin.y - radius });
+          } else if (shape instanceof fabric.Line) {
+            shape.set({ x2: p.x, y2: p.y });
+          }
+          canvas.requestRenderAll();
+        });
 
-      default:
-        canvas.isDrawingMode = false;
-        canvas.selection = true;
-        canvas.defaultCursor = 'default';
+        on('mouse:up', () => {
+          if (draft.shape) {
+            draft.shape.setCoords();
+            emitOperation(draft.shape, 'add');
+          }
+          draft.origin = null;
+          draft.shape = null;
+        });
+        break;
+      }
+
+      case 'text': {
+        on('mouse:down', (opt) => {
+          if (opt.target) return; // clicking existing text edits it instead
+          const text = new fabric.IText('Type here...', {
+            left: opt.scenePoint.x,
+            top: opt.scenePoint.y,
+            fontSize: options.fontSize || 16,
+            fill: options.color || '#000000',
+            fontFamily: options.fontFamily || 'Arial',
+          });
+          stampObject(text, currentUserRef.current);
+          canvas.add(text);
+          canvas.setActiveObject(text);
+          text.enterEditing();
+          text.selectAll();
+          emitOperation(text, 'add');
+        });
+        break;
+      }
     }
-  }, [activeTool, toolOptions]);
 
-  // Setup pan tool
-  const setupPanTool = useCallback((canvas: fabric.Canvas) => {
-    let isDragging = false;
-    let lastPosX = 0;
-    let lastPosY = 0;
+    return () => disposers.forEach((dispose) => dispose());
+  }, [canvas, activeTool, toolOptions, emitOperation]); // `canvas` re-runs this once the instance exists
 
-    canvas.on('mouse:down', (opt) => {
-      const evt = opt.e;
-      isDragging = true;
-      canvas.selection = false;
-      lastPosX = evt.clientX;
-      lastPosY = evt.clientY;
-      canvas.defaultCursor = 'grabbing';
-    });
-
-    canvas.on('mouse:move', (opt) => {
-      if (isDragging) {
-        const evt = opt.e;
-        const vpt = canvas.viewportTransform!;
-        vpt[4] += evt.clientX - lastPosX;
-        vpt[5] += evt.clientY - lastPosY;
-        canvas.requestRenderAll();
-        lastPosX = evt.clientX;
-        lastPosY = evt.clientY;
-      }
-    });
-
-    canvas.on('mouse:up', () => {
-      canvas.setViewportTransform(canvas.viewportTransform!);
-      isDragging = false;
-      canvas.selection = true;
-      canvas.defaultCursor = 'grab';
-    });
-  }, []);
-
-  // Setup shape tools
-  const setupShapeTool = useCallback((canvas: fabric.Canvas, shapeType: string) => {
-    let isDown = false;
-    let origX = 0;
-    let origY = 0;
-    let shape: fabric.Object | null = null;
-
-    canvas.on('mouse:down', (opt) => {
-      isDown = true;
-      const pointer = canvas.getPointer(opt.e);
-      origX = pointer.x;
-      origY = pointer.y;
-
-      if (shapeType === 'rectangle') {
-        shape = new fabric.Rect({
-          left: origX,
-          top: origY,
-          width: 0,
-          height: 0,
-          fill: toolOptions.fillColor || 'transparent',
-          stroke: toolOptions.strokeColor || '#000000',
-          strokeWidth: toolOptions.strokeWidth || 2,
-        });
-      } else if (shapeType === 'circle') {
-        shape = new fabric.Circle({
-          left: origX,
-          top: origY,
-          radius: 0,
-          fill: toolOptions.fillColor || 'transparent',
-          stroke: toolOptions.strokeColor || '#000000',
-          strokeWidth: toolOptions.strokeWidth || 2,
-        });
-      }
-
-      if (shape) {
-        addObjectId(shape);
-        canvas.add(shape);
-      }
-    });
-
-    canvas.on('mouse:move', (opt) => {
-      if (!isDown || !shape) return;
-      
-      const pointer = canvas.getPointer(opt.e);
-      
-      if (shapeType === 'rectangle') {
-        const rect = shape as fabric.Rect;
-        rect.set({
-          width: Math.abs(origX - pointer.x),
-          height: Math.abs(origY - pointer.y),
-          left: Math.min(origX, pointer.x),
-          top: Math.min(origY, pointer.y),
-        });
-      } else if (shapeType === 'circle') {
-        const circle = shape as fabric.Circle;
-        const radius = Math.abs(origX - pointer.x) / 2;
-        circle.set({
-          radius: radius,
-          left: origX - radius,
-          top: origY - radius,
-        });
-      }
-      
-      canvas.renderAll();
-    });
-
-    canvas.on('mouse:up', () => {
-      if (shape && isDown) {
-        createObjectOperation(shape, 'add');
-      }
-      isDown = false;
-      shape = null;
-    });
-  }, [toolOptions]);
-
-  // Setup line tool
-  const setupLineTool = useCallback((canvas: fabric.Canvas) => {
-    let isDown = false;
-    let line: fabric.Line | null = null;
-
-    canvas.on('mouse:down', (opt) => {
-      isDown = true;
-      const pointer = canvas.getPointer(opt.e);
-      
-      line = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
-        stroke: toolOptions.strokeColor || '#000000',
-        strokeWidth: toolOptions.strokeWidth || 2,
-        strokeLineCap: 'round',
-      });
-
-      addObjectId(line);
-      canvas.add(line);
-    });
-
-    canvas.on('mouse:move', (opt) => {
-      if (!isDown || !line) return;
-      
-      const pointer = canvas.getPointer(opt.e);
-      line.set({
-        x2: pointer.x,
-        y2: pointer.y,
-      });
-      canvas.renderAll();
-    });
-
-    canvas.on('mouse:up', () => {
-      if (line && isDown) {
-        createObjectOperation(line, 'add');
-      }
-      isDown = false;
-      line = null;
-    });
-  }, [toolOptions]);
-
-  // Setup text tool
-  const setupTextTool = useCallback((canvas: fabric.Canvas) => {
-    canvas.on('mouse:down', (opt) => {
-      const pointer = canvas.getPointer(opt.e);
-      
-      const textbox = new fabric.IText('Type here...', {
-        left: pointer.x,
-        top: pointer.y,
-        fontSize: toolOptions.fontSize || 16,
-        fill: toolOptions.color || '#000000',
-        fontFamily: toolOptions.fontFamily || 'Arial',
-      });
-
-      addObjectId(textbox);
-      canvas.add(textbox);
-      canvas.setActiveObject(textbox);
-      textbox.enterEditing();
-      textbox.selectAll();
-      
-      createObjectOperation(textbox, 'add');
-    });
-  }, [toolOptions]);
-
-  // Add unique ID to objects
-  const addObjectId = useCallback((obj: fabric.Object) => {
-    obj.set({
-      id: uuidv4(),
-      userId: currentUser?.id,
-      version: 1,
-      lastModified: Date.now(),
-    });
-  }, [currentUser]);
-
-  // Create operation for object changes
-  const createObjectOperation = useCallback((obj: fabric.Object, type: 'add' | 'update' | 'delete') => {
-    if (!currentUser) return;
-
-    const operation: Operation = {
-      id: uuidv4(),
-      type,
-      objectId: obj.id || uuidv4(),
-      data: obj.toObject(['id', 'userId', 'version', 'lastModified']),
-      userId: currentUser.id,
-      timestamp: Date.now(),
-      version: 1,
-    };
-
-    addOperation(operation);
-  }, [currentUser, addOperation]);
-
-  // Handle object modifications
+  // Object lifecycle -> collaboration operations.
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvas) return;
 
-    const canvas = canvasRef.current;
-
-    const handleObjectModified = (e: fabric.IEvent) => {
-      const obj = e.target;
-      if (obj && obj.id) {
-        obj.set({
-          version: (obj.version || 1) + 1,
-          lastModified: Date.now(),
-        });
-        createObjectOperation(obj, 'update');
-      }
-    };
-
-    const handleObjectAdded = (e: fabric.IEvent) => {
-      const obj = e.target;
-      if (obj && !obj.id) {
-        addObjectId(obj);
-      }
-    };
-
-    const handlePathCreated = (e: any) => {
-      const path = e.path;
-      if (path) {
-        addObjectId(path);
-        createObjectOperation(path, 'add');
-      }
-    };
-
-    canvas.on('object:modified', handleObjectModified);
-    canvas.on('object:added', handleObjectAdded);
-    canvas.on('path:created', handlePathCreated);
+    const offModified = canvas.on('object:modified', ({ target }) => {
+      if (!target?.id) return;
+      target.set({ version: (target.version ?? 1) + 1, lastModified: Date.now() });
+      emitOperation(target, 'update');
+    });
+    const offAdded = canvas.on('object:added', ({ target }) => {
+      if (!target.id && target.name !== GRID_NAME) stampObject(target, currentUserRef.current);
+    });
+    const offRemoved = canvas.on('object:removed', ({ target }) => {
+      if (!target.id || target.name === GRID_NAME || remotelyRemoved.has(target)) return;
+      emitOperation(target, 'delete');
+    });
+    const offPath = canvas.on('path:created', ({ path }) => {
+      stampObject(path, currentUserRef.current);
+      emitOperation(path, 'add');
+    });
 
     return () => {
-      canvas.off('object:modified', handleObjectModified);
-      canvas.off('object:added', handleObjectAdded);
-      canvas.off('path:created', handlePathCreated);
+      offModified();
+      offAdded();
+      offRemoved();
+      offPath();
     };
-  }, [addObjectId, createObjectOperation]);
+  }, [canvas, emitOperation]);
 
-  // Snap to grid functionality
+  // Snap to grid while dragging.
   useEffect(() => {
-    if (!canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-
-    const handleObjectMoving = (e: fabric.IEvent) => {
-      if (!snapToGrid || !e.target) return;
-
-      const obj = e.target;
-      const left = Math.round(obj.left! / gridSize) * gridSize;
-      const top = Math.round(obj.top! / gridSize) * gridSize;
-
-      obj.set({
-        left,
-        top,
+    if (!canvas || !snapToGrid) return;
+    return canvas.on('object:moving', ({ target }) => {
+      target.set({
+        left: Math.round(target.left / gridSize) * gridSize,
+        top: Math.round(target.top / gridSize) * gridSize,
       });
-    };
+    });
+  }, [canvas, snapToGrid, gridSize]);
 
-    if (snapToGrid) {
-      canvas.on('object:moving', handleObjectMoving);
-    }
+  const zoomCanvas = useCallback(
+    (delta: number, pointer?: { x: number; y: number }) => {
+      if (!canvas) return;
+      const zoom = Math.min(20, Math.max(0.01, canvas.getZoom() * 0.999 ** delta));
+      if (pointer) canvas.zoomToPoint(new fabric.Point(pointer.x, pointer.y), zoom);
+      else canvas.setZoom(zoom);
+    },
+    [canvas]
+  );
 
-    return () => {
-      canvas.off('object:moving', handleObjectMoving);
-    };
-  }, [snapToGrid, gridSize]);
+  const panCanvas = useCallback(
+    (deltaX: number, deltaY: number) => {
+      if (!canvas) return;
+      const vpt = [...canvas.viewportTransform] as fabric.TMat2D;
+      vpt[4] += deltaX;
+      vpt[5] += deltaY;
+      canvas.setViewportTransform(vpt);
+    },
+    [canvas]
+  );
 
-  // Zoom functionality
-  const zoomCanvas = useCallback((delta: number, pointer?: { x: number; y: number }) => {
-    if (!canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    let zoom = canvas.getZoom();
-    zoom *= 0.999 ** delta;
-
-    if (zoom > 20) zoom = 20;
-    if (zoom < 0.01) zoom = 0.01;
-
-    if (pointer) {
-      canvas.zoomToPoint(pointer, zoom);
-    } else {
-      canvas.setZoom(zoom);
-    }
-  }, []);
-
-  // Pan canvas
-  const panCanvas = useCallback((deltaX: number, deltaY: number) => {
-    if (!canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const vpt = canvas.viewportTransform!;
-    vpt[4] += deltaX;
-    vpt[5] += deltaY;
-    canvas.setViewportTransform(vpt);
-  }, []);
-
-  // Reset viewport
   const resetViewport = useCallback(() => {
-    if (!canvasRef.current) return;
+    canvas?.setViewportTransform([1, 0, 0, 1, 0, 0]);
+  }, [canvas]);
 
-    canvasRef.current.setViewportTransform([1, 0, 0, 1, 0, 0]);
-    canvasRef.current.setZoom(1);
-  }, []);
-
-  return {
-    canvas: canvasRef.current,
-    zoomCanvas,
-    panCanvas,
-    resetViewport,
-  };
+  return { canvas, zoomCanvas, panCanvas, resetViewport };
 };

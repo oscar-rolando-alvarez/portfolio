@@ -1,15 +1,14 @@
 import { useEffect, useCallback, useState } from 'react';
 import { getWebRTCManager } from '@/lib/webrtc';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { RTCMessage, MediaState } from '@/types';
+import { type RTCMessage, type MediaState } from '@/types';
 
 export const useWebRTC = () => {
   const webRTCManager = getWebRTCManager();
-  const [mediaState, setMediaState] = useState<MediaState>({ audio: false, video: false, screen: false });
+  const [mediaState, setMediaState] = useState<MediaState>(() => webRTCManager.getMediaState());
   const [isConnecting, setIsConnecting] = useState(false);
   const { 
     currentUser, 
-    addUser, 
     removeUser, 
     updateUser, 
     addOperation,
@@ -117,7 +116,7 @@ export const useWebRTC = () => {
 
   // Toggle screen share
   const toggleScreenShare = useCallback(async () => {
-    let success = false;
+    let success: boolean;
     if (mediaState.screen) {
       await webRTCManager.stopScreenShare();
       success = true;
@@ -150,9 +149,7 @@ export const useWebRTC = () => {
 
   // Update media state from WebRTC manager
   useEffect(() => {
-    const currentState = webRTCManager.getMediaState();
-    setMediaState(currentState);
-    setStoreMediaState(currentState);
+    setStoreMediaState(webRTCManager.getMediaState());
   }, [webRTCManager, setStoreMediaState]);
 
   // Cleanup on unmount

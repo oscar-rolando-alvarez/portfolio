@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   MousePointer, 
   Square, 
@@ -24,8 +24,9 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { ColorPicker } from '@/components/ui/ColorPicker';
 import { Slider } from '@/components/ui/Slider';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { ToolType } from '@/types';
+import { type ToolType } from '@/types';
 import { cn } from '@/lib/utils';
+import { ExportDialog, ImportDialog } from '@/components/Export/ExportDialog';
 
 const drawingTools = [
   { type: 'select' as ToolType, icon: MousePointer, label: 'Select', shortcut: 'V' },
@@ -51,6 +52,8 @@ export const Toolbar: React.FC = () => {
     users,
     mediaState,
   } = useCollaborationStore();
+
+  const [dialog, setDialog] = useState<'import' | 'export' | null>(null);
 
   const handleToolSelect = (tool: ToolType) => {
     setActiveTool(tool);
@@ -179,12 +182,12 @@ export const Toolbar: React.FC = () => {
       {/* File Operations */}
       <div className="flex items-center gap-1 border-r border-gray-200 pr-4">
         <Tooltip content="Import">
-          <Button variant="ghost" size="icon" className="toolbar-button">
+          <Button variant="ghost" size="icon" className="toolbar-button" onClick={() => setDialog('import')}>
             <Upload className="h-4 w-4" />
           </Button>
         </Tooltip>
         <Tooltip content="Export">
-          <Button variant="ghost" size="icon" className="toolbar-button">
+          <Button variant="ghost" size="icon" className="toolbar-button" onClick={() => setDialog('export')}>
             <Download className="h-4 w-4" />
           </Button>
         </Tooltip>
@@ -226,7 +229,7 @@ export const Toolbar: React.FC = () => {
       {/* User Presence */}
       <div className="flex items-center gap-2 border-r border-gray-200 pr-4">
         <Users className="h-4 w-4 text-gray-600" />
-        <span className="text-sm text-gray-600">{users.length}</span>
+        <span className="text-sm text-gray-600" aria-label={`${users.length} users online`}>{users.length}</span>
       </div>
 
       {/* Settings */}
@@ -237,6 +240,8 @@ export const Toolbar: React.FC = () => {
           </Button>
         </Tooltip>
       </div>
+      {dialog === 'export' && <ExportDialog isOpen onClose={() => setDialog(null)} />}
+      {dialog === 'import' && <ImportDialog isOpen onClose={() => setDialog(null)} />}
     </div>
   );
 };
