@@ -22,6 +22,15 @@ updates:
     open-pull-requests-limit: 10
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # Held back on purpose: typescript-eslint and vue-tsc do not support TS 7 yet,
+      # runtimes target Node 24 LTS, and eslint-config-next does not support ESLint 10 yet.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: uv
     directories:
@@ -64,6 +73,10 @@ updates:
     schedule: { interval: monthly }
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # Solana crate majors must move together with the Anchor release line.
+      - dependency-name: "solana-*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: gomod
     directory: /llm-gateway
@@ -96,6 +109,10 @@ updates:
     schedule: { interval: monthly }
     groups:
       base-images: { patterns: ["*"] }
+    ignore:
+      # Runtimes stay on their LTS lines (Node 24, Java 21, Python 3.13); bump majors deliberately.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
 
   - package-ecosystem: terraform
     directories:
