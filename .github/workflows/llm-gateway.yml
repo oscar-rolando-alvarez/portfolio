@@ -1,0 +1,175 @@
+name: llm-gateway
+
+on:
+  pull_request:
+    paths:
+      - "llm-gateway/**"
+      - ".github/workflows/llm-gateway.yml"
+  push:
+    branches: [master]
+    paths:
+      - "llm-gateway/**"
+      - ".github/workflows/llm-gateway.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-gateway-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: llm-gateway
+
+env:
+  GOLANGCI_LINT_VERSION: v2.15.0
+  GOVULNCHECK_VERSION: v1.9.0
+  KUBECONFORM_VERSION: v0.8.0
+  HELM_VERSION: v4.3.1
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: llm-gateway/go.mod
+          cache-dependency-path: llm-gateway/go.sum
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "Unformatted files:"; echo "$unformatted"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: goinstall # build with the project's Go toolchain
+          working-directory: llm-gateway
+
+  test:
+    name: Unit & integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      redis:
+        image: redis:8.10.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: llm-gateway/go.mod
+          cache-dependency-path: llm-gateway/go.sum
+      - name: Unit tests (race, in-memory stores / miniredis)
+        run: go test -race -count=1 -coverpkg=./internal/... -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Integration tests against Redis
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: go test -race -count=1 ./internal/adapters/redisstore/... ./internal/httpapi/... ./internal/governance/...
+      - name: Coverage summary
+        run: |
+          total="$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')"
+          echo "Total coverage: $total"
+          echo "### Test coverage: $total" >> "$GITHUB_STEP_SUMMARY"
+      - name: Benchmarks (smoke)
+        run: go test -run '^$' -bench . -benchtime=100x ./...
+
+  evals:
+    name: Eval harness (threshold gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: llm-gateway/go.mod
+          cache-dependency-path: llm-gateway/go.sum
+      - name: Run evals
+        run: go run ./cmd/evals -out evals-report.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: evals-report
+          path: llm-gateway/evals-report.json
+          if-no-files-found: ignore
+
+  vuln:
+    name: Vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: llm-gateway/go.mod
+          cache-dependency-path: llm-gateway/go.sum
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
+
+  docker:
+    name: Docker build & smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: llm-gateway
+          push: false
+          load: true
+          tags: llm-gateway:ci
+          build-args: VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=llm-gateway
+          cache-to: type=gha,mode=max,scope=llm-gateway
+      - name: Smoke test container
+        run: |
+          docker run -d --name gw -p 8080:8080 --read-only --cap-drop ALL llm-gateway:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS localhost:8080/v1/chat/completions \
+            -H "Authorization: Bearer sk-gw-demo-acme-7Qp2" -H "Content-Type: application/json" \
+            -d '{"model":"chat-resilient","messages":[{"role":"user","content":"ping from CI"}]}' | tee /tmp/resp.json
+          grep -q '"object":"chat.completion"' /tmp/resp.json
+          test "$(docker inspect -f '{{.Config.User}}' gw)" = "65532:65532"
+      - name: Container logs
+        if: failure()
+        run: docker logs gw
+
+  helm:
+    name: Helm lint, render & validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: llm-gateway/go.mod
+          cache-dependency-path: llm-gateway/go.sum
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: helm lint
+        run: helm lint deploy/helm/llm-gateway --strict
+      - name: helm template + kubeconform
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@${KUBECONFORM_VERSION}
+          helm template llm-gateway deploy/helm/llm-gateway \
+            --set redis.existingSecret=redis --set existingSecret=llm-secrets > rendered.yaml
+          "$(go env GOPATH)/bin/kubeconform" -strict -summary -kubernetes-version 1.33.0 rendered.yaml
+      - name: Validate the chart's gateway config with the gateway itself
+        run: |
+          helm template llm-gateway deploy/helm/llm-gateway --show-only templates/configmap.yaml \
+            | yq '.data["gateway.yaml"]' > /tmp/gateway.yaml
+          go run ./cmd/gateway -validate -config /tmp/gateway.yaml
