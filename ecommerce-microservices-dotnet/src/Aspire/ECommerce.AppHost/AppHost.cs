@@ -1,17 +1,18 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Secrets: generated once per machine and stored in user-secrets; never committed.
+// Secret parameters: set them with user-secrets (Parameters:jwt-signing-key, Parameters:admin-password)
+// or enter them when the dashboard prompts. They are never committed.
 var jwtSigningKey = builder.AddParameter("jwt-signing-key", secret: true);
 var adminEmail = builder.AddParameter("admin-email", "admin@shop.local");
 var adminPassword = builder.AddParameter("admin-password", secret: true);
 
 // Backing services (containers).
-var postgres = builder.AddPostgres("postgres").WithDataVolume().WithLifetime(ContainerLifetime.Persistent);
+var postgres = builder.AddPostgres("postgres").WithDataVolume();
 var identityDb = postgres.AddDatabase("identitydb");
 var orderingDb = postgres.AddDatabase("orderingdb");
 var paymentDb = postgres.AddDatabase("paymentdb");
 
-var catalogDb = builder.AddMongoDB("mongo").WithDataVolume().WithLifetime(ContainerLifetime.Persistent).AddDatabase("catalogdb");
+var catalogDb = builder.AddMongoDB("mongo").WithDataVolume().AddDatabase("catalogdb");
 var redis = builder.AddRedis("redis");
 var messaging = builder.AddRabbitMQ("messaging").WithManagementPlugin();
 

@@ -1,172 +1,168 @@
-version: '3.8'
+# Full stack without Aspire: docker compose --env-file .env up --build
+# Gateway: http://localhost:8080  ·  Telemetry dashboard: http://localhost:18888
+
+name: ecommerce
+
+x-service-env: &service-env
+  ASPNETCORE_ENVIRONMENT: Production
+  Jwt__SigningKey: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://dashboard:18889
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+
+x-build: &build
+  context: .
+  dockerfile: Dockerfile
 
 services:
-  # Infrastructure Services
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+  postgres:
+    image: postgres:17-alpine
     environment:
-      SA_PASSWORD: "YourStrong@Passw0rd"
-      ACCEPT_EULA: "Y"
-    ports:
-      - "1433:1433"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
-      - sqlserver_data:/var/opt/mssql
-    networks:
-      - ecommerce-network
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
-  mongodb:
-    image: mongo:latest
-    ports:
-      - "27017:27017"
+  mongo:
+    image: mongo:8.0
     volumes:
-      - mongodb_data:/data/db
-    networks:
-      - ecommerce-network
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - ecommerce-network
+    image: redis:8-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:4.3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ecommerce}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
     ports:
-      - "5672:5672"
       - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
-  eventstore:
-    image: eventstore/eventstore:latest
+  dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6.1
+    environment:
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
     ports:
-      - "2113:2113"
-      - "1113:1113"
-    environment:
-      EVENTSTORE_CLUSTER_SIZE: 1
-      EVENTSTORE_RUN_PROJECTIONS: All
-      EVENTSTORE_START_STANDARD_PROJECTIONS: true
-      EVENTSTORE_INSECURE: true
-    volumes:
-      - eventstore_data:/var/lib/eventstore
-    networks:
-      - ecommerce-network
+      - "18888:18888"
 
-  # Microservices
-  identity-service:
+  identity:
     build:
-      context: .
-      dockerfile: src/Services/Identity/ECommerce.Services.Identity/Dockerfile
-    ports:
-      - "7000:80"
+      <<: *build
+      args:
+        PROJECT: src/Services/Identity/ECommerce.Services.Identity/ECommerce.Services.Identity.csproj
+        ASSEMBLY: ECommerce.Services.Identity
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=ECommerceIdentity;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
+      <<: *service-env
+      OTEL_SERVICE_NAME: identity
+      ConnectionStrings__identitydb: Host=postgres;Database=identitydb;Username=postgres;Password=${POSTGRES_PASSWORD}
+      Identity__Admin__Email: ${ADMIN_EMAIL:-}
+      Identity__Admin__Password: ${ADMIN_PASSWORD:-}
     depends_on:
-      - sqlserver
-    networks:
-      - ecommerce-network
+      postgres: { condition: service_healthy }
 
-  catalog-service:
+  catalog:
     build:
-      context: .
-      dockerfile: src/Services/Catalog/ECommerce.Services.Catalog/Dockerfile
-    ports:
-      - "7001:80"
+      <<: *build
+      args:
+        PROJECT: src/Services/Catalog/ECommerce.Services.Catalog/ECommerce.Services.Catalog.csproj
+        ASSEMBLY: ECommerce.Services.Catalog
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      CatalogDatabase__ConnectionString: "mongodb://mongodb:27017"
-      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+      <<: *service-env
+      OTEL_SERVICE_NAME: catalog
+      ConnectionStrings__catalogdb: mongodb://mongo:27017/catalogdb
     depends_on:
-      - mongodb
-      - rabbitmq
-    networks:
-      - ecommerce-network
+      mongo: { condition: service_healthy }
 
-  basket-service:
+  basket:
     build:
-      context: .
-      dockerfile: src/Services/Basket/ECommerce.Services.Basket/Dockerfile
-    ports:
-      - "7002:80"
+      <<: *build
+      args:
+        PROJECT: src/Services/Basket/ECommerce.Services.Basket/ECommerce.Services.Basket.csproj
+        ASSEMBLY: ECommerce.Services.Basket
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Redis: "redis:6379"
-      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
-      Services__Catalog: "http://catalog-service:80"
+      <<: *service-env
+      OTEL_SERVICE_NAME: basket
+      ConnectionStrings__redis: redis:6379
+      services__catalog__http__0: http://catalog:8080
     depends_on:
-      - redis
-      - rabbitmq
-      - catalog-service
-    networks:
-      - ecommerce-network
+      redis: { condition: service_healthy }
+      catalog: { condition: service_healthy }
 
-  ordering-service:
+  ordering:
     build:
-      context: .
-      dockerfile: src/Services/Ordering/ECommerce.Services.Ordering/Dockerfile
-    ports:
-      - "7003:80"
+      <<: *build
+      args:
+        PROJECT: src/Services/Ordering/ECommerce.Services.Ordering/ECommerce.Services.Ordering.csproj
+        ASSEMBLY: ECommerce.Services.Ordering
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=ECommerceOrdering;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
-      ConnectionStrings__EventStore: "esdb://eventstore:2113?tls=false"
-      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+      <<: *service-env
+      OTEL_SERVICE_NAME: ordering
+      ConnectionStrings__orderingdb: Host=postgres;Database=orderingdb;Username=postgres;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__messaging: amqp://${RABBITMQ_USER:-ecommerce}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      services__catalog__http__0: http://catalog:8080
     depends_on:
-      - sqlserver
-      - eventstore
-      - rabbitmq
-    networks:
-      - ecommerce-network
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      catalog: { condition: service_healthy }
 
-  payment-service:
+  payment:
     build:
-      context: .
-      dockerfile: src/Services/Payment/ECommerce.Services.Payment/Dockerfile
-    ports:
-      - "7004:80"
+      <<: *build
+      args:
+        PROJECT: src/Services/Payment/ECommerce.Services.Payment/ECommerce.Services.Payment.csproj
+        ASSEMBLY: ECommerce.Services.Payment
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=ECommercePayment;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=true;"
-      ConnectionStrings__RabbitMQ: "amqp://guest:guest@rabbitmq:5672"
+      <<: *service-env
+      OTEL_SERVICE_NAME: payment
+      ConnectionStrings__paymentdb: Host=postgres;Database=paymentdb;Username=postgres;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__messaging: amqp://${RABBITMQ_USER:-ecommerce}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      PaymentGateway__ApprovalLimit: ${PAYMENT_APPROVAL_LIMIT:-10000}
     depends_on:
-      - sqlserver
-      - rabbitmq
-    networks:
-      - ecommerce-network
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
-  api-gateway:
+  gateway:
     build:
-      context: .
-      dockerfile: src/ApiGateway/ECommerce.ApiGateway/Dockerfile
-    ports:
-      - "7100:80"
+      <<: *build
+      args:
+        PROJECT: src/ApiGateway/ECommerce.ApiGateway/ECommerce.ApiGateway.csproj
+        ASSEMBLY: ECommerce.ApiGateway
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
+      <<: *service-env
+      OTEL_SERVICE_NAME: gateway
+      services__identity__http__0: http://identity:8080
+      services__catalog__http__0: http://catalog:8080
+      services__basket__http__0: http://basket:8080
+      services__ordering__http__0: http://ordering:8080
+      services__payment__http__0: http://payment:8080
+    ports:
+      - "8080:8080"
     depends_on:
-      - identity-service
-      - catalog-service
-      - basket-service
-      - ordering-service
-      - payment-service
-    networks:
-      - ecommerce-network
+      identity: { condition: service_healthy }
+      catalog: { condition: service_healthy }
+      basket: { condition: service_healthy }
+      ordering: { condition: service_healthy }
+      payment: { condition: service_healthy }
 
 volumes:
-  sqlserver_data:
-  mongodb_data:
-  redis_data:
-  rabbitmq_data:
-  eventstore_data:
-
-networks:
-  ecommerce-network:
-    driver: bridge
+  postgres-data:
+  mongo-data:
