@@ -109,6 +109,10 @@ updates:
     schedule: { interval: monthly }
     groups:
       base-images: { patterns: ["*"] }
+    ignore:
+      # Runtimes stay on their LTS lines (Node 24, Java 21, Python 3.13); bump majors deliberately.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
 
   - package-ecosystem: terraform
     directories:
