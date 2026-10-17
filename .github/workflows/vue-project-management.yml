@@ -1,0 +1,108 @@
+name: vue-project-management
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "vue-project-management/**"
+      - ".github/workflows/vue-project-management.yml"
+  pull_request:
+    paths:
+      - "vue-project-management/**"
+      - ".github/workflows/vue-project-management.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: vue-project-management
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  build-test:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: vue-project-management/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and component tests
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test production server
+        env:
+          NODE_ENV: production
+          NUXT_JWT_SECRET: ci-smoke-test-secret-not-used-anywhere-else
+          PORT: "3000"
+        run: |
+          node .output/server/index.mjs &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3000/api/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:3000/api/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/tasks)" = "401"
+          curl -sf -c cookies.txt -H 'content-type: application/json' \
+            -d '{"email":"manager@example.com","password":"manager123"}' \
+            http://127.0.0.1:3000/api/auth/login > /dev/null
+          curl -sf -b cookies.txt http://127.0.0.1:3000/api/tasks | grep -q '"projectId"'
+          curl -sf -b cookies.txt http://127.0.0.1:3000/dashboard | grep -q 'Welcome back'
+
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory only: remaining high findings are in Nuxt/Nitro build tooling with no patched release yet.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: vue-project-management
+          push: false
+          load: true
+          tags: vue-project-management:ci
+          cache-from: type=gha,scope=vue-project-management
+          cache-to: type=gha,mode=max,scope=vue-project-management
+      - name: Container health check
+        run: |
+          docker run -d --name app -p 3000:3000 -e NUXT_JWT_SECRET=ci-container-secret-0123456789 vue-project-management:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3000/api/health && exit 0; sleep 1; done
+          docker logs app
+          exit 1
