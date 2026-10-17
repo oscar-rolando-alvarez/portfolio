@@ -114,7 +114,9 @@ def train() -> dict:
             }
         )
 
-    data_hash = hashlib.sha256(np.ascontiguousarray(x).tobytes() + y.tobytes()).hexdigest()[:16]
+    # Hash a rounded, platform-independent representation: libm may differ in the last ulp across OS/CPU.
+    canonical = np.round(x, 9).astype("<f8").tobytes() + y.astype("<i8").tobytes()
+    data_hash = hashlib.sha256(canonical).hexdigest()[:16]
     return {
         "modelVersion": MODEL_VERSION,
         "algorithm": "standardized logistic regression (L2, lbfgs)",
