@@ -15,7 +15,7 @@ anchor-spl = { version = "1.2.1", default-features = false, features = ["token",
 pyth-solana-receiver-sdk = "2.0.0"
 litesvm = "0.18.0"
 solana-keypair = "3"
-solana-signer = "3"
+solana-signer = "4"
 solana-transaction = "4"
 solana-account = "4"
 
