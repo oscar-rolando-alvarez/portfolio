@@ -1,67 +1,32 @@
-# Multi-stage build for production optimization
-FROM python:3.11-slim as builder
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONHASHSEED=random \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create and activate virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
-
-# Production stage
-FROM python:3.11-slim as production
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONHASHSEED=random \
-    PATH="/opt/venv/bin:$PATH"
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Set work directory
+# syntax=docker/dockerfile:1.7
+# ---- builder: resolve and install locked dependencies with uv ----
+FROM python:3.13.16-slim-trixie AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 
-# Copy application code
-COPY . .
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 
-# Create directories and set permissions
-RUN mkdir -p logs && \
-    chown -R appuser:appuser /app
+COPY src ./src
+COPY alembic ./alembic
+COPY alembic.ini ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
-# Switch to non-root user
-USER appuser
-
-# Expose port
+# ---- runtime: slim image, non-root, no build tooling ----
+FROM python:3.13.16-slim-trixie AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH" \
+    DATABASE_URL="sqlite+aiosqlite:////app/data/financial_analysis.db"
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home app \
+    && mkdir -p /app/data && chown app:app /app/data
+WORKDIR /app
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/alembic /app/alembic
+COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
+USER app
 EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Default command
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+CMD ["uvicorn", "financial_analysis.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

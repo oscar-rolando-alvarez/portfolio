@@ -172,7 +172,6 @@ data/
 Thumbs.db
 
 # Docker
-.dockerignore
 
 # Testing
 .coverage
