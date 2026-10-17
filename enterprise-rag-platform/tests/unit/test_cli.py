@@ -19,7 +19,8 @@ def _offline_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ask_demo_answers_offline() -> None:
     result = CliRunner().invoke(app, ["ask", "How many weeks of paid parental leave are offered?"])
     assert result.exit_code == 0, result.output
-    body = json.loads(result.output[result.output.index("{") :])
+    start = result.output.index('{\n  "answer"')  # log lines may precede the payload
+    body, _ = json.JSONDecoder().raw_decode(result.output[start:])
     assert "16 weeks" in body["answer"]
     assert body["citations"]
 

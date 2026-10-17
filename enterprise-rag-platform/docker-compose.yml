@@ -1,0 +1,80 @@
+# Full local stack: PostgreSQL + pgvector, migrations, API, ingestion worker, Jaeger (OTLP).
+# Runs fully offline with the deterministic fake model providers by default.
+# To use a real OpenAI-compatible endpoint, copy .env.example to .env and set RAG_LLM_*.
+name: enterprise-rag-platform
+
+x-app: &app
+  build: .
+  image: enterprise-rag-platform:local
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    RAG_DATABASE_URL: postgresql+asyncpg://rag:rag@postgres:5432/rag
+    RAG_INGESTION_MODE: queue
+    RAG_OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    RAG_ENVIRONMENT: compose
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg18-trixie
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    ports:
+      - "${RAG_PG_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  api:
+    <<: *app
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${RAG_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686" # UI
+      - "${OTLP_PORT:-4317}:4317"   # OTLP gRPC
+
+volumes:
+  pgdata:

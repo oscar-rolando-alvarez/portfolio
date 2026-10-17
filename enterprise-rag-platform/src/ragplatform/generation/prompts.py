@@ -3,6 +3,7 @@ can be correlated with eval results (``PROMPT_VERSION`` is attached to every tra
 
 from __future__ import annotations
 
+import html
 from collections.abc import Sequence
 
 from ragplatform.domain.models import Candidate
@@ -47,8 +48,9 @@ well the answer addresses the QUESTION. Output JSON only."""
 def render_sources(candidates: Sequence[Candidate]) -> str:
     parts = []
     for c in candidates:
-        section = " > ".join(c.section_path)
-        title = c.document_title.replace('"', "'")
+        # attribute values are escaped so titles/headings cannot break out of the element
+        section = html.escape(" > ".join(c.section_path), quote=True)
+        title = html.escape(c.document_title, quote=True)
         flag = ' trust="low"' if c.metadata.get("injection_flagged") else ""
         parts.append(
             f'<source id="{c.chunk_id}" title="{title}" section="{section}"{flag}>\n'

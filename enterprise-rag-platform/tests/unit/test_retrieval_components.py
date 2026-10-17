@@ -217,3 +217,18 @@ def test_tsquery_is_built_from_sanitised_terms() -> None:
     assert build_tsquery("What's the VPN client?!") == "client | vpn"
     assert build_tsquery("'; DROP TABLE chunks; --") == "chunk | drop | table"
     assert build_tsquery("the and of") is None
+
+
+async def test_source_attributes_are_escaped() -> None:
+    from ragplatform.generation.prompts import render_sources
+
+    c = cand("Sev1 pages are acknowledged within 5 minutes.", title='Runbook "A" > <b>')
+    c.section_path = ["Ops > Paging"]
+    rendered = render_sources([c])
+    assert 'title="Runbook &quot;A&quot; &gt; &lt;b&gt;"' in rendered
+    out = await ExtractiveFakeLLM().complete(
+        build_answer_messages("How fast are Sev1 pages acknowledged?", [c]),
+        max_tokens=50,
+        temperature=0,
+    )
+    assert out.text.startswith("Sev1 pages are acknowledged")
