@@ -5,41 +5,34 @@ export const selectNotificationState = createFeatureSelector<NotificationState>(
 
 export const selectAllNotifications = createSelector(
   selectNotificationState,
-  (state: NotificationState) => state.notifications
+  (state: NotificationState) => state.notifications,
 );
 
-export const selectUnreadNotifications = createSelector(
-  selectAllNotifications,
-  (notifications) => notifications.filter(notification => !notification.isRead)
+export const selectUnreadNotifications = createSelector(selectAllNotifications, (notifications) =>
+  notifications.filter((notification) => !notification.isRead),
 );
 
 export const selectUnreadNotificationsCount = createSelector(
   selectUnreadNotifications,
-  (notifications) => notifications.length
+  (notifications) => notifications.length,
 );
 
 export const selectNotificationsByType = (type: 'info' | 'success' | 'warning' | 'error') =>
-  createSelector(
-    selectAllNotifications,
-    (notifications) => notifications.filter(notification => notification.type === type)
+  createSelector(selectAllNotifications, (notifications) =>
+    notifications.filter((notification) => notification.type === type),
   );
 
-export const selectRecentNotifications = createSelector(
-  selectAllNotifications,
-  (notifications) => {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    return notifications.filter(notification => 
-      new Date(notification.createdAt) > oneDayAgo
-    );
-  }
-);
+export const selectRecentNotifications = createSelector(selectAllNotifications, (notifications) => {
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  return notifications.filter((notification) => new Date(notification.createdAt) > oneDayAgo);
+});
 
 export const selectNotificationsLoading = createSelector(
   selectNotificationState,
-  (state: NotificationState) => state.isLoading
+  (state: NotificationState) => state.isLoading,
 );
 
 export const selectNotificationsError = createSelector(
   selectNotificationState,
-  (state: NotificationState) => state.error
+  (state: NotificationState) => state.error,
 );

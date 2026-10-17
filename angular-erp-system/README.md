@@ -1,388 +1,231 @@
 # Angular ERP System
 
-A comprehensive Enterprise Resource Planning (ERP) system built with Angular 17, featuring a modular architecture and modern web technologies.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/angular-erp-system.yml/badge.svg)
 
-## 🚀 Features
+A modular ERP (Enterprise Resource Planning) front end built with **Angular 22**, **Angular Material 3** and **NgRx**. It shows how a large back-office application is structured: a role-aware shell, authentication with session restore, a global notification inbox, and feature modules that load lazily. The **Inventory** module is fully implemented; additional modules (HR, Finance, CRM, ...) plug into the same shell, navigation and role model.
 
-### Angular 17 Features
-- **Standalone Components**: Modern component architecture without NgModules
-- **New Control Flow**: Using `@if`, `@for`, `@switch` syntax
-- **Angular Signals**: Reactive state management with signals
-- **Lazy Loading**: Route-based code splitting for optimal performance
-- **SSR Support**: Server-Side Rendering for better SEO and performance
+The app ships with an **in-browser mock API**, so it runs end to end with no backend: clone, `npm start`, sign in.
 
-### ERP Modules
-- **Human Resources**: Employee management, payroll, attendance tracking
-- **Financial Management**: Accounting, invoicing, expense tracking, financial reporting
-- **Inventory Management**: Product catalog, stock management, supplier relations, purchase orders
-- **Customer Relationship Management (CRM)**: Customer data, lead tracking, opportunity management
-- **Project Management**: Task management, project timelines, resource allocation
-- **Sales Management**: Sales orders, quotations, commission tracking
-- **Reporting & Analytics**: KPI tracking, custom reports, data visualization
+## Problem it solves
 
-### Architecture Features
-- **Micro-frontend Ready**: Modular architecture with Angular Elements support
-- **NgRx State Management**: Comprehensive state management with feature stores
-- **Reactive Forms**: Dynamic form generation with validation
-- **Custom Directives & Pipes**: Reusable UI components and data transformations
-- **Advanced Routing**: Guards, resolvers, and lazy-loaded routes
-- **Internationalization (i18n)**: Multi-language support
+Mid-sized companies often run inventory, purchasing and back-office work in spreadsheets. This front end gives operations staff one place to see stock levels, react to low-stock alerts and record stock movements, with access restricted by role.
 
-### UI/UX Features
-- **Material Design**: Angular Material with custom theming
-- **Responsive Design**: Mobile-first approach with adaptive layouts
-- **Dynamic Theming**: Light/dark themes with system preference detection
-- **Advanced Data Tables**: Sorting, filtering, pagination, and bulk actions
-- **Customizable Dashboard**: Widget-based dashboard with drag-and-drop
-- **Rich Text Editor**: Integrated WYSIWYG editor
-- **File Upload**: Progress tracking and multiple file support
+## Key features
 
-### Advanced Features
-- **Role-Based Access Control (RBAC)**: Granular permissions system
-- **Audit Logging**: Complete activity tracking
-- **Real-time Notifications**: WebSocket-based updates
-- **Progressive Web App (PWA)**: Offline support and native app experience
-- **Data Export**: Excel, PDF, CSV export capabilities
-- **Print Functionality**: Optimized printing layouts
-- **Advanced Search**: Global search across all modules
+- **Role-based shell**: navigation and routes are filtered by the signed-in user's roles (`roleGuard` + shared navigation model).
+- **Authentication flow**: login, token refresh scheduling, session restore before the first navigation (`provideAppInitializer`), and redirect back to the originally requested page.
+- **Inventory module**: KPIs (SKUs, items needing reorder, stock value), live search, category and stock-status filters, sortable/paginated table, add product form, receive/issue stock actions.
+- **Notifications**: inbox loaded from the API (unread badge, mark all read) plus transient toasts driven by NgRx effects.
+- **Light/dark theme** that follows the OS by default and is remembered per browser.
+- **Mock backend** implemented as a functional `HttpInterceptor`; disable it with one flag to talk to a real API.
+- **PWA-ready**: Angular service worker in production builds.
+- **Hardened container**: non-root nginx, strict Content Security Policy, health endpoint.
 
-## 📁 Project Structure
+## Tech stack
 
-```
-src/
-├── app/
-│   ├── core/                    # Core services, guards, interceptors
-│   │   ├── guards/              # Route guards (auth, role, admin)
-│   │   ├── interceptors/        # HTTP interceptors
-│   │   ├── models/              # Data models and interfaces
-│   │   ├── services/            # Core services
-│   │   └── store/               # NgRx store (auth, theme, notifications, UI)
-│   ├── shared/                  # Shared components and utilities
-│   │   ├── components/          # Reusable components
-│   │   ├── directives/          # Custom directives
-│   │   ├── pipes/               # Custom pipes
-│   │   └── utils/               # Utility functions
-│   ├── features/                # Feature modules
-│   │   ├── auth/                # Authentication module
-│   │   ├── dashboard/           # Main dashboard
-│   │   ├── hr/                  # Human Resources module
-│   │   ├── finance/             # Financial Management module
-│   │   ├── inventory/           # Inventory Management module
-│   │   ├── crm/                 # Customer Relationship Management
-│   │   ├── projects/            # Project Management module
-│   │   ├── sales/               # Sales Management module
-│   │   └── analytics/           # Reporting & Analytics module
-│   ├── layout/                  # App layout components
-│   │   ├── header/              # Header component
-│   │   ├── sidenav/             # Navigation sidebar
-│   │   └── footer/              # Footer component
-│   └── store/                   # Root store configuration
-├── assets/                      # Static assets
-│   ├── i18n/                    # Translation files
-│   ├── icons/                   # App icons
-│   └── images/                  # Images and graphics
-├── environments/                # Environment configurations
-└── styles.scss                  # Global styles and theming
+| Area | Technology | Version |
+| --- | --- | --- |
+| Framework | Angular (standalone components, signals, zoneless) | 22.2 |
+| UI | Angular Material / CDK (Material 3 tokens) | 22.2 |
+| State | NgRx Store + Effects (+ Store Devtools) | 22.0 |
+| Reactive | RxJS | 7.8 |
+| Language | TypeScript | 6.0 |
+| Build | Angular CLI, `@angular/build` (esbuild + Vite) | 22.2 |
+| Unit tests | Vitest via `@angular/build:unit-test`, jsdom | 5.0 |
+| Lint / format | ESLint flat config + angular-eslint + typescript-eslint, Prettier | 10 / 22.6 / 8.71 / 3.9 |
+| Runtime (CI, Docker build) | Node.js LTS | 24 |
+| Web server | nginx-unprivileged (Alpine) | 1.30 |
+
+## Architecture
+
+### Context and containers
+
+```mermaid
+flowchart LR
+    user(["Operations user<br/>(admin, warehouse staff)"])
+
+    subgraph browser["Browser"]
+        spa["Angular SPA<br/>standalone components, signals"]
+        store[("NgRx Store<br/>auth, notifications")]
+        mock["Mock API interceptor<br/>(demo mode)"]
+        sw["Angular service worker"]
+    end
+
+    nginx["nginx-unprivileged container<br/>static files, CSP, /health"]
+    api["ERP REST API<br/>/api/v1 (optional, not included)"]
+
+    user -->|"HTTPS"| nginx
+    nginx -->|"index.html, JS, CSS"| spa
+    spa <--> store
+    spa -->|"HttpClient"| mock
+    mock -.->|"pass-through when disabled<br/>or endpoint unknown"| api
+    sw -.->|"caches app shell"| spa
 ```
 
-## 🛠️ Technology Stack
+### Code structure
 
-- **Frontend**: Angular 17, TypeScript, SCSS
-- **State Management**: NgRx (Store, Effects, Entity)
-- **UI Framework**: Angular Material
-- **Charts**: Chart.js with ng2-charts
-- **Rich Text**: Quill.js with ngx-quill
-- **Build Tool**: Angular CLI with Webpack
-- **Testing**: Jest, Cypress
-- **PWA**: Angular Service Worker
-- **Containerization**: Docker, Docker Compose
-- **Server**: Nginx (production)
+```mermaid
+flowchart TB
+    app["AppComponent<br/>shell + global progress bar"] --> layout["Layout<br/>sidenav, header, footer"]
+    app --> routes["app.routes.ts<br/>lazy loadComponent"]
+    routes --> auth["features/auth<br/>login"]
+    routes --> dash["features/dashboard<br/>httpResource summary"]
+    routes --> inv["features/inventory<br/>InventoryService (httpResource) + table"]
+    inv --> table["shared/data-table<br/>generic, signal inputs"]
+    subgraph core["core"]
+        guards["guards<br/>authGuard, roleGuard"]
+        interceptors["interceptors<br/>auth, loading, error, mock"]
+        ngrx["store<br/>auth + notification slices, effects"]
+        services["signal services<br/>ThemeService, LoadingService"]
+    end
+    routes --> guards
+    dash --> ngrx
+    layout --> ngrx
+    layout --> services
+```
 
-## 🚀 Getting Started
+### Sign-in and first data load
 
-### Prerequisites
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant L as LoginComponent
+    participant S as NgRx Store
+    participant E as AuthEffects
+    participant A as AuthService
+    participant I as Interceptors (auth, loading, error, mock)
+    participant R as Router
 
-- Node.js 18+ and npm 8+
-- Angular CLI 17+
-- Docker (optional, for containerized deployment)
+    U->>L: submit email + password
+    L->>S: dispatch login
+    S->>E: login action
+    E->>A: login(email, password)
+    A->>I: POST /api/v1/auth/login
+    I-->>A: user, token, refreshToken, expiresIn
+    A-->>E: LoginResponse (refresh timer scheduled)
+    E->>S: dispatch loginSuccess
+    E->>R: navigateByUrl(returnUrl or /dashboard)
+    R->>R: authGuard reads store signal: authenticated
+    Note over I: authInterceptor now adds the Bearer token header
+    R-->>U: Dashboard renders, httpResource loads /dashboard/summary
+```
 
-### Installation
+### Inventory state model
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd angular-erp-system
-   ```
+```mermaid
+stateDiagram-v2
+    [*] --> InStock: above reorder point
+    InStock --> LowStock: issue stock, at or below reorder point
+    LowStock --> OutOfStock: issue last unit
+    LowStock --> InStock: receive stock
+    OutOfStock --> LowStock: receive stock
+    OutOfStock --> InStock: receive enough stock
+```
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+## Project structure
 
-3. **Start development server**
-   ```bash
-   npm start
-   ```
+```text
+angular-erp-system/
+├── src/
+│   ├── app/
+│   │   ├── core/
+│   │   │   ├── guards/          authGuard, roleGuard
+│   │   │   ├── http/            apiUrl() and response envelope helpers
+│   │   │   ├── interceptors/    auth, loading, error
+│   │   │   ├── mock/            in-browser API + seed data
+│   │   │   ├── models/          domain types
+│   │   │   ├── navigation/      role-aware navigation model
+│   │   │   ├── services/        auth, notifications, theme, loading
+│   │   │   └── store/           NgRx auth + notification slices
+│   │   ├── features/            auth, dashboard, inventory (lazy loaded)
+│   │   ├── layout/              shell: sidenav, header, footer
+│   │   ├── shared/components/   data-table, not-found
+│   │   ├── store/               root reducer map
+│   │   ├── app.config.ts        providers (zoneless, router, http, store)
+│   │   └── app.routes.ts
+│   ├── environments/
+│   └── styles.scss              Material 3 theme
+├── Dockerfile                   multi-stage, non-root runtime
+├── nginx.conf / security-headers.conf
+├── docker-compose.yml
+└── eslint.config.js             flat config
+```
 
-4. **Open your browser**
-   Navigate to `http://localhost:4200`
+## Running locally
 
-### Development Commands
+Requirements: Node.js 24 LTS and npm 11.
 
 ```bash
-# Development server
-npm start
-
-# Build for production
-npm run build
-
-# Build with SSR
-npm run build:ssr
-
-# Serve SSR build
-npm run serve:ssr
-
-# Run tests
-npm test
-
-# Run tests with coverage
-npm run test:coverage
-
-# Run e2e tests
-npm run e2e
-
-# Extract i18n messages
-npm run i18n:extract
-
-# Build for specific locale
-npm run i18n:build:en
-npm run i18n:build:es
-npm run i18n:build:fr
-
-# Analyze bundle size
-npm run analyze
+cd angular-erp-system
+npm ci
+npm start            # http://localhost:4200
 ```
 
-## 🐳 Docker Deployment
+Demo accounts (served by the in-browser mock API, password `demo1234`):
 
-### Development with Docker
+| Email | Roles | Sees |
+| --- | --- | --- |
+| `admin@erp.local` | admin | Dashboard, Inventory |
+| `warehouse@erp.local` | warehouse_employee | Dashboard, Inventory |
+| `sales@erp.local` | sales_rep | Dashboard only (Inventory is role-restricted) |
+
+### With Docker
 
 ```bash
-# Build and run with Docker Compose
-docker-compose up --build
-
-# Run in background
-docker-compose up -d
-
-# View logs
-docker-compose logs -f frontend
-
-# Stop services
-docker-compose down
+cd angular-erp-system
+docker compose up --build        # http://localhost:8080
+# or
+docker build -t angular-erp-system .
+docker run --rm -p 8080:8080 --read-only --tmpfs /tmp angular-erp-system
 ```
 
-### Production Deployment
+The container runs as the unprivileged `nginx` user on port 8080 and exposes `GET /health` for liveness checks.
 
-1. **Build production image**
-   ```bash
-   docker build -t angular-erp-system .
-   ```
-
-2. **Run container**
-   ```bash
-   docker run -p 80:80 -p 443:443 angular-erp-system
-   ```
-
-### Environment Variables
-
-Create a `.env` file for configuration:
-
-```env
-NODE_ENV=production
-API_URL=https://api.yourcompany.com
-DATABASE_URL=postgresql://user:password@localhost:5432/erp_db
-JWT_SECRET=your-secret-key
-REDIS_URL=redis://localhost:6379
-```
-
-## 🧪 Testing
-
-### Unit Tests (Jest)
+## Testing and quality checks
 
 ```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Generate coverage report
-npm run test:coverage
+npm test               # Vitest (jsdom) via the Angular CLI unit-test builder
+npm run test:coverage  # with V8 coverage report in ./coverage
+npm run lint           # ESLint flat config (angular-eslint, typescript-eslint)
+npm run typecheck      # tsc for app and spec projects
+npm run format:check   # Prettier
+npm run build          # production build with budgets
 ```
 
-### E2E Tests (Cypress)
+Tests cover the auth reducer, `authGuard`, the mock API (login, 401 handling, persistence), the theme service, the login form and the inventory page (KPIs, search, stock actions via `HttpTestingController`).
 
-```bash
-# Open Cypress interface
-npm run e2e
+CI (`.github/workflows/angular-erp-system.yml`) runs all of the above on Node 24, an advisory `npm audit --audit-level=high`, and builds the Docker image and smoke-tests it (health endpoint, SPA fallback, CSP header, non-root user).
 
-# Run headless tests
-npm run e2e:headless
-```
+## Configuration
 
-## 🌐 Internationalization
+Build-time configuration lives in `src/environments/` (production values are swapped in by `fileReplacements`).
 
-The application supports multiple languages:
+| Setting | Default | Description |
+| --- | --- | --- |
+| `apiUrl` | `/api` | Base URL of the ERP REST API |
+| `apiVersion` | `v1` | Path segment appended to `apiUrl` |
+| `enableMocking` | `true` | Serve the API from the in-browser mock; set `false` to call a real backend |
+| `security.tokenExpirationTime` | `3600000` | Fallback token lifetime (ms) used to schedule refresh |
 
-1. **Extract translatable text**
-   ```bash
-   npm run i18n:extract
-   ```
+Runtime (Docker Compose) variables:
 
-2. **Translate messages**
-   Edit files in `src/locale/`
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ERP_WEB_PORT` | `8080` | Host port mapped to the container |
 
-3. **Build for specific locale**
-   ```bash
-   npm run i18n:build:en
-   npm run i18n:build:es
-   npm run i18n:build:fr
-   ```
+No secrets are needed: the app is a static bundle and the demo credentials exist only in the mock seed data.
 
-## 📱 Progressive Web App (PWA)
+## Design decisions
 
-The application includes PWA features:
+- **Zoneless + signals**: Angular 22 apps are zoneless by default. Components are `OnPush`, read state through signals (`selectSignal`, `toSignal`, `httpResource`, `computed`) and never mutate template-bound objects.
+- **NgRx where it pays off, signals elsewhere**: authentication and notifications are shared across the app and involve side effects, so they stay in NgRx Store with Effects. Purely presentational state (theme, global loading indicator, page filters) uses signal services and component signals, which removes a lot of boilerplate.
+- **`httpResource` for reads, `HttpClient` for writes**: reads are declarative and cancel automatically; writes patch the resource value locally for instant feedback.
+- **Mock API as an interceptor**: the UI talks to real HTTP endpoints and the mock sits behind the same contract, so switching to a real backend is a configuration change, and unknown endpoints already pass through.
+- **Focused scope**: the original version advertised many modules whose files were never written and could not compile. This version ships the shell, auth and one complete vertical slice (Inventory) instead; new modules are added by registering a route and a navigation entry.
+- **Strict CSP**: critical-CSS inlining is disabled so no inline script is needed and `script-src 'self'` can be enforced by nginx.
 
-- **Offline Support**: Service worker caching
-- **App-like Experience**: Installable on mobile devices
-- **Push Notifications**: Real-time updates
-- **Background Sync**: Data synchronization when online
+## Known limitations
 
-### PWA Configuration
-
-Edit `ngsw-config.json` to customize caching strategies and update policies.
-
-## 🔐 Security Features
-
-- **Authentication**: JWT-based authentication
-- **Authorization**: Role-based access control (RBAC)
-- **CSRF Protection**: Cross-site request forgery prevention
-- **Content Security Policy**: XSS protection
-- **Secure Headers**: Security headers via Nginx
-- **Input Validation**: Client and server-side validation
-
-## 📊 Performance Optimization
-
-- **Lazy Loading**: Route-based code splitting
-- **OnPush Change Detection**: Optimized change detection
-- **TrackBy Functions**: Efficient list rendering
-- **Image Optimization**: Responsive images with lazy loading
-- **Bundle Analysis**: Webpack bundle analyzer
-- **Service Worker**: Aggressive caching strategies
-
-## 🏗️ Architecture Patterns
-
-### State Management
-- **NgRx Store**: Centralized state management
-- **Feature Stores**: Module-specific state slices
-- **Effects**: Side effect management
-- **Selectors**: Memoized state queries
-
-### Component Architecture
-- **Standalone Components**: No NgModule dependencies
-- **Smart/Dumb Components**: Clear separation of concerns
-- **OnPush Strategy**: Performance-optimized components
-- **Reactive Forms**: Model-driven form handling
-
-### Service Architecture
-- **Dependency Injection**: Angular DI container
-- **HTTP Interceptors**: Request/response handling
-- **Guard Services**: Route protection
-- **Resolver Services**: Data pre-loading
-
-## 🚀 Deployment Strategies
-
-### Development
-- Local development server
-- Hot module replacement
-- Source maps for debugging
-
-### Staging
-- Docker containers
-- Environment-specific configuration
-- Automated testing
-
-### Production
-- Multi-stage Docker builds
-- Nginx reverse proxy
-- SSL/TLS termination
-- Health checks and monitoring
-
-## 📈 Monitoring and Analytics
-
-### Application Monitoring
-- Error tracking and reporting
-- Performance metrics
-- User analytics
-- Real-time dashboards
-
-### Infrastructure Monitoring
-- Container health checks
-- Resource utilization
-- Log aggregation
-- Alerting systems
-
-## 🤝 Contributing
-
-1. **Fork the repository**
-2. **Create a feature branch**
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-3. **Commit your changes**
-   ```bash
-   git commit -m 'Add some amazing feature'
-   ```
-4. **Push to the branch**
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-5. **Open a Pull Request**
-
-### Development Guidelines
-
-- **Code Style**: Follow Angular style guide
-- **Testing**: Write unit and e2e tests
-- **Documentation**: Update README and code comments
-- **Type Safety**: Use TypeScript strictly
-- **Performance**: Consider performance implications
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Angular team for the amazing framework
-- Angular Material team for the UI components
-- NgRx team for state management
-- Open source community for the ecosystem
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 📞 Support
-
-For technical support and questions:
-
-- **Documentation**: Check the `/docs` folder
-- **Issues**: Create an issue on GitHub
-- **Discussions**: Use GitHub Discussions
-
----
-
-Built with ❤️ using Angular 17 and modern web technologies.
+- There is no real backend in this repository; the mock API keeps data in memory and resets on reload.
+- Only the Inventory module is implemented; HR, Finance, CRM and other modules are not part of this version.
+- No end-to-end browser tests in CI yet (unit and component tests only).

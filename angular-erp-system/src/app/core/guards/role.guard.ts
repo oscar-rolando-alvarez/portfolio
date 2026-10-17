@@ -3,7 +3,7 @@ import { Router, CanActivateFn } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { map, take } from 'rxjs/operators';
 
-import { selectHasAnyRole, selectCurrentUser } from '@core/store/auth/auth.selectors';
+import { selectCurrentUser } from '@core/store/auth/auth.selectors';
 import { NotificationService } from '@core/services/notification.service';
 
 export const roleGuard: CanActivateFn = (route, state) => {
@@ -19,17 +19,17 @@ export const roleGuard: CanActivateFn = (route, state) => {
 
   return store.select(selectCurrentUser).pipe(
     take(1),
-    map(user => {
+    map((user) => {
       if (!user) {
         notificationService.showWarning('Please log in to access this page');
-        router.navigate(['/auth/login'], { 
-          queryParams: { returnUrl: state.url } 
+        router.navigate(['/auth/login'], {
+          queryParams: { returnUrl: state.url },
         });
         return false;
       }
 
-      const userRoles = user.roles.map(role => role.name);
-      const hasRequiredRole = requiredRoles.some(role => userRoles.includes(role));
+      const userRoles = user.roles.map((role) => role.name);
+      const hasRequiredRole = requiredRoles.some((role) => userRoles.includes(role));
 
       if (hasRequiredRole) {
         return true;
@@ -38,6 +38,6 @@ export const roleGuard: CanActivateFn = (route, state) => {
         router.navigate(['/dashboard']);
         return false;
       }
-    })
+    }),
   );
 };

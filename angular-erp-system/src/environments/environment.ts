@@ -1,35 +1,18 @@
+/**
+ * Development environment. Replaced by environment.prod.ts in production builds
+ * (see fileReplacements in angular.json).
+ */
 export const environment = {
   production: false,
-  apiUrl: 'http://localhost:3000/api',
-  apiVersion: 'v1',
   appName: 'Angular ERP System',
-  appVersion: '1.0.0',
-  enableDebug: true,
+  appVersion: '2.0.0',
+  /** Base URL of the ERP REST API. Requests are proxied by nginx in the container image. */
+  apiUrl: '/api',
+  apiVersion: 'v1',
+  /** Serve the API from the in-browser mock backend instead of a real server. */
   enableMocking: true,
-  enableAnalytics: false,
-  enablePWA: true,
-  features: {
-    enableRealtimeUpdates: true,
-    enableOfflineMode: true,
-    enableAdvancedSearch: true,
-    enableAuditLog: true,
-    enableDataExport: true,
-    enableFileUpload: true,
-    enableNotifications: true,
-    enableThemes: true,
-    enableI18n: true
-  },
-  external: {
-    chartsLibrary: 'chart.js',
-    mapsProvider: 'google',
-    paymentProvider: 'stripe',
-    emailProvider: 'sendgrid'
-  },
   security: {
-    tokenExpirationTime: 3600000, // 1 hour
-    refreshTokenExpirationTime: 2592000000, // 30 days
-    enableCSRF: true,
-    enableCORS: true,
-    allowedOrigins: ['http://localhost:4200', 'http://localhost:3000']
-  }
+    /** Fallback access-token lifetime used to schedule a refresh when the API omits expiresIn. */
+    tokenExpirationTime: 60 * 60 * 1000,
+  },
 };

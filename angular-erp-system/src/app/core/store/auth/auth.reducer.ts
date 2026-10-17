@@ -23,7 +23,7 @@ export const initialState: AuthState = {
   error: null,
   lastLoginAt: null,
   sessionExpiresAt: null,
-  rememberMe: false
+  rememberMe: false,
 };
 
 export const authReducer = createReducer(
@@ -33,7 +33,7 @@ export const authReducer = createReducer(
   on(AuthActions.login, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.loginSuccess, (state, { user, token, refreshToken }) => ({
@@ -45,7 +45,7 @@ export const authReducer = createReducer(
     isLoading: false,
     error: null,
     lastLoginAt: new Date(),
-    sessionExpiresAt: new Date(Date.now() + (60 * 60 * 1000)) // 1 hour from now
+    sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
   })),
 
   on(AuthActions.loginFailure, (state, { error }) => ({
@@ -55,30 +55,30 @@ export const authReducer = createReducer(
     isAuthenticated: false,
     user: null,
     token: null,
-    refreshToken: null
+    refreshToken: null,
   })),
 
   // Logout Actions
   on(AuthActions.logout, (state) => ({
     ...state,
-    isLoading: true
+    isLoading: true,
   })),
 
   on(AuthActions.logoutSuccess, () => ({
-    ...initialState
+    ...initialState,
   })),
 
   on(AuthActions.logoutFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
-    error
+    error,
   })),
 
   // Registration Actions
   on(AuthActions.register, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.registerSuccess, (state, { user, token }) => ({
@@ -89,20 +89,20 @@ export const authReducer = createReducer(
     isLoading: false,
     error: null,
     lastLoginAt: new Date(),
-    sessionExpiresAt: new Date(Date.now() + (60 * 60 * 1000))
+    sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
   })),
 
   on(AuthActions.registerFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
     error,
-    isAuthenticated: false
+    isAuthenticated: false,
   })),
 
   // Token Refresh Actions
   on(AuthActions.refreshToken, (state) => ({
     ...state,
-    isLoading: true
+    isLoading: true,
   })),
 
   on(AuthActions.refreshTokenSuccess, (state, { token, refreshToken }) => ({
@@ -110,7 +110,7 @@ export const authReducer = createReducer(
     token,
     refreshToken: refreshToken || state.refreshToken,
     isLoading: false,
-    sessionExpiresAt: new Date(Date.now() + (60 * 60 * 1000))
+    sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
   })),
 
   on(AuthActions.refreshTokenFailure, (state, { error }) => ({
@@ -120,99 +120,110 @@ export const authReducer = createReducer(
     isAuthenticated: false,
     user: null,
     token: null,
-    refreshToken: null
+    refreshToken: null,
   })),
 
   // Password Management Actions
   on(AuthActions.forgotPassword, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.forgotPasswordSuccess, (state) => ({
     ...state,
     isLoading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.forgotPasswordFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
-    error
+    error,
   })),
 
   on(AuthActions.resetPassword, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.resetPasswordSuccess, (state) => ({
     ...state,
     isLoading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.resetPasswordFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
-    error
+    error,
   })),
 
   // User Profile Actions
   on(AuthActions.loadUserProfile, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.loadUserProfileSuccess, (state, { user }) => ({
     ...state,
     user,
     isLoading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.loadUserProfileFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
-    error
+    error,
   })),
 
   on(AuthActions.updateUserProfile, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.updateUserProfileSuccess, (state, { user }) => ({
     ...state,
     user,
     isLoading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.updateUserProfileFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
-    error
+    error,
   })),
 
   // Session Management
-  on(AuthActions.sessionExpired, (state) => ({
+  on(AuthActions.sessionExpired, () => ({
     ...initialState,
-    error: 'Your session has expired. Please log in again.'
+    error: 'Your session has expired. Please log in again.',
   })),
+
+  on(AuthActions.sessionRestored, (state, { user, token, refreshToken }) => ({
+    ...state,
+    user,
+    token,
+    refreshToken: refreshToken ?? null,
+    isAuthenticated: true,
+    error: null,
+  })),
+
+  on(AuthActions.sessionCleared, () => initialState),
 
   on(AuthActions.sessionExtended, (state) => ({
     ...state,
-    sessionExpiresAt: new Date(Date.now() + (60 * 60 * 1000))
+    sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
   })),
 
   // Clear Errors
   on(AuthActions.clearAuthErrors, (state) => ({
     ...state,
-    error: null
-  }))
+    error: null,
+  })),
 );

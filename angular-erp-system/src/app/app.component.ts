@@ -1,73 +1,54 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { RouterOutlet } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
 
-import { LayoutComponent } from './layout/layout.component';
 import { LoadingService } from '@core/services/loading.service';
-import { ThemeService } from '@core/services/theme.service';
 import { NotificationService } from '@core/services/notification.service';
-import { AuthService } from '@core/services/auth.service';
+import { ThemeService } from '@core/services/theme.service';
 import { selectIsAuthenticated } from '@core/store/auth/auth.selectors';
-import { selectIsLoading } from '@core/store/ui/ui.selectors';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { LayoutComponent } from './layout/layout.component';
 
 @Component({
   selector: 'app-root',
-  standalone: true,
-  imports: [
-    CommonModule,
-    RouterOutlet,
-    LayoutComponent,
-    MatProgressBarModule
-  ],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RouterOutlet, LayoutComponent, MatProgressBarModule],
   template: `
-    <div [class.dark-theme]="isDarkTheme$ | async" class="app-container">
-      @if (isLoading$ | async) {
-        <mat-progress-bar mode="indeterminate" class="global-loading"></mat-progress-bar>
-      }
-      
-      @if (isAuthenticated$ | async) {
-        <app-layout>
-          <router-outlet></router-outlet>
-        </app-layout>
-      } @else {
-        <router-outlet></router-outlet>
-      }
-    </div>
-  `,
-  styles: [`
-    .app-container {
-      height: 100vh;
-      overflow: hidden;
+    @if (loading.isLoading()) {
+      <mat-progress-bar mode="indeterminate" class="global-loading" />
     }
-    
+
+    @if (isAuthenticated()) {
+      <app-layout>
+        <router-outlet />
+      </app-layout>
+    } @else {
+      <router-outlet />
+    }
+  `,
+  styles: `
     .global-loading {
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 9999;
+      inset: 0 0 auto 0;
+      z-index: 1000;
     }
-  `]
+  `,
 })
-export class AppComponent implements OnInit {
-  private store = inject(Store);
-  private themeService = inject(ThemeService);
-  private authService = inject(AuthService);
-  private notificationService = inject(NotificationService);
+export class AppComponent {
+  private readonly store = inject(Store);
+  private readonly notifications = inject(NotificationService);
+  protected readonly loading = inject(LoadingService);
 
-  title = 'Angular ERP System';
-  
-  isAuthenticated$: Observable<boolean> = this.store.select(selectIsAuthenticated);
-  isLoading$: Observable<boolean> = this.store.select(selectIsLoading);
-  isDarkTheme$: Observable<boolean> = this.themeService.isDarkTheme$;
+  protected readonly isAuthenticated = this.store.selectSignal(selectIsAuthenticated);
 
-  ngOnInit(): void {
-    // Initialize services
-    this.authService.initializeAuth();
-    this.themeService.initializeTheme();
-    this.notificationService.initialize();
+  constructor() {
+    // Instantiating the theme service applies the persisted/system theme.
+    inject(ThemeService);
+
+    effect(() => {
+      if (this.isAuthenticated()) {
+        this.notifications.loadNotifications();
+      }
+    });
   }
 }

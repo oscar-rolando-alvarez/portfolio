@@ -76,6 +76,6 @@ export interface DashboardWidget {
   type: string;
   title: string;
   position: { x: number; y: number; width: number; height: number };
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
   isVisible: boolean;
 }

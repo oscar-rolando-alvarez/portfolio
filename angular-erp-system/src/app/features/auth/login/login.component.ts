@@ -1,177 +1,133 @@
-import { Component, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
-import { Store } from '@ngrx/store';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { Store } from '@ngrx/store';
 
 import * as AuthActions from '@core/store/auth/auth.actions';
-import { selectAuthLoading, selectAuthError } from '@core/store/auth/auth.selectors';
+import { selectAuthError, selectAuthLoading } from '@core/store/auth/auth.selectors';
+import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-login',
-  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
-    RouterModule,
-    MatFormFieldModule,
-    MatInputModule,
     MatButtonModule,
     MatCheckboxModule,
+    MatFormFieldModule,
     MatIconModule,
-    MatProgressSpinnerModule
+    MatInputModule,
+    MatProgressSpinnerModule,
   ],
   template: `
-    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="login-form">
-      <h2>Welcome Back</h2>
-      <p>Please sign in to your account</p>
+    <form [formGroup]="form" (ngSubmit)="submit()" class="login-form" novalidate>
+      <h2>Sign in</h2>
 
-      @if (error$ | async; as error) {
-        <div class="error-message">{{ error }}</div>
+      @if (error(); as message) {
+        <div class="error" role="alert">{{ message }}</div>
       }
 
-      <mat-form-field appearance="outline" class="form-field">
+      <mat-form-field>
         <mat-label>Email</mat-label>
-        <input matInput type="email" formControlName="email" required>
+        <input matInput type="email" formControlName="email" autocomplete="username" />
         <mat-icon matSuffix>email</mat-icon>
-        @if (loginForm.get('email')?.invalid && loginForm.get('email')?.touched) {
-          <mat-error>Please enter a valid email</mat-error>
+        @if (form.controls.email.invalid) {
+          <mat-error>Enter a valid email address</mat-error>
         }
       </mat-form-field>
 
-      <mat-form-field appearance="outline" class="form-field">
+      <mat-form-field>
         <mat-label>Password</mat-label>
-        <input matInput [type]="hidePassword ? 'password' : 'text'" formControlName="password" required>
-        <button type="button" mat-icon-button matSuffix (click)="hidePassword = !hidePassword">
-          <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
+        <input
+          matInput
+          [type]="hidePassword() ? 'password' : 'text'"
+          formControlName="password"
+          autocomplete="current-password"
+        />
+        <button
+          mat-icon-button
+          matSuffix
+          type="button"
+          [attr.aria-label]="hidePassword() ? 'Show password' : 'Hide password'"
+          (click)="hidePassword.set(!hidePassword())"
+        >
+          <mat-icon>{{ hidePassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
         </button>
-        @if (loginForm.get('password')?.invalid && loginForm.get('password')?.touched) {
-          <mat-error>Password is required</mat-error>
+        @if (form.controls.password.invalid) {
+          <mat-error>Password must be at least 6 characters</mat-error>
         }
       </mat-form-field>
 
-      <div class="form-options">
-        <mat-checkbox formControlName="rememberMe">Remember me</mat-checkbox>
-        <a routerLink="../forgot-password" class="forgot-password-link">Forgot password?</a>
-      </div>
+      <mat-checkbox formControlName="rememberMe">Remember me</mat-checkbox>
 
-      <button 
-        mat-raised-button 
-        color="primary" 
-        type="submit" 
-        class="submit-button"
-        [disabled]="loginForm.invalid || (loading$ | async)">
-        @if (loading$ | async) {
-          <mat-spinner diameter="20"></mat-spinner>
+      <button mat-flat-button type="submit" class="submit" [disabled]="loading()">
+        @if (loading()) {
+          <mat-spinner diameter="20" />
         } @else {
-          Sign In
+          Sign in
         }
       </button>
 
-      <div class="register-link">
-        Don't have an account? 
-        <a routerLink="../register">Create one here</a>
-      </div>
+      @if (demoMode) {
+        <p class="hint">
+          Demo mode: sign in as <code>admin&#64;erp.local</code> or
+          <code>warehouse&#64;erp.local</code>
+          (see README for the demo password).
+        </p>
+      }
     </form>
   `,
-  styles: [`
+  styles: `
     .login-form {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 8px;
     }
-
     h2 {
-      font-size: 1.5rem;
+      margin: 0 0 8px;
       font-weight: 500;
-      margin: 0;
-      text-align: center;
-      color: rgba(0, 0, 0, 0.87);
     }
-
-    p {
-      text-align: center;
-      margin: 0;
-      color: rgba(0, 0, 0, 0.6);
-    }
-
-    .error-message {
-      background-color: #ffebee;
-      color: #c62828;
+    .error {
       padding: 12px;
-      border-radius: 4px;
-      border-left: 4px solid #f44336;
-      font-size: 0.875rem;
+      border-radius: 8px;
+      background: var(--mat-sys-error-container);
+      color: var(--mat-sys-on-error-container);
     }
-
-    .form-field {
-      width: 100%;
-    }
-
-    .form-options {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin: 8px 0;
-    }
-
-    .forgot-password-link {
-      color: #1976d2;
-      text-decoration: none;
-      font-size: 0.875rem;
-    }
-
-    .forgot-password-link:hover {
-      text-decoration: underline;
-    }
-
-    .submit-button {
-      height: 48px;
-      font-size: 1rem;
+    .submit {
+      height: 44px;
       margin-top: 8px;
     }
-
-    .register-link {
-      text-align: center;
-      margin-top: 16px;
-      font-size: 0.875rem;
-      color: rgba(0, 0, 0, 0.6);
+    .hint {
+      font-size: 0.8rem;
+      opacity: 0.75;
     }
-
-    .register-link a {
-      color: #1976d2;
-      text-decoration: none;
-    }
-
-    .register-link a:hover {
-      text-decoration: underline;
-    }
-  `]
+  `,
 })
 export class LoginComponent {
-  private fb = inject(FormBuilder);
-  private store = inject(Store);
+  private readonly store = inject(Store);
+  private readonly fb = inject(NonNullableFormBuilder);
 
-  hidePassword = true;
-  loading$ = this.store.select(selectAuthLoading);
-  error$ = this.store.select(selectAuthError);
+  protected readonly demoMode = environment.enableMocking;
+  protected readonly hidePassword = signal(true);
+  protected readonly loading = this.store.selectSignal(selectAuthLoading);
+  protected readonly error = this.store.selectSignal(selectAuthError);
 
-  loginForm: FormGroup = this.fb.group({
+  protected readonly form = this.fb.group({
     email: ['', [Validators.required, Validators.email]],
     password: ['', [Validators.required, Validators.minLength(6)]],
-    rememberMe: [false]
+    rememberMe: [false],
   });
 
-  onSubmit(): void {
-    if (this.loginForm.valid) {
-      const { email, password, rememberMe } = this.loginForm.value;
-      this.store.dispatch(AuthActions.login({ email, password, rememberMe }));
+  protected submit(): void {
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
     }
+    this.store.dispatch(AuthActions.login(this.form.getRawValue()));
   }
 }

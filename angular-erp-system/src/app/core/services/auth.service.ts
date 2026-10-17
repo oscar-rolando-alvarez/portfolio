@@ -1,24 +1,18 @@
-import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject, timer } from 'rxjs';
-import { map, tap, catchError, switchMap } from 'rxjs/operators';
+import { DestroyRef, Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
+import { Observable, Subscription, of, timer } from 'rxjs';
+import { catchError, map, tap } from 'rxjs/operators';
 
-import { environment } from '@environments/environment';
+import { apiUrl, unwrap } from '@core/http/api';
 import { User } from '@core/models/user.model';
-import { ApiResponse } from '@core/models/base.model';
 import * as AuthActions from '@core/store/auth/auth.actions';
+import { environment } from '@environments/environment';
 
-interface LoginResponse {
+export interface LoginResponse {
   user: User;
   token: string;
   refreshToken?: string;
-  expiresIn: number;
-}
-
-interface RegisterResponse {
-  user: User;
-  token: string;
   expiresIn: number;
 }
 
@@ -28,201 +22,131 @@ interface RefreshTokenResponse {
   expiresIn: number;
 }
 
-@Injectable({
-  providedIn: 'root'
-})
+const STORAGE = { token: 'token', refreshToken: 'refreshToken', user: 'user' } as const;
+const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
+/**
+ * Thin HTTP + persistence layer for authentication. State transitions are owned
+ * by the NgRx auth slice; effects call into this service for I/O.
+ */
+@Injectable({ providedIn: 'root' })
 export class AuthService {
-  private http = inject(HttpClient);
-  private store = inject(Store);
-  
-  private readonly apiUrl = `${environment.apiUrl}/${environment.apiVersion}/auth`;
-  private tokenRefreshTimer?: any;
+  private readonly http = inject(HttpClient);
+  private readonly store = inject(Store);
+  private refreshTimer?: Subscription;
 
   constructor() {
-    // Initialize token refresh timer if user is logged in
-    this.initializeTokenRefresh();
+    inject(DestroyRef).onDestroy(() => this.clearRefreshTimer());
   }
 
-  initializeAuth(): void {
-    const token = this.getStoredToken();
-    const user = this.getStoredUser();
-    
-    if (token && user) {
-      // Validate token and load user
-      this.validateToken().subscribe({
-        next: (isValid) => {
-          if (isValid) {
-            this.store.dispatch(AuthActions.loginSuccess({ user, token }));
-            this.setupTokenRefresh();
-          } else {
-            this.clearStoredData();
-          }
-        },
-        error: () => {
-          this.clearStoredData();
-        }
-      });
+  /**
+   * Rehydrates a persisted session at startup. The store is populated first so the
+   * auth interceptor can attach the token, then the server is asked to confirm it.
+   */
+  restoreSession(): Observable<void> {
+    const token = localStorage.getItem(STORAGE.token);
+    const user = this.readStoredUser();
+    if (!token || !user) {
+      return of(undefined);
     }
+
+    const refreshToken = localStorage.getItem(STORAGE.refreshToken) ?? undefined;
+    this.store.dispatch(AuthActions.sessionRestored({ user, token, refreshToken }));
+
+    return this.validateToken().pipe(
+      tap((valid) => {
+        if (valid) {
+          this.scheduleRefresh();
+        } else {
+          this.clearSession();
+          this.store.dispatch(AuthActions.sessionCleared());
+        }
+      }),
+      map(() => undefined),
+    );
   }
 
   login(email: string, password: string, rememberMe = false): Observable<LoginResponse> {
-    return this.http.post<ApiResponse<LoginResponse>>(`${this.apiUrl}/login`, {
-      email,
-      password,
-      rememberMe
-    }).pipe(
-      map(response => response.data!),
-      tap(data => this.setupTokenRefresh(data.expiresIn)),
-      catchError(this.handleError)
+    return this.http.post(apiUrl('auth/login'), { email, password, rememberMe }).pipe(
+      map((raw) => unwrap<LoginResponse>(raw)),
+      tap((data) => this.scheduleRefresh(data.expiresIn)),
     );
   }
 
-  register(userData: Partial<User>, password: string): Observable<RegisterResponse> {
-    return this.http.post<ApiResponse<RegisterResponse>>(`${this.apiUrl}/register`, {
-      ...userData,
-      password
-    }).pipe(
-      map(response => response.data!),
-      tap(data => this.setupTokenRefresh(data.expiresIn)),
-      catchError(this.handleError)
-    );
+  register(userData: Partial<User>, password: string): Observable<LoginResponse> {
+    return this.http
+      .post(apiUrl('auth/register'), { ...userData, password })
+      .pipe(map((raw) => unwrap<LoginResponse>(raw)));
   }
 
   logout(): Observable<void> {
-    return this.http.post<ApiResponse<void>>(`${this.apiUrl}/logout`, {}).pipe(
-      map(() => void 0),
+    return this.http.post(apiUrl('auth/logout'), {}).pipe(
+      map(() => undefined),
+      // Even if the server call fails, the local session must be cleared.
+      catchError(() => of(undefined)),
       tap(() => {
-        this.clearTokenRefreshTimer();
-        this.clearStoredData();
+        this.clearRefreshTimer();
+        this.clearSession();
       }),
-      catchError(() => {
-        // Even if logout fails on server, clear local data
-        this.clearTokenRefreshTimer();
-        this.clearStoredData();
-        return [];
-      })
     );
   }
 
   refreshToken(): Observable<RefreshTokenResponse> {
-    const refreshToken = localStorage.getItem('refreshToken');
-    
-    return this.http.post<ApiResponse<RefreshTokenResponse>>(`${this.apiUrl}/refresh`, {
-      refreshToken
-    }).pipe(
-      map(response => response.data!),
-      tap(data => {
-        localStorage.setItem('token', data.token);
-        if (data.refreshToken) {
-          localStorage.setItem('refreshToken', data.refreshToken);
-        }
-        this.setupTokenRefresh(data.expiresIn);
-      }),
-      catchError(this.handleError)
+    const refreshToken = localStorage.getItem(STORAGE.refreshToken);
+    return this.http.post(apiUrl('auth/refresh'), { refreshToken }).pipe(
+      map((raw) => unwrap<RefreshTokenResponse>(raw)),
+      tap((data) => this.scheduleRefresh(data.expiresIn)),
     );
   }
 
   forgotPassword(email: string): Observable<void> {
-    return this.http.post<ApiResponse<void>>(`${this.apiUrl}/forgot-password`, { email }).pipe(
-      map(() => void 0),
-      catchError(this.handleError)
-    );
+    return this.http.post(apiUrl('auth/forgot-password'), { email }).pipe(map(() => undefined));
   }
 
   resetPassword(token: string, newPassword: string): Observable<void> {
-    return this.http.post<ApiResponse<void>>(`${this.apiUrl}/reset-password`, {
-      token,
-      newPassword
-    }).pipe(
-      map(() => void 0),
-      catchError(this.handleError)
-    );
+    return this.http
+      .post(apiUrl('auth/reset-password'), { token, newPassword })
+      .pipe(map(() => undefined));
   }
 
   getCurrentUser(): Observable<User> {
-    return this.http.get<ApiResponse<User>>(`${this.apiUrl}/me`).pipe(
-      map(response => response.data!),
-      catchError(this.handleError)
-    );
+    return this.http.get(apiUrl('auth/me')).pipe(map((raw) => unwrap<User>(raw)));
   }
 
   updateProfile(updates: Partial<User>): Observable<User> {
-    return this.http.patch<ApiResponse<User>>(`${this.apiUrl}/profile`, updates).pipe(
-      map(response => response.data!),
-      catchError(this.handleError)
-    );
-  }
-
-  changePassword(currentPassword: string, newPassword: string): Observable<void> {
-    return this.http.post<ApiResponse<void>>(`${this.apiUrl}/change-password`, {
-      currentPassword,
-      newPassword
-    }).pipe(
-      map(() => void 0),
-      catchError(this.handleError)
-    );
+    return this.http.patch(apiUrl('auth/profile'), updates).pipe(map((raw) => unwrap<User>(raw)));
   }
 
   validateToken(): Observable<boolean> {
-    return this.http.get<ApiResponse<{ valid: boolean }>>(`${this.apiUrl}/validate`).pipe(
-      map(response => response.data?.valid || false),
-      catchError(() => [false])
+    return this.http.get(apiUrl('auth/validate')).pipe(
+      map((raw) => unwrap<{ valid: boolean }>(raw).valid),
+      catchError(() => of(false)),
     );
   }
 
-  // Helper methods
-  private setupTokenRefresh(expiresIn?: number): void {
-    this.clearTokenRefreshTimer();
-    
-    const tokenExpiresIn = expiresIn || environment.security.tokenExpirationTime;
-    const refreshTime = tokenExpiresIn - (5 * 60 * 1000); // Refresh 5 minutes before expiry
-    
-    this.tokenRefreshTimer = timer(refreshTime).subscribe(() => {
-      this.store.dispatch(AuthActions.refreshToken());
-    });
+  private scheduleRefresh(expiresIn = environment.security.tokenExpirationTime): void {
+    this.clearRefreshTimer();
+    const dueIn = Math.max(expiresIn - REFRESH_MARGIN_MS, 30_000);
+    this.refreshTimer = timer(dueIn).subscribe(() =>
+      this.store.dispatch(AuthActions.refreshToken()),
+    );
   }
 
-  private initializeTokenRefresh(): void {
-    const token = this.getStoredToken();
-    if (token) {
-      // In a real implementation, you'd decode the JWT to get expiration time
-      this.setupTokenRefresh();
+  private clearRefreshTimer(): void {
+    this.refreshTimer?.unsubscribe();
+    this.refreshTimer = undefined;
+  }
+
+  private readStoredUser(): User | null {
+    try {
+      const raw = localStorage.getItem(STORAGE.user);
+      return raw ? (JSON.parse(raw) as User) : null;
+    } catch {
+      return null;
     }
   }
 
-  private clearTokenRefreshTimer(): void {
-    if (this.tokenRefreshTimer) {
-      this.tokenRefreshTimer.unsubscribe();
-      this.tokenRefreshTimer = null;
-    }
-  }
-
-  private getStoredToken(): string | null {
-    return localStorage.getItem('token');
-  }
-
-  private getStoredUser(): User | null {
-    const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
-  }
-
-  private clearStoredData(): void {
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
-  }
-
-  private handleError = (error: any) => {
-    console.error('Auth Service Error:', error);
-    throw error;
-  };
-
-  // Public getters for components
-  get isAuthenticated(): boolean {
-    return !!this.getStoredToken();
-  }
-
-  get currentUser(): User | null {
-    return this.getStoredUser();
+  private clearSession(): void {
+    Object.values(STORAGE).forEach((key) => localStorage.removeItem(key));
   }
 }
