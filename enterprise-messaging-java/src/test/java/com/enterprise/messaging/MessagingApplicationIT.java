@@ -16,6 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -32,6 +33,9 @@ class MessagingApplicationIT {
 
     @Autowired
     private MeterRegistry meterRegistry;
+
+    @Autowired
+    private KafkaListenerEndpointRegistry listenerRegistry;
 
     @Test
     void healthEndpointIsPublic() throws Exception {
@@ -76,6 +80,12 @@ class MessagingApplicationIT {
 
     @Test
     void registrationEventIsPublishedToKafkaAndConsumed() throws Exception {
+        // Consumer-group rebalancing can be slow on shared CI runners; wait until every listener
+        // container owns partitions so the assertion below only measures publish-to-consume time.
+        await().atMost(Duration.ofSeconds(90)).untilAsserted(() -> listenerRegistry
+                .getListenerContainers()
+                .forEach(container -> assertThat(container.getAssignedPartitions()).isNotEmpty()));
+
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -83,7 +93,7 @@ class MessagingApplicationIT {
                                 """))
                 .andExpect(status().isCreated());
 
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+        await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
             Counter counter = meterRegistry
                     .find("messaging.events")
                     .tags("category", "user", "type", "USER_REGISTERED")
