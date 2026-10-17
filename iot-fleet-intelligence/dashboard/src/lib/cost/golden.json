@@ -1,0 +1,783 @@
+{
+ "cases": [
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "2.41",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "2.24",
+    "Ingest (IoT Core)": "148.92",
+    "Messaging (SQS)": "0.53",
+    "Observability": "3.34",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "66.28",
+    "Streaming (MSK Serverless)": "560.47"
+   },
+   "per_device_usd": "0.078534",
+   "profile": {
+    "devices": 10000
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "102.49",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "36.10",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "35.83",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "785.34",
+   "volumes": {
+    "incidents": "152.08",
+    "ingest_gib": "41.77",
+    "llm_calls": "152.08",
+    "messages": "87600000.00",
+    "msk_partitions": "6.00",
+    "readings": "87600000.00",
+    "stream_invocations": "3153600.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "19.11",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "224.41",
+    "Ingest (IoT Core)": "12964.00",
+    "Messaging (SQS)": "0.56",
+    "Observability": "17.63",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "368.34",
+    "Streaming (MSK Serverless)": "1194.37"
+   },
+   "per_device_usd": "0.014790",
+   "profile": {
+    "devices": 1000000
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "8647.65",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "2941.27",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "320.15",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "298.58",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    },
+    {
+     "monthly_savings_usd": "168.69",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    }
+   ],
+   "total_usd": "14789.57",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "4177.09",
+    "llm_calls": "15208.33",
+    "messages": "8760000000.00",
+    "msk_partitions": "6.00",
+    "readings": "8760000000.00",
+    "stream_invocations": "17520000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "190.78",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "2244.14",
+    "Ingest (IoT Core)": "123340.00",
+    "Messaging (SQS)": "0.89",
+    "Observability": "174.32",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "3682.97",
+    "Streaming (MSK Serverless)": "6970.18"
+   },
+   "per_device_usd": "0.013660",
+   "profile": {
+    "devices": 10000000
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "82422.99",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "29419.31",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "3211.34",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "2985.82",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    },
+    {
+     "monthly_savings_usd": "1686.91",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    }
+   ],
+   "total_usd": "136604.42",
+   "volumes": {
+    "incidents": "152083.33",
+    "ingest_gib": "41770.94",
+    "llm_calls": "152083.33",
+    "messages": "87600000000.00",
+    "msk_partitions": "18.00",
+    "readings": "87600000000.00",
+    "stream_invocations": "175200000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "93.87",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "224.41",
+    "Ingest (IoT Core)": "48004.00",
+    "Messaging (SQS)": "0.56",
+    "Observability": "87.00",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "1840.02",
+    "Streaming (MSK Serverless)": "3758.84"
+   },
+   "per_device_usd": "0.054010",
+   "profile": {
+    "devices": 1000000,
+    "report_interval_seconds": 60
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "41273.49",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "14709.66",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "1604.03",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "1492.91",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "54009.84",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "20885.47",
+    "llm_calls": "15208.33",
+    "messages": "43800000000.00",
+    "msk_partitions": "9.00",
+    "readings": "43800000000.00",
+    "stream_invocations": "87600000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "6.66",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "224.41",
+    "Ingest (IoT Core)": "6916.00",
+    "Messaging (SQS)": "0.56",
+    "Observability": "6.07",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "123.06",
+    "Streaming (MSK Serverless)": "767.50"
+   },
+   "per_device_usd": "0.008045",
+   "profile": {
+    "devices": 1000000,
+    "report_interval_seconds": 900
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "3093.44",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "1068.02",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "168.69",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "106.72",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "96.87",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    },
+    {
+     "monthly_savings_usd": "67.41",
+     "title": "Cache diagnoses for repeated incident signatures (30% hit rate)"
+    }
+   ],
+   "total_usd": "8045.40",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "1392.36",
+    "llm_calls": "15208.33",
+    "messages": "2920000000.00",
+    "msk_partitions": "6.00",
+    "readings": "2920000000.00",
+    "stream_invocations": "5840000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "3.23",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "224.41",
+    "Ingest (IoT Core)": "4453.00",
+    "Messaging (SQS)": "0.56",
+    "Observability": "3.41",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "66.65",
+    "Streaming (MSK Serverless)": "607.43"
+   },
+   "per_device_usd": "0.005360",
+   "profile": {
+    "devices": 1000000,
+    "report_interval_seconds": 3600
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "854.10",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "300.85",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "168.69",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "67.41",
+     "title": "Cache diagnoses for repeated incident signatures (30% hit rate)"
+    },
+    {
+     "monthly_savings_usd": "35.83",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "5359.82",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "348.09",
+    "llm_calls": "15208.33",
+    "messages": "730000000.00",
+    "msk_partitions": "6.00",
+    "readings": "730000000.00",
+    "stream_invocations": "3153600.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "8.58",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "224.41",
+    "Ingest (IoT Core)": "4642.80",
+    "Messaging (SQS)": "0.56",
+    "Observability": "3.41",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "66.65",
+    "Streaming (MSK Serverless)": "1194.37"
+   },
+   "per_device_usd": "0.006142",
+   "profile": {
+    "devices": 1000000,
+    "readings_per_message": 10
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "535.48",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "320.15",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "168.69",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "67.41",
+     "title": "Cache diagnoses for repeated incident signatures (30% hit rate)"
+    },
+    {
+     "monthly_savings_usd": "35.83",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "6141.92",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "4177.09",
+    "llm_calls": "15208.33",
+    "messages": "876000000.00",
+    "msk_partitions": "6.00",
+    "readings": "8760000000.00",
+    "stream_invocations": "3153600.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "13.51",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "224.41",
+    "Ingest (IoT Core)": "10336.00",
+    "Messaging (SQS)": "0.56",
+    "Observability": "12.43",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "257.97",
+    "Streaming (MSK Serverless)": "778.17"
+   },
+   "per_device_usd": "0.011624",
+   "profile": {
+    "compression_ratio": "0.5",
+    "devices": 1000000,
+    "edge_filter_ratio": "0.3"
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "6241.86",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "209.01",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    },
+    {
+     "monthly_savings_usd": "168.69",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "67.41",
+     "title": "Cache diagnoses for repeated incident signatures (30% hit rate)"
+    }
+   ],
+   "total_usd": "11624.19",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "1461.98",
+    "llm_calls": "15208.33",
+    "messages": "6132000000.00",
+    "msk_partitions": "6.00",
+    "readings": "8760000000.00",
+    "stream_invocations": "12264000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "4.81",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "56.10",
+    "Messaging (SQS)": "0.53",
+    "Observability": "4.57",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "92.12",
+    "Streaming (MSK Serverless)": "714.14"
+   },
+   "per_device_usd": "0.003494",
+   "profile": {
+    "devices": 250000,
+    "ingest_path": "direct_kafka"
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "80.04",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "76.33",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "63.70",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    },
+    {
+     "monthly_savings_usd": "42.17",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "16.85",
+     "title": "Cache diagnoses for repeated incident signatures (30% hit rate)"
+    }
+   ],
+   "total_usd": "873.42",
+   "volumes": {
+    "incidents": "3802.08",
+    "ingest_gib": "1044.27",
+    "llm_calls": "3802.08",
+    "messages": "2190000000.00",
+    "msk_partitions": "6.00",
+    "readings": "2190000000.00",
+    "stream_invocations": "4380000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "24.37",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "561.04",
+    "Ingest (IoT Core)": "28075.00",
+    "Messaging (SQS)": "0.62",
+    "Observability": "22.07",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "460.88",
+    "Streaming (MSK Serverless)": "9954.22"
+   },
+   "per_device_usd": "0.015640",
+   "profile": {
+    "devices": 2500000,
+    "payload_bytes": 6000,
+    "report_interval_seconds": 600
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "12367.81",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "9287.55",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "8557.45",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "421.73",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "348.35",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "39099.33",
+   "volumes": {
+    "incidents": "38020.83",
+    "ingest_gib": "61187.89",
+    "llm_calls": "38020.83",
+    "messages": "10950000000.00",
+    "msk_partitions": "25.00",
+    "readings": "10950000000.00",
+    "stream_invocations": "21900000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "18.88",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "11.14",
+    "Ingest (IoT Core)": "12964.00",
+    "Messaging (SQS)": "0.56",
+    "Observability": "17.63",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "368.34",
+    "Streaming (MSK Serverless)": "1194.37"
+   },
+   "per_device_usd": "0.014576",
+   "profile": {
+    "devices": 1000000,
+    "llm_large_share": "0.2",
+    "llm_share": "0.2"
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "8647.65",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "2941.27",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "320.15",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "298.58",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "14576.06",
+   "volumes": {
+    "incidents": "15208.33",
+    "ingest_gib": "4177.09",
+    "llm_calls": "3041.67",
+    "messages": "8760000000.00",
+    "msk_partitions": "6.00",
+    "readings": "8760000000.00",
+    "stream_invocations": "17520000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "99.47",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "3141.80",
+    "Ingest (IoT Core)": "62020.00",
+    "Messaging (SQS)": "1.26",
+    "Observability": "88.28",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "1847.09",
+    "Streaming (MSK Serverless)": "3758.84"
+   },
+   "per_device_usd": "0.014192",
+   "profile": {
+    "devices": 5000000,
+    "incidents_per_1k_devices_per_day": "2",
+    "llm_cache_hit_rate": "0.3"
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "41273.49",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "14709.66",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "2361.67",
+     "title": "Model tiering: small model first, escalate 20% to the large tier"
+    },
+    {
+     "monthly_savings_usd": "1604.03",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "1492.91",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "70957.88",
+   "volumes": {
+    "incidents": "304166.67",
+    "ingest_gib": "20885.47",
+    "llm_calls": "212916.67",
+    "messages": "43800000000.00",
+    "msk_partitions": "9.00",
+    "readings": "43800000000.00",
+    "stream_invocations": "87600000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.10",
+    "Compute (Lambda arm64)": "9.40",
+    "Data transfer": "0.03",
+    "GenAI (LLM)": "11.22",
+    "Ingest (IoT Core)": "5193.20",
+    "Messaging (SQS)": "0.53",
+    "Observability": "8.90",
+    "Security (KMS)": "1.00",
+    "Storage (DynamoDB)": "184.03",
+    "Streaming (MSK Serverless)": "1834.66"
+   },
+   "per_device_usd": "0.144861",
+   "profile": {
+    "devices": 50000,
+    "payload_bytes": 2048,
+    "report_interval_seconds": 30
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "3412.40",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "1890.17",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    },
+    {
+     "monthly_savings_usd": "640.30",
+     "title": "Compress payloads (CBOR + zstd, ~50%)"
+    },
+    {
+     "monthly_savings_usd": "149.29",
+     "title": "Larger MSK batches (2,000 records / 10 s window)"
+    }
+   ],
+   "total_usd": "7243.07",
+   "volumes": {
+    "incidents": "760.42",
+    "ingest_gib": "8354.19",
+    "llm_calls": "760.42",
+    "messages": "4380000000.00",
+    "msk_partitions": "6.00",
+    "readings": "4380000000.00",
+    "stream_invocations": "8760000.00"
+   }
+  },
+  {
+   "by_category": {
+    "API Gateway": "0.00",
+    "Compute (Lambda arm64)": "0.54",
+    "Data transfer": "0.00",
+    "GenAI (LLM)": "0.00",
+    "Ingest (IoT Core)": "4.45",
+    "Messaging (SQS)": "0.00",
+    "Observability": "0.00",
+    "Security (KMS)": "0.00",
+    "Storage (DynamoDB)": "15.33",
+    "Streaming (MSK Serverless)": "554.17"
+   },
+   "per_device_usd": "0.574493",
+   "profile": {
+    "api_requests_per_month": 0,
+    "devices": 1000,
+    "incidents_per_1k_devices_per_day": "0",
+    "kms_keys": 0,
+    "log_bytes_per_stream_invocation": 0,
+    "payload_bytes": 1000,
+    "report_interval_seconds": 3600,
+    "sqs_pollers_per_queue": 0,
+    "xray_sampling": "0"
+   },
+   "recommendations": [
+    {
+     "monthly_savings_usd": "15.06",
+     "title": "Batch 10 readings per message at the edge"
+    },
+    {
+     "monthly_savings_usd": "5.08",
+     "title": "Report by exception (filter 30% unchanged readings at the edge)"
+    }
+   ],
+   "total_usd": "574.49",
+   "volumes": {
+    "incidents": "0.00",
+    "ingest_gib": "0.68",
+    "llm_calls": "0.00",
+    "messages": "730000.00",
+    "msk_partitions": "6.00",
+    "readings": "730000.00",
+    "stream_invocations": "730000.00"
+   }
+  }
+ ],
+ "generated_by": "fleetintel-cost golden",
+ "pricing": {
+  "api_gateway_http": {
+   "per_million_requests": "1.00"
+  },
+  "cloudwatch_logs": {
+   "ingest_per_gb": "0.50",
+   "storage_per_gb_month": "0.03"
+  },
+  "currency": "USD",
+  "data_transfer": {
+   "internet_out_per_gb": "0.09"
+  },
+  "dynamodb_on_demand": {
+   "per_million_rru": "0.125",
+   "per_million_wru": "0.625",
+   "storage_per_gb_month": "0.25"
+  },
+  "embeddings_per_million_tokens": "0.02",
+  "gib_bytes": 1073741824,
+  "hours_per_month": 730,
+  "iot_core": {
+   "actions_per_million": "0.15",
+   "connectivity_per_million_minutes": "0.08",
+   "message_increment_bytes": 5120,
+   "messaging_tiers": [
+    {
+     "price_per_million": "1.00",
+     "up_to_million": 1000
+    },
+    {
+     "price_per_million": "0.80",
+     "up_to_million": 5000
+    },
+    {
+     "price_per_million": "0.70",
+     "up_to_million": null
+    }
+   ],
+   "rules_per_million": "0.15"
+  },
+  "kms": {
+   "per_key_month": "1.00"
+  },
+  "lambda_arm": {
+   "per_gb_second": "0.0000133334",
+   "per_million_requests": "0.20"
+  },
+  "llm_tiers": {
+   "large": {
+    "input_per_million": "2.50",
+    "output_per_million": "10.00"
+   },
+   "small": {
+    "input_per_million": "0.15",
+    "output_per_million": "0.60"
+   }
+  },
+  "msk_serverless": {
+   "cluster_hour": "0.75",
+   "data_in_per_gb": "0.10",
+   "data_out_per_gb": "0.05",
+   "ingress_mb_per_s_per_partition": "1.0",
+   "min_partitions": 6,
+   "partition_hour": "0.0015",
+   "storage_per_gb_month": "0.10"
+  },
+  "region": "us-east-1",
+  "sources": {
+   "api_gateway": "https://aws.amazon.com/api-gateway/pricing/",
+   "cloudwatch": "https://aws.amazon.com/cloudwatch/pricing/",
+   "data_transfer": "https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer",
+   "dynamodb": "https://aws.amazon.com/dynamodb/pricing/on-demand/",
+   "iot_core": "https://aws.amazon.com/iot-core/pricing/",
+   "kms": "https://aws.amazon.com/kms/pricing/",
+   "lambda": "https://aws.amazon.com/lambda/pricing/",
+   "msk_serverless": "https://aws.amazon.com/msk/pricing/",
+   "sqs": "https://aws.amazon.com/sqs/pricing/",
+   "xray": "https://aws.amazon.com/xray/pricing/"
+  },
+  "sqs_standard": {
+   "per_million_requests": "0.40",
+   "request_increment_bytes": 65536
+  },
+  "version": "2026-10-01",
+  "xray": {
+   "per_million_traces": "5.00"
+  }
+ }
+}

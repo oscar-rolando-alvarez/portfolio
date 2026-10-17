@@ -1,0 +1,8 @@
+node_modules
+.next
+coverage
+playwright-report
+test-results
+public/vendor
+src/lib/cost/golden.json
+package-lock.json
