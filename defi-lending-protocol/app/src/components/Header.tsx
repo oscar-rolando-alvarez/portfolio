@@ -1,70 +1,52 @@
-'use client'
+"use client";
 
-import { useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { useEffect, useState } from 'react'
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { config } from "@/lib/config";
+import { WalletButton } from "./wallet/WalletButton";
+
+const NAV = [
+  { href: "/", label: "Markets" },
+  { href: "/positions", label: "My positions" },
+  { href: "/governance", label: "Governance" },
+] as const;
 
 export function Header() {
-  const { connected, publicKey } = useWallet()
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  if (!mounted) {
-    return null
-  }
-
+  const pathname = usePathname();
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200">
-      <div className="container mx-auto px-4 py-4">
-        <div className="flex items-center justify-between">
-          {/* Logo */}
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-primary-500 to-secondary-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">DL</span>
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-800">DeFi Lending</h1>
-              <p className="text-xs text-gray-500">Powered by Solana</p>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <nav className="hidden md:flex items-center space-x-6">
-            <a href="#" className="text-gray-600 hover:text-primary-600 font-medium">
-              Markets
-            </a>
-            <a href="#" className="text-gray-600 hover:text-primary-600 font-medium">
-              Analytics
-            </a>
-            <a href="#" className="text-gray-600 hover:text-primary-600 font-medium">
-              Docs
-            </a>
-            <a href="#" className="text-gray-600 hover:text-primary-600 font-medium">
-              Support
-            </a>
-          </nav>
-
-          {/* Wallet Connection */}
-          <div className="flex items-center space-x-4">
-            {connected && publicKey && (
-              <div className="hidden md:flex items-center space-x-2">
-                <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
-                  <span className="text-primary-600 text-sm font-medium">
-                    {publicKey.toString().slice(0, 2)}
-                  </span>
-                </div>
-                <span className="text-sm text-gray-600 font-mono">
-                  {publicKey.toString().slice(0, 4)}...{publicKey.toString().slice(-4)}
-                </span>
-              </div>
-            )}
-            <WalletMultiButton />
-          </div>
+    <header className="sticky top-0 z-10 border-b border-border bg-bg/80 backdrop-blur">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+        <Link href="/" className="flex items-center gap-2 font-semibold">
+          <span aria-hidden className="grid size-8 place-items-center rounded-lg bg-accent text-accent-fg">
+            L
+          </span>
+          <span>Lending</span>
+          <span className="badge bg-surface-muted text-muted">{config.cluster}</span>
+        </Link>
+        <nav aria-label="Main" className="order-3 w-full sm:order-none sm:w-auto">
+          <ul className="flex gap-1 text-sm">
+            {NAV.map((item) => {
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className={`rounded-full px-3 py-1.5 transition ${
+                      active ? "bg-surface-muted font-medium text-fg" : "text-muted hover:text-fg"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+        <div className="ml-auto">
+          <WalletButton />
         </div>
       </div>
     </header>
-  )
+  );
 }

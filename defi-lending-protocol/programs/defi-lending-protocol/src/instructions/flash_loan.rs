@@ -1,204 +1,159 @@
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{
-    instruction::Instruction,
-    program::invoke,
-};
-use anchor_spl::token::{Token, TokenAccount, Transfer};
+//! Single-transaction flash loans using instruction introspection: `flash_borrow`
+//! only succeeds if a matching `flash_repay` for the same market and amount
+//! appears later in the same transaction, so funds can never leave the vault
+//! beyond the transaction boundary.
+
 use crate::constants::*;
 use crate::errors::LendingError;
-use crate::state::{Protocol, Pool};
-use crate::utils::{TokenUtils, calculate_flash_loan_fee};
+use crate::events::FlashLoan;
+use crate::math;
+use crate::state::{Market, Protocol};
+use crate::token::{self, TransferArgs};
+use anchor_lang::Discriminator;
+use anchor_lang::compat::solana_instructions_sysvar::{
+    load_current_index_checked, load_instruction_at_checked,
+};
+use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+
+/// Index of the `market` account inside [`FlashLoanAccounts`].
+const MARKET_ACCOUNT_INDEX: usize = 2;
 
 #[derive(Accounts)]
-pub struct FlashLoan<'info> {
-    #[account(
-        seeds = [PROTOCOL_SEED],
-        bump = protocol.bump,
-        constraint = !protocol.is_paused() @ LendingError::PoolPaused
-    )]
-    pub protocol: Account<'info, Protocol>,
-    
-    #[account(
-        mut,
-        seeds = [POOL_SEED, pool.asset_mint.as_ref()],
-        bump = pool.bump,
-        constraint = pool.is_active() @ LendingError::PoolPaused
-    )]
-    pub pool: Account<'info, Pool>,
-    
-    #[account(
-        mut,
-        address = pool.asset_token_account
-    )]
-    pub pool_asset_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        token::mint = pool.asset_mint
-    )]
-    pub receiver_asset_account: Account<'info, TokenAccount>,
-    
-    /// CHECK: PDA authority for the pool
-    #[account(
-        seeds = [POOL_SEED, pool.asset_mint.as_ref(), b"authority"],
-        bump
-    )]
-    pub pool_authority: UncheckedAccount<'info>,
-    
-    /// The program that will receive the flash loan
-    /// CHECK: Any program can be a flash loan receiver
-    pub receiver_program: UncheckedAccount<'info>,
-    
-    /// Protocol treasury for flash loan fees
-    #[account(
-        mut,
-        token::mint = pool.asset_mint,
-        address = protocol.treasury
-    )]
-    pub treasury_account: Account<'info, TokenAccount>,
-    
+pub struct FlashLoanAccounts<'info> {
     pub user: Signer<'info>,
-    pub token_program: Program<'info, Token>,
+    #[account(seeds = [PROTOCOL_SEED], bump = protocol.bump)]
+    pub protocol: Account<'info, Protocol>,
+    #[account(
+        mut,
+        has_one = protocol,
+        has_one = loan_mint,
+        has_one = loan_vault,
+        has_one = token_program
+    )]
+    pub market: Box<Account<'info, Market>>,
+    pub loan_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut)]
+    pub loan_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = loan_mint, token::authority = user)]
+    pub user_loan_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: verified to be the instructions sysvar by the address constraint.
+    #[account(address = anchor_lang::compat::solana_instructions_sysvar::ID)]
+    pub instructions: UncheckedAccount<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
-pub fn flash_loan(
-    ctx: Context<FlashLoan>,
-    amount: u64,
-    params: Vec<u8>,
-) -> Result<()> {
-    if amount == 0 {
-        return Err(LendingError::InvalidAmount.into());
-    }
-
-    let pool = &mut ctx.accounts.pool;
-    
-    // Check available liquidity
-    if pool.available_liquidity < amount {
-        return Err(LendingError::InsufficientLiquidity.into());
-    }
-    
-    // Calculate flash loan fee
-    let fee = calculate_flash_loan_fee(amount)?;
-    let total_owed = amount
-        .checked_add(fee)
-        .ok_or(LendingError::MathOverflow)?;
-    
-    // Store initial balance for verification later
-    let initial_balance = ctx.accounts.pool_asset_account.amount;
-    
-    // Transfer tokens to receiver
-    let pool_seeds = &[
-        POOL_SEED,
-        pool.asset_mint.as_ref(),
-        b"authority",
-        &[ctx.bumps.pool_authority],
-    ];
-    let signer_seeds = &[&pool_seeds[..]];
-    
-    TokenUtils::transfer_tokens(
-        &ctx.accounts.token_program,
-        &ctx.accounts.pool_asset_account,
-        &ctx.accounts.receiver_asset_account,
-        &ctx.accounts.pool_authority.to_account_info(),
-        amount,
-        signer_seeds,
-    )?;
-    
-    // Create flash loan callback instruction
-    let flash_loan_callback = Instruction {
-        program_id: ctx.accounts.receiver_program.key(),
-        accounts: vec![
-            // The receiver program should expect these accounts
-            AccountMeta::new(ctx.accounts.receiver_asset_account.key(), false),
-            AccountMeta::new(ctx.accounts.pool_asset_account.key(), false),
-            AccountMeta::new_readonly(ctx.accounts.pool_authority.key(), false),
-            AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
-        ],
-        data: [
-            // Flash loan callback discriminator (first 8 bytes)
-            &[0x1a, 0x69, 0x8a, 0x5e, 0x1a, 0x69, 0x8a, 0x5e],
-            &amount.to_le_bytes(),
-            &fee.to_le_bytes(),
-            &params,
-        ].concat(),
-    };
-    
-    // Invoke the receiver program
-    invoke(
-        &flash_loan_callback,
-        &[
-            ctx.accounts.receiver_asset_account.to_account_info(),
-            ctx.accounts.pool_asset_account.to_account_info(),
-            ctx.accounts.pool_authority.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-        ],
-    )?;
-    
-    // Reload the pool asset account to check repayment
-    ctx.accounts.pool_asset_account.reload()?;
-    
-    let final_balance = ctx.accounts.pool_asset_account.amount;
-    let expected_balance = initial_balance
-        .checked_add(fee)
-        .ok_or(LendingError::MathOverflow)?;
-    
-    // Verify that the loan was repaid with fee
-    if final_balance < expected_balance {
-        if final_balance < initial_balance {
-            return Err(LendingError::FlashLoanNotRepaid.into());
-        } else {
-            return Err(LendingError::FlashLoanFeeNotPaid.into());
-        }
-    }
-    
-    // Transfer fee to treasury
-    if fee > 0 {
-        TokenUtils::transfer_tokens(
-            &ctx.accounts.token_program,
-            &ctx.accounts.pool_asset_account,
-            &ctx.accounts.treasury_account,
-            &ctx.accounts.pool_authority.to_account_info(),
-            fee,
-            signer_seeds,
-        )?;
-    }
-    
-    // Update pool state - available liquidity stays the same, but we collected fees
-    pool.available_liquidity = ctx.accounts.pool_asset_account.amount
-        .checked_sub(pool.get_total_debt())
-        .unwrap_or(0);
-    
-    msg!(
-        "Flash loan executed: amount={}, fee={}, receiver={}",
-        amount,
-        fee,
-        ctx.accounts.receiver_program.key()
+pub fn handle_flash_borrow(ctx: Context<FlashLoanAccounts>, amount: u64) -> Result<()> {
+    require!(amount > 0, LendingError::ZeroAmount);
+    let market = &mut ctx.accounts.market;
+    market.assert_operational(&ctx.accounts.protocol)?;
+    market.accrue_interest(Clock::get()?.unix_timestamp)?;
+    require!(
+        amount <= market.available_liquidity(),
+        LendingError::InsufficientLiquidity
     );
 
+    let ixs = ctx.accounts.instructions.to_account_info();
+    let current = load_current_index_checked(&ixs)? as usize;
+    let current_ix = load_instruction_at_checked(current, &ixs)?;
+    require_keys_eq!(
+        current_ix.program_id,
+        crate::ID,
+        LendingError::FlashLoanViaCpi
+    );
+
+    let market_key = market.key();
+    let mut found = false;
+    let mut index = current + 1;
+    while let Ok(ix) = load_instruction_at_checked(index, &ixs) {
+        if ix.program_id == crate::ID {
+            let data = ix.data.as_slice();
+            if data.starts_with(crate::instruction::FlashBorrow::DISCRIMINATOR) {
+                // Nested flash loans would make the accounting ambiguous.
+                return err!(LendingError::FlashLoanInProgress);
+            }
+            if data.starts_with(crate::instruction::FlashRepay::DISCRIMINATOR) {
+                let disc_len = crate::instruction::FlashRepay::DISCRIMINATOR.len();
+                let repay_amount = data
+                    .get(disc_len..disc_len + 8)
+                    .and_then(|b| b.try_into().ok())
+                    .map(u64::from_le_bytes)
+                    .ok_or(LendingError::FlashRepayMismatch)?;
+                let same_market = ix
+                    .accounts
+                    .get(MARKET_ACCOUNT_INDEX)
+                    .is_some_and(|m| m.pubkey == market_key);
+                require!(
+                    same_market && repay_amount == amount,
+                    LendingError::FlashRepayMismatch
+                );
+                found = true;
+                break;
+            }
+        }
+        index += 1;
+    }
+    require!(found, LendingError::FlashRepayMissing);
+
+    market.flash_loan_active = true;
+    market.flash_loan_amount = amount;
+
+    let seeds = market.signer_seeds();
+    token::transfer(
+        TransferArgs {
+            token_program: &ctx.accounts.token_program.to_account_info(),
+            from: &ctx.accounts.loan_vault.to_account_info(),
+            to: &ctx.accounts.user_loan_account.to_account_info(),
+            mint: &ctx.accounts.loan_mint.to_account_info(),
+            authority: &market.to_account_info(),
+            decimals: market.loan_decimals,
+        },
+        amount,
+        &[&seeds],
+    )
+}
+
+pub fn handle_flash_repay(ctx: Context<FlashLoanAccounts>, amount: u64) -> Result<()> {
+    let market = &mut ctx.accounts.market;
+    require!(market.flash_loan_active, LendingError::NoFlashLoan);
+    require!(
+        amount == market.flash_loan_amount,
+        LendingError::FlashRepayMismatch
+    );
+
+    let fee = math::flash_loan_fee(amount, market.config.flash_loan_fee_bps as u64)?;
+    let total = amount.checked_add(fee).ok_or(LendingError::MathOverflow)?;
+    token::transfer(
+        TransferArgs {
+            token_program: &ctx.accounts.token_program.to_account_info(),
+            from: &ctx.accounts.user_loan_account.to_account_info(),
+            to: &ctx.accounts.loan_vault.to_account_info(),
+            mint: &ctx.accounts.loan_mint.to_account_info(),
+            authority: &ctx.accounts.user.to_account_info(),
+            decimals: market.loan_decimals,
+        },
+        total,
+        &[],
+    )?;
+
+    let (to_suppliers, to_reserves) =
+        math::split_fee(fee, market.config.reserve_factor_bps as u64)?;
+    market.total_deposits = market
+        .total_deposits
+        .checked_add(to_suppliers)
+        .ok_or(LendingError::MathOverflow)?;
+    market.total_reserves = market
+        .total_reserves
+        .checked_add(to_reserves)
+        .ok_or(LendingError::MathOverflow)?;
+    market.flash_loan_active = false;
+    market.flash_loan_amount = 0;
+
+    emit!(FlashLoan {
+        market: market.key(),
+        receiver: ctx.accounts.user.key(),
+        amount,
+        fee,
+    });
     Ok(())
-}
-
-// Flash loan receiver interface
-#[derive(Accounts)]
-pub struct FlashLoanReceiver<'info> {
-    #[account(mut)]
-    pub asset_account: Account<'info, TokenAccount>,
-    
-    #[account(mut)]
-    pub pool_asset_account: Account<'info, TokenAccount>,
-    
-    /// CHECK: Pool authority
-    pub pool_authority: UncheckedAccount<'info>,
-    
-    pub token_program: Program<'info, Token>,
-}
-
-// This would be implemented by flash loan receiver programs
-pub trait FlashLoanReceiverInterface {
-    fn execute_operation(
-        ctx: Context<FlashLoanReceiver>,
-        amount: u64,
-        fee: u64,
-        params: Vec<u8>,
-    ) -> Result<()>;
 }

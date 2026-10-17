@@ -1,42 +1,41 @@
-FROM node:18-alpine AS deps
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
+# syntax=docker/dockerfile:1
 
-# Install dependencies based on the preferred package manager
-COPY package.json package-lock.json* ./
-RUN npm ci --only=production
+ARG NODE_IMAGE=node:24.22.0-alpine
 
-# Rebuild the source code only when needed
-FROM node:18-alpine AS builder
+# ---- deps: install exact dependency tree from the lockfile ----
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# ---- build: compile the standalone Next.js server ----
+FROM ${NODE_IMAGE} AS build
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time.
+ARG NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com
+ARG NEXT_PUBLIC_CLUSTER=devnet
+ARG NEXT_PUBLIC_MARKETPLACE_PROGRAM_ID=BKvFQqBhXJNpKjmAzwvsbuHGKG54EPcdcV7YmRfxw1Te
+ARG NEXT_PUBLIC_AUCTION_PROGRAM_ID=5YeC15ieZAhKmeDeVHR1xDzC6patSL68yQTtgqEio7Sh
+ENV NEXT_PUBLIC_RPC_URL=${NEXT_PUBLIC_RPC_URL} \
+    NEXT_PUBLIC_CLUSTER=${NEXT_PUBLIC_CLUSTER} \
+    NEXT_PUBLIC_MARKETPLACE_PROGRAM_ID=${NEXT_PUBLIC_MARKETPLACE_PROGRAM_ID} \
+    NEXT_PUBLIC_AUCTION_PROGRAM_ID=${NEXT_PUBLIC_AUCTION_PROGRAM_ID}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-
-# Build the application
 RUN npm run build
 
-# Production image
-FROM node:18-alpine AS runner
+# ---- runtime: minimal image running as the unprivileged `node` user ----
+FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
-
-ENV NODE_ENV production
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-# Copy the built application
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./package.json
-
-# Copy built assets
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
-
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+COPY --from=build --chown=node:node /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
+USER node
 EXPOSE 3000
-
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
-
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "server.js"]

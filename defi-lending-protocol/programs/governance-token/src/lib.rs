@@ -1,97 +1,63 @@
+//! Governance token for the lending protocol.
+//!
+//! Holders stake tokens into a program vault to obtain voting power, create
+//! proposals (above a stake threshold) and vote. Voting locks the stake until
+//! the proposal closes, so the same tokens cannot be moved to vote twice.
+//! Execution of passed proposals is intentionally left to an off-chain or
+//! multisig executor; the program records the binding on-chain outcome.
+
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, MintTo, Burn};
 
-declare_id!("GovToknAbCdEfGhIjKlMnOpQrStUvWxYz123456789");
-
-pub mod constants;
 pub mod errors;
 pub mod instructions;
 pub mod state;
 
 use instructions::*;
+use state::VoteChoice;
+
+declare_id!("JCFC4bviKZmiVdsDkvzXjRCzE9Yc7P1VumkgkiBvQ43c");
 
 #[program]
 pub mod governance_token {
     use super::*;
 
-    /// Initialize the governance token
-    pub fn initialize_governance_token(
-        ctx: Context<InitializeGovernanceToken>,
-        initial_supply: u64,
-        governance_authority: Pubkey,
+    pub fn initialize(
+        ctx: Context<InitializeGovernance>,
+        decimals: u8,
+        params: GovernanceParams,
     ) -> Result<()> {
-        instructions::initialize_governance_token(ctx, initial_supply, governance_authority)
+        handle_initialize(ctx, decimals, params)
     }
 
-    /// Mint governance tokens (only by authority)
-    pub fn mint_governance_tokens(
-        ctx: Context<MintGovernanceTokens>,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::mint_governance_tokens(ctx, amount)
+    pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
+        handle_mint_tokens(ctx, amount)
     }
 
-    /// Stake governance tokens for voting power
-    pub fn stake_tokens(
-        ctx: Context<StakeTokens>,
-        amount: u64,
-        lock_period: i64,
-    ) -> Result<()> {
-        instructions::stake_tokens(ctx, amount, lock_period)
+    pub fn create_stake_account(ctx: Context<CreateStakeAccount>) -> Result<()> {
+        handle_create_stake_account(ctx)
     }
 
-    /// Unstake governance tokens
-    pub fn unstake_tokens(
-        ctx: Context<UnstakeTokens>,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::unstake_tokens(ctx, amount)
+    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+        handle_stake(ctx, amount)
     }
 
-    /// Create a governance proposal
+    pub fn unstake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+        handle_unstake(ctx, amount)
+    }
+
     pub fn create_proposal(
         ctx: Context<CreateProposal>,
         title: String,
-        description: String,
-        target: Pubkey,
-        data: Vec<u8>,
-        value: u64,
+        description_uri: String,
     ) -> Result<()> {
-        instructions::create_proposal(ctx, title, description, target, data, value)
+        handle_create_proposal(ctx, title, description_uri)
     }
 
-    /// Vote on a proposal
-    pub fn vote_on_proposal(
-        ctx: Context<VoteOnProposal>,
-        choice: VoteChoice,
-    ) -> Result<()> {
-        instructions::vote_on_proposal(ctx, choice)
+    pub fn cast_vote(ctx: Context<CastVote>, choice: VoteChoice) -> Result<()> {
+        handle_cast_vote(ctx, choice)
     }
 
-    /// Queue a proposal for execution
-    pub fn queue_proposal(ctx: Context<QueueProposal>) -> Result<()> {
-        instructions::queue_proposal(ctx)
+    pub fn finalize_proposal(ctx: Context<FinalizeProposal>) -> Result<()> {
+        handle_finalize_proposal(ctx)
     }
-
-    /// Execute a proposal
-    pub fn execute_proposal(ctx: Context<ExecuteProposal>) -> Result<()> {
-        instructions::execute_proposal(ctx)
-    }
-
-    /// Cancel a proposal
-    pub fn cancel_proposal(ctx: Context<CancelProposal>) -> Result<()> {
-        instructions::cancel_proposal(ctx)
-    }
-
-    /// Claim staking rewards
-    pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
-        instructions::claim_staking_rewards(ctx)
-    }
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq)]
-pub enum VoteChoice {
-    Against = 0,
-    For = 1,
-    Abstain = 2,
 }

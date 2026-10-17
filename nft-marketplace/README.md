@@ -1,402 +1,225 @@
-# Advanced NFT Marketplace on Solana
+# NFT Marketplace (Solana)
 
-A comprehensive, production-ready NFT marketplace built on the Solana blockchain with advanced features including real-time bidding, auction systems, royalty distribution, and analytics.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/nft-marketplace.yml/badge.svg)
 
-## 🚀 Features
+A trust-minimised NFT marketplace on Solana: two Anchor programs for **escrowed fixed-price
+listings with SOL offers** and **English auctions**, plus a Next.js storefront that reads listings,
+offers and auctions straight from chain with `@solana/kit`.
 
-### Core Marketplace
-- **NFT Listing & Trading**: List, buy, and sell NFTs with customizable pricing
-- **Offer System**: Make and accept offers on listed NFTs
-- **Escrow System**: Secure escrow for all transactions
-- **Fee Management**: Configurable marketplace fees with admin controls
+Both programs use the SPL **token interface**, so they trade classic SPL Token NFTs and Token-2022
+NFTs alike — including the on-chain-metadata NFTs produced by the companion
+[`nft-minting`](../nft-minting) program.
 
-### Advanced Features
-- **Auction System**: Real-time bidding with automatic settlement
-- **Royalty Distribution**: Automatic royalty payments to creators
-- **Collection Management**: Create and manage NFT collections
-- **Rarity Scoring**: Advanced rarity calculation and ranking
-- **Analytics Dashboard**: Comprehensive marketplace metrics and insights
+> Portfolio / reference implementation — unaudited, not deployed to mainnet. See
+> [SECURITY.md](SECURITY.md).
 
-### Minting & Collections
-- **Custom NFT Minting**: Mint NFTs with custom metadata and traits
-- **Collection Creation**: Create verified collections with custom settings
-- **Candy Machine Integration**: Automated minting with whitelist support
-- **Batch Minting**: Efficient batch minting for large collections
-- **Metadata Standards**: Full Metaplex compatibility
+## Key features
+**Marketplace program**
+- List an NFT at a SOL price with optional expiry; the NFT is escrowed in the listing PDA's ATA.
+- Update price/expiry, delist (NFT and rent returned).
+- Atomic purchase: SOL to seller and fee to treasury, NFT to buyer, accounts closed — with a
+  `max_price` slippage guard against last-second price changes.
+- SOL offers escrowed in a PDA; buyers can cancel, sellers can accept unexpired offers.
+- Admin config: fee (≤ 10%), treasury, pause switch, admin rotation; on-chain volume/sales stats.
 
-### Frontend Features
-- **Multi-Wallet Support**: Phantom, Solflare, Ledger, and more
-- **Real-time Updates**: WebSocket integration for live bidding
-- **Advanced Search**: Fuzzy search with filters and sorting
-- **Responsive Design**: Mobile-first responsive interface
-- **Dark/Light Theme**: Theme switching with system preference
+**Auction program**
+- English auctions with minimum bid and minimum increment (bps, rounded up).
+- Each bid escrows SOL and refunds the previous bidder in the same instruction.
+- Anti-sniping: bids in the last 5 minutes extend the auction.
+- Permissionless settlement (NFT to winner, SOL to seller) and cancellation before the first bid.
 
-### Security & Performance
-- **Security Audited**: Following Solana security best practices
-- **Rate Limiting**: Protection against spam and abuse
-- **Caching**: Redis caching for optimal performance
-- **Monitoring**: Prometheus metrics and Grafana dashboards
-- **Load Balancing**: Nginx reverse proxy configuration
+**Storefront**
+- Listings grid with sorting, expired filter, "my listings" and best active offer per NFT.
+- Live auctions with countdowns, phase badges and next minimum bid.
+- Wallet-standard wallet connection; graceful empty/error states when programs are not deployed.
 
-## 🏗️ Architecture
+## Tech stack
+| Layer | Technology | Version |
+| --- | --- | --- |
+| On-chain programs | Anchor (`anchor-lang`, `anchor-spl`) | 1.2.1 |
+| Toolchain | Agave (Solana) CLI / `cargo-build-sbf` | 4.3.2 |
+| Language | Rust, edition 2024 (MSRV 1.89) | stable |
+| Program tests | LiteSVM + host unit tests | 0.18.0 |
+| Frontend | Next.js / React | 16.4 / 19.3 |
+| Solana client | `@solana/kit`, `@wallet-standard/react` | 8.5 / 1.0 |
+| Styling / tooling | Tailwind CSS 4, TypeScript 6 (strict), ESLint 9 flat config, Vitest 5 | — |
+| Runtime | Node.js LTS (`node:24-alpine`, non-root) | 24 |
+| CI | GitHub Actions (+ advisory `cargo audit` / `npm audit`) | — |
 
-### Programs (Smart Contracts)
-```
-programs/
-├── marketplace/          # Core marketplace functionality
-├── nft-minting/         # NFT creation and metadata
-├── auction-system/      # Real-time auction mechanics
-├── royalty-distribution/ # Creator royalty payments
-├── collection-manager/   # Collection verification and management
-└── escrow-system/       # Secure transaction escrow
-```
+## Architecture
 
-### Frontend Application
-```
-app/
-├── src/
-│   ├── components/      # React components
-│   ├── contexts/        # React contexts
-│   ├── hooks/          # Custom hooks
-│   ├── pages/          # Next.js pages
-│   ├── services/       # API services
-│   ├── utils/          # Utility functions
-│   └── types/          # TypeScript types
-```
-
-### Infrastructure
-```
-├── docker-compose.yml   # Multi-service development environment
-├── nginx/              # Reverse proxy configuration
-├── monitoring/         # Prometheus & Grafana setup
-└── scripts/           # Deployment and utility scripts
-```
-
-## 🛠️ Tech Stack
-
-### Blockchain
-- **Solana**: High-performance blockchain
-- **Anchor**: Solana development framework
-- **Metaplex**: NFT metadata standards
-- **SPL Token**: Token program integration
-
-### Frontend
-- **Next.js 14**: React framework with App Router
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first styling
-- **Solana Web3.js**: Blockchain interaction
-- **React Query**: Data fetching and caching
-- **Zustand**: State management
-- **Socket.IO**: Real-time communication
-
-### Infrastructure
-- **Docker**: Containerization
-- **Nginx**: Reverse proxy and load balancing
-- **Redis**: Caching and real-time data
-- **PostgreSQL**: Analytics and metadata storage
-- **IPFS**: Decentralized metadata storage
-- **Prometheus**: Metrics collection
-- **Grafana**: Monitoring dashboards
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+
-- Rust 1.70+
-- Solana CLI 1.16+
-- Anchor CLI 0.29+
-- Docker & Docker Compose
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd nft-marketplace
-   ```
-
-2. **Install dependencies**
-   ```bash
-   # Install Anchor dependencies
-   npm install
-   
-   # Install frontend dependencies
-   cd app && npm install && cd ..
-   ```
-
-3. **Setup Solana environment**
-   ```bash
-   # Create new keypair (if needed)
-   solana-keygen new --outfile ~/.config/solana/id.json
-   
-   # Set to devnet
-   solana config set --url devnet
-   
-   # Airdrop SOL for testing
-   solana airdrop 2
-   ```
-
-4. **Build and deploy programs**
-   ```bash
-   # Build all programs
-   anchor build
-   
-   # Deploy to devnet
-   ./scripts/deploy.sh devnet
-   ```
-
-5. **Start development environment**
-   ```bash
-   # Start all services
-   docker-compose up -d
-   
-   # Start frontend development server
-   cd app && npm run dev
-   ```
-
-6. **Access the application**
-   - Frontend: http://localhost:3000
-   - Analytics: http://localhost:3002
-   - Grafana: http://localhost:3003
-
-## 📖 Usage Guide
-
-### For Creators
-
-1. **Connect Wallet**
-   - Click "Connect Wallet" and select your preferred wallet
-   - Ensure you're on the correct network (devnet for testing)
-
-2. **Create Collection**
-   - Navigate to "Create" → "New Collection"
-   - Upload collection image and metadata
-   - Set royalty percentage and supply limits
-
-3. **Mint NFTs**
-   - Go to "Create" → "Mint NFT"
-   - Upload artwork and set metadata
-   - Add traits and rarity information
-   - Choose collection (optional)
-
-4. **Setup Candy Machine**
-   - Navigate to "Create" → "Candy Machine"
-   - Configure pricing, launch date, and whitelist
-   - Upload metadata for batch minting
-
-### For Traders
-
-1. **Browse Marketplace**
-   - Explore collections and individual NFTs
-   - Use search and filters to find specific items
-   - Check rarity scores and price history
-
-2. **Purchase NFTs**
-   - Click on any listed NFT
-   - Review details and price
-   - Click "Buy Now" and confirm transaction
-
-3. **Make Offers**
-   - On NFT detail page, click "Make Offer"
-   - Set offer amount and expiration
-   - Funds are escrowed until accepted or expired
-
-4. **Participate in Auctions**
-   - Find active auctions in the marketplace
-   - Place bids in real-time
-   - Monitor auction status and automatic settlement
-
-### For Collectors
-
-1. **List NFTs**
-   - Go to your profile and select an NFT
-   - Click "List for Sale"
-   - Set price, duration, and offer settings
-
-2. **Manage Listings**
-   - View active listings in your profile
-   - Update prices or cancel listings
-   - Accept offers from potential buyers
-
-3. **Track Portfolio**
-   - Monitor your collection value
-   - View transaction history
-   - Analyze profit/loss metrics
-
-## 🔧 Configuration
-
-### Environment Variables
-
-#### Frontend (.env.local)
-```env
-NEXT_PUBLIC_SOLANA_NETWORK=devnet
-NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
-NEXT_PUBLIC_MARKETPLACE_PROGRAM_ID=<program-id>
-NEXT_PUBLIC_NFT_MINTING_PROGRAM_ID=<program-id>
-NEXT_PUBLIC_WEBSOCKET_URL=ws://localhost:3001
+### Context / container view
+```mermaid
+flowchart LR
+    seller["Seller wallet"]
+    buyer["Buyer / bidder wallet"]
+    admin["Marketplace admin"]
+    subgraph offchain["Off-chain"]
+        app["Next.js storefront - @solana/kit"]
+    end
+    subgraph solana["Solana"]
+        market["Marketplace program"]
+        auction["Auction program"]
+        token["SPL Token / Token-2022 + ATA programs"]
+        minting["nft-minting program (companion)"]
+    end
+    seller --> app
+    buyer --> app
+    app -->|"getProgramAccounts + signed txs"| market
+    app -->|"getProgramAccounts + signed txs"| auction
+    admin -->|"fee / treasury / pause"| market
+    market -->|"escrow and release NFT"| token
+    auction -->|"escrow and release NFT"| token
+    minting -->|"mints Token-2022 NFTs"| token
 ```
 
-#### Backend Services
-```env
-NODE_ENV=development
-DATABASE_URL=postgresql://user:password@localhost:5432/nft_marketplace
-REDIS_URL=redis://localhost:6379
-SOLANA_RPC_URL=https://api.devnet.solana.com
+### Purchase flow
+```mermaid
+sequenceDiagram
+    actor S as Seller
+    actor B as Buyer
+    participant M as Marketplace program
+    participant T as Token program
+    S->>M: list_nft(price, expires_at)
+    M->>T: transfer NFT to listing vault (ATA of listing PDA)
+    B->>M: purchase_nft(max_price)
+    M->>M: check not paused, not expired, price <= max_price
+    M->>S: price minus fee (system transfer)
+    M->>M: fee to treasury
+    M->>T: vault to buyer ATA (listing PDA signs), close vault
+    M-->>S: listing account closed, rent refunded
 ```
 
-### Program Configuration
-
-Programs can be configured through initialization instructions:
-
-```typescript
-// Marketplace configuration
-const marketplaceFee = 250; // 2.5%
-const maxListingDuration = 30 * 24 * 60 * 60; // 30 days
-
-// Collection settings
-const royaltyPercentage = 500; // 5%
-const maxSupply = 10000; // Optional supply limit
+### Auction lifecycle
+```mermaid
+stateDiagram-v2
+    [*] --> Active: create_auction (NFT escrowed)
+    Active --> Active: place_bid (refund previous bidder, maybe extend end)
+    Active --> Cancelled: cancel_auction (no bids)
+    Active --> Ended: now >= ends_at
+    Ended --> Settled: settle_auction (NFT to winner, SOL to seller)
+    Cancelled --> [*]
+    Settled --> [*]
 ```
 
-## 🧪 Testing
+### On-chain accounts
+```mermaid
+erDiagram
+    MARKETPLACE ||--o{ LISTING : "configures"
+    LISTING ||--o{ OFFER : "receives (by mint)"
+    MARKETPLACE {
+        pubkey admin
+        pubkey treasury
+        u16 fee_bps
+        bool paused
+        u64 total_volume
+        u64 total_sales
+    }
+    LISTING {
+        pubkey seller
+        pubkey mint
+        u64 price
+        i64 expires_at
+    }
+    OFFER {
+        pubkey buyer
+        pubkey mint
+        u64 amount
+        i64 expires_at
+    }
+    AUCTION {
+        pubkey seller
+        pubkey mint
+        u64 min_bid
+        u16 min_increment_bps
+        u64 highest_bid
+        pubkey highest_bidder
+        i64 ends_at
+    }
+```
 
-### Program Tests
+PDA seeds: `marketplace`, `listing + mint`, `offer + mint + buyer`, `auction + mint`. Vaults are the
+associated token accounts of the listing / auction PDAs.
+
+## Project structure
+```
+nft-marketplace/
+├── Anchor.toml, Cargo.toml, Cargo.lock   # Anchor 1.2.1 workspace (Rust 2024)
+├── programs/
+│   ├── marketplace/
+│   │   ├── src/                          # state, escrow helper, instructions/{admin,listing,offer}
+│   │   └── tests/marketplace.rs          # LiteSVM end-to-end tests
+│   └── auction-system/
+│       ├── src/lib.rs
+│       └── tests/auction.rs
+├── app/                                  # Next.js 16 storefront (@solana/kit)
+├── scripts/deploy.sh
+├── docker-compose.yml                    # runs the storefront container
+└── SECURITY.md
+```
+
+## Running locally
+
+### Programs
+Prerequisites: Rust stable, [Agave CLI 4.3.x](https://docs.anza.xyz/cli/install),
+[Anchor CLI 1.2.1](https://www.anchor-lang.com/docs/installation) (`avm install 1.2.1`).
 ```bash
-# Run all program tests
-anchor test
-
-# Run specific program tests
-anchor test --skip-deploy -- --grep "marketplace"
+cd nft-marketplace
+anchor build                  # SBF binaries, IDLs and TS types
+cargo test --workspace        # unit + LiteSVM end-to-end tests
+./scripts/deploy.sh devnet    # anchor keys sync + build + deploy
 ```
 
-### Frontend Tests
+### Storefront without Docker
 ```bash
-cd app
-
-# Run unit tests
-npm test
-
-# Run with coverage
-npm run test:coverage
-
-# Run E2E tests
-npm run test:e2e
+cd nft-marketplace/app
+cp .env.example .env.local
+npm ci
+npm run dev                   # http://localhost:3000
 ```
 
-### Integration Tests
+### Storefront with Docker
 ```bash
-# Start test environment
-docker-compose -f docker-compose.test.yml up -d
-
-# Run integration tests
-npm run test:integration
+cd nft-marketplace
+docker compose up --build     # http://localhost:3000
 ```
 
-## 🚀 Deployment
+## Testing
+| Suite | Command | Coverage |
+| --- | --- | --- |
+| Unit | `cargo test --workspace --lib` | fee math, listing expiry, next-minimum-bid rules |
+| Program E2E (LiteSVM) | `anchor build && cargo test --workspace` | list → purchase (fee + seller payout), slippage guard, delist, offers cancel/accept, admin-only pause; bids, refunds, wrong refund target, early settle, late bid, settlement, anti-sniping, cancellation rules |
+| Frontend | `cd app && npm run lint && npm run typecheck && npm test && npm run build` | account codecs and discriminators, auction math, formatting |
 
-### Development Deployment
-```bash
-# Deploy to devnet
-./scripts/deploy.sh devnet
+## Configuration
+| Variable / setting | Where | Default |
+| --- | --- | --- |
+| `NEXT_PUBLIC_RPC_URL` | `app/.env.local` / Docker build arg | `https://api.devnet.solana.com` |
+| `NEXT_PUBLIC_CLUSTER` | `app/.env.local` / Docker build arg | `devnet` |
+| `NEXT_PUBLIC_MARKETPLACE_PROGRAM_ID` | `app/.env.local` / Docker build arg | `BKvFQqBhXJNpKjmAzwvsbuHGKG54EPcdcV7YmRfxw1Te` |
+| `NEXT_PUBLIC_AUCTION_PROGRAM_ID` | `app/.env.local` / Docker build arg | `5YeC15ieZAhKmeDeVHR1xDzC6patSL68yQTtgqEio7Sh` |
+| Program ids | `declare_id!` + `Anchor.toml` | as above (`anchor keys sync` to use your own) |
+| Marketplace fee / treasury | `initialize_marketplace` / `update_marketplace` | e.g. 250 bps |
 
-# Deploy to testnet
-./scripts/deploy.sh testnet ~/.config/solana/testnet-keypair.json
-```
+No secrets are needed: transactions are signed client-side by the user's wallet.
 
-### Production Deployment
-```bash
-# Deploy to mainnet (requires mainnet keypair)
-./scripts/deploy.sh mainnet-beta ~/.config/solana/mainnet-keypair.json
+## Design decisions
+- **Escrow over delegate-based listings**: the program holds the NFT, so a listing is always
+  fillable and cannot be double-sold; the cost is an extra ATA rent deposit, refunded on close.
+- **One listing / auction per mint** (`[seed, mint]` PDAs): an NFT has exactly one owner, so this
+  keeps lookups O(1) and prevents conflicting listings.
+- **Offers hold lamports in the PDA itself**: no extra escrow account, and closing the PDA refunds
+  escrow and rent in one step.
+- **Token interface everywhere**: SPL Token and Token-2022 NFTs with one code path.
+- **Royalties are not enforced on-chain here**; the minting program publishes `royalty_bps` in
+  token metadata for clients that honour it (see SECURITY.md).
+- **LiteSVM tests** run the real SBF binaries with the real Token and ATA programs in milliseconds.
+- **Read-only storefront first**: the UI decodes accounts with unit-tested `@solana/kit` codecs and
+  never shows mocked balances; transaction builders can be generated from the IDLs (`target/idl`).
 
-# Deploy frontend to production
-cd app && npm run build && npm start
-```
-
-### Docker Deployment
-```bash
-# Build and start all services
-docker-compose up -d
-
-# Scale specific services
-docker-compose up -d --scale websocket=3
-
-# View logs
-docker-compose logs -f frontend
-```
-
-## 📊 Monitoring
-
-### Metrics & Monitoring
-- **Prometheus**: Metrics collection at http://localhost:9090
-- **Grafana**: Dashboards at http://localhost:3003
-- **Application Logs**: `docker-compose logs -f <service>`
-
-### Key Metrics
-- Transaction volume and count
-- Active listings and sales
-- User engagement metrics
-- Program execution costs
-- Real-time bidding activity
-
-## 🔒 Security
-
-### Security Features
-- **Input Validation**: All user inputs validated
-- **Access Controls**: Role-based permissions
-- **Escrow Protection**: Secure fund handling
-- **Rate Limiting**: Anti-spam protection
-- **Audit Trail**: Complete transaction history
-
-### Security Best Practices
-- Regular security audits
-- Multi-signature for admin functions
-- Proper error handling
-- Secure key management
-- Regular dependency updates
-
-See [SECURITY.md](./docs/SECURITY.md) for the complete security audit checklist.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-Please read [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for detailed contribution guidelines.
-
-## 📚 Documentation
-
-- [API Documentation](./docs/API.md)
-- [Program Documentation](./docs/PROGRAMS.md)
-- [Frontend Guide](./docs/FRONTEND.md)
-- [Security Audit](./docs/SECURITY.md)
-- [Deployment Guide](./docs/DEPLOYMENT.md)
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 🆘 Support
-
-- **Documentation**: Check the docs/ directory
-- **Issues**: Create an issue on GitHub
-- **Discord**: Join our community Discord
-
-## 🙏 Acknowledgments
-
-- Solana Foundation for the amazing blockchain platform
-- Metaplex for NFT standards and tools
-- Anchor framework for Solana development
-- The open-source community for invaluable tools and libraries
-
----
-
-Built with ❤️ for the Solana ecosystem
+## What changed in the 2026 modernisation
+The previous workspace (Anchor 0.29, Metaplex, six declared programs of which three did not exist)
+did not build; most instructions were placeholders and the frontend relied on mocks and a
+non-existent websocket server. It was reduced to two complete, tested programs on Anchor 1.2.1, the
+minting program was extracted into [`nft-minting`](../nft-minting), and the storefront was rebuilt on
+Next.js 16 and `@solana/kit`.

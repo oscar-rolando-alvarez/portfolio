@@ -1,0 +1,37 @@
+[package]
+name = "nft-minting"
+description = "Token-2022 NFT collections with on-chain metadata (metadata pointer + token metadata extensions)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "nft_minting"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+custom-heap = []
+custom-panic = []
+anchor-debug = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang.workspace = true
+anchor-spl.workspace = true
+
+[dev-dependencies]
+litesvm.workspace = true
+solana-keypair.workspace = true
+solana-signer.workspace = true
+solana-transaction.workspace = true
+solana-account.workspace = true
+
+[lints]
+workspace = true

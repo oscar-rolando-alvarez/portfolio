@@ -1,160 +1,71 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@layer base {
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --color-bg: #f7f6fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef0f6;
+  --color-border: #dfe3ec;
+  --color-fg: #0f172a;
+  --color-muted: #5b6475;
+  --color-accent: #7c3aed;
+  --color-accent-2: #db2777;
+  --color-accent-fg: #ffffff;
+  --color-success: #047857;
+  --color-warning: #b45309;
+  --color-danger: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222.2 84% 4.9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 94.1%;
+    --color-bg: #0d0b14;
+    --color-surface: #15121f;
+    --color-surface-muted: #211c30;
+    --color-border: #2e2742;
+    --color-fg: #e6e9f2;
+    --color-muted: #98a2b8;
+    --color-accent: #a78bfa;
+    --color-accent-2: #f472b6;
+    --color-accent-fg: #0d0b14;
+    --color-success: #34d399;
+    --color-warning: #fbbf24;
+    --color-danger: #f87171;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  
-  body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
-  
-  /* Scrollbar styles */
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  
-  ::-webkit-scrollbar-track {
-    @apply bg-muted;
-  }
-  
-  ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/20 rounded-md;
-  }
-  
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/30;
-  }
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
 @layer components {
-  .btn {
-    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50;
-  }
-  
-  .btn-primary {
-    @apply btn bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2;
-  }
-  
-  .btn-secondary {
-    @apply btn bg-secondary text-secondary-foreground hover:bg-secondary/80 h-10 px-4 py-2;
-  }
-  
-  .btn-ghost {
-    @apply btn hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2;
-  }
-  
-  .btn-outline {
-    @apply btn border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2;
-  }
-  
   .card {
-    @apply rounded-lg border bg-card text-card-foreground shadow-sm;
+    @apply rounded-2xl border border-border bg-surface p-5 shadow-sm;
   }
-  
-  .input {
-    @apply flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60;
   }
-  
-  .nft-card {
-    @apply card overflow-hidden transition-all hover:shadow-lg hover:scale-[1.02] cursor-pointer;
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium transition hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60;
   }
-  
-  .nft-grid {
-    @apply grid grid-cols-auto-fill-250 gap-6 p-6;
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
   }
-  
-  .gradient-bg {
-    @apply bg-gradient-to-br from-primary/10 via-accent/5 to-secondary/10;
-  }
-  
-  .glass {
-    @apply bg-background/80 backdrop-blur-md border border-border/50;
-  }
-  
-  .loading-shimmer {
-    @apply animate-pulse bg-gradient-to-r from-muted via-muted-foreground/20 to-muted bg-[length:200%_100%];
-    animation: shimmer 2s infinite;
-  }
-  
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
-  }
-  
-  .rarity-common {
-    @apply text-rarity-common border-rarity-common/20 bg-rarity-common/5;
-  }
-  
-  .rarity-uncommon {
-    @apply text-rarity-uncommon border-rarity-uncommon/20 bg-rarity-uncommon/5;
-  }
-  
-  .rarity-rare {
-    @apply text-rarity-rare border-rarity-rare/20 bg-rarity-rare/5;
-  }
-  
-  .rarity-epic {
-    @apply text-rarity-epic border-rarity-epic/20 bg-rarity-epic/5;
-  }
-  
-  .rarity-legendary {
-    @apply text-rarity-legendary border-rarity-legendary/20 bg-rarity-legendary/5;
-  }
-  
-  .rarity-mythic {
-    @apply text-rarity-mythic border-rarity-mythic/20 bg-rarity-mythic/5;
-  }
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .popover-panel {
+    @apply w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-surface p-2 text-fg shadow-xl;
+    position: fixed;
+    inset: auto;
+    top: 4.5rem;
+    right: 1rem;
+    margin: 0;
   }
 }

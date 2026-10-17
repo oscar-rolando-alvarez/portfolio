@@ -1,483 +1,235 @@
-# DeFi Lending Protocol on Solana
+# DeFi Lending Protocol (Solana)
 
-A comprehensive decentralized finance (DeFi) lending protocol built on Solana using the Anchor framework. This protocol enables users to lend, borrow, participate in governance, and utilize flash loans in a trustless environment.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/defi-lending-protocol.yml/badge.svg)
 
-## 🌟 Features
+An over-collateralised lending protocol for Solana built with Anchor. Lenders supply an asset and
+earn interest through share tokens; borrowers lock collateral and borrow against it, priced by
+**Pyth pull oracles**. Unhealthy positions are liquidated with a bonus, idle liquidity powers
+**single-transaction flash loans**, and a companion **governance token** program lets stakers create
+and vote on proposals.
 
-### Core Lending Features
-- **Lending & Borrowing**: Supply assets to earn interest or borrow against collateral
-- **Liquidity Pools**: Multiple token pools with dynamic interest rates
-- **Collateral Management**: Over-collateralized loans with automated liquidations
-- **Interest Rate Models**: Dynamic rates based on supply and demand
+The design follows the *isolated market* model (as popularised by Morpho Blue and Kamino's isolated
+pools): each market pairs exactly one collateral asset with one borrowable asset, so the risk of a
+volatile collateral never spills into other markets.
 
-### Advanced Features
-- **Flash Loans**: Instant, uncollateralized loans for arbitrage and liquidations
-- **Governance Token**: Decentralized governance with voting and proposals
-- **Yield Farming**: Additional rewards for liquidity providers
-- **Price Oracles**: Integration with Pyth and Switchboard for accurate pricing
-- **Liquidation Engine**: Automated liquidations to maintain protocol solvency
+> Portfolio / reference implementation — unaudited, not deployed to mainnet. See
+> [SECURITY.md](SECURITY.md).
 
-### Technical Features
-- **Anchor Framework**: Type-safe Rust smart contracts
-- **React Frontend**: Modern web interface with wallet integration
-- **Comprehensive Testing**: Full test coverage with Anchor Test Suite
-- **Docker Support**: Containerized deployment
-- **Monitoring**: Built-in metrics and health checks
+## Key features
+- **Isolated markets** (`collateral mint × loan mint`) with PDA vaults and a PDA share mint.
+- **Supply / withdraw** with interest-bearing SPL share tokens (rounding in favour of the pool).
+- **Collateral, borrow, repay** with index-based debt accounting (`borrow_scaled × borrow_index`).
+- **Kinked interest-rate model** (base + slope1 up to optimal utilisation, slope2 above), with a
+  configurable reserve factor accruing protocol reserves.
+- **Pyth `PriceUpdateV2`** oracle checks: feed id, max age, full Wormhole verification, confidence.
+- **Liquidations** with 50% close factor, liquidation bonus and bad-debt-safe collateral capping.
+- **Flash loans** enforced by instruction introspection (`flash_borrow` … `flash_repay` in one tx).
+- **Admin controls**: global pause, per-market pause and risk updates, reserve collection.
+- **Governance token**: time-locked staking, stake-weighted proposals, quorum + majority finalisation,
+  vote records preventing double voting.
+- **Token interface** support (SPL Token and Token-2022 mints without transfer fees/hooks).
+- **Next.js dashboard** reading markets, positions and proposals straight from chain with
+  `@solana/kit`, and wallet-standard wallet connection.
 
-## 🏗️ Architecture
+## Tech stack
+| Layer | Technology | Version |
+| --- | --- | --- |
+| On-chain programs | Anchor (`anchor-lang`, `anchor-spl`) | 1.2.1 |
+| Toolchain | Agave (Solana) CLI / `cargo-build-sbf` | 4.3.2 |
+| Language | Rust, edition 2024 (MSRV 1.89) | stable |
+| Oracle | `pyth-solana-receiver-sdk` (Pyth pull oracle) | 2.0.0 |
+| Program tests | LiteSVM + host unit tests | 0.18.0 |
+| Frontend | Next.js / React | 16.4 / 19.3 |
+| Solana client | `@solana/kit`, `@solana/react`, wallet-standard | 8.5 |
+| Styling / tooling | Tailwind CSS 4, TypeScript 6 (strict), ESLint 9 flat config, Vitest | — |
+| Runtime | Node.js LTS | 24 |
+| CI | GitHub Actions (+ advisory `cargo audit` / `npm audit`) | — |
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend      │    │   Anchor        │    │   Oracles       │
-│   (React/Next)  │◄──►│   Programs      │◄──►│   (Pyth/Switch) │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-        │                       │                       │
-        │                       │                       │
-        ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Wallet        │    │   Solana        │    │   Token         │
-│   Integration   │    │   Blockchain    │    │   Accounts      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+## Architecture
 
-### Smart Contract Structure
-
-- **Main Protocol** (`defi-lending-protocol`): Core lending logic
-- **Governance Token** (`governance-token`): DAO governance functionality
-- **Price Oracles**: External price feed integration
-- **Interest Rate Models**: Dynamic rate calculations
-- **Liquidation Engine**: Automated position liquidations
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Rust** 1.75+
-- **Solana CLI** 1.17.0+
-- **Anchor CLI** 0.29.0+
-- **Node.js** 18+
-- **Docker** (optional)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd defi-lending-protocol
-   ```
-
-2. **Install dependencies**
-   ```bash
-   # Install Rust dependencies
-   anchor build
-   
-   # Install frontend dependencies
-   cd app && npm install && cd ..
-   ```
-
-3. **Configure Solana CLI**
-   ```bash
-   # For devnet
-   solana config set --url https://api.devnet.solana.com
-   
-   # Create a keypair (if you don't have one)
-   solana-keygen new
-   ```
-
-4. **Deploy to devnet**
-   ```bash
-   chmod +x scripts/deploy.sh
-   ./scripts/deploy.sh devnet
-   ```
-
-5. **Start the frontend**
-   ```bash
-   cd app
-   npm run dev
-   ```
-
-### Docker Deployment
-
-1. **Build and start all services**
-   ```bash
-   docker-compose up -d
-   ```
-
-2. **For local development with test validator**
-   ```bash
-   docker-compose --profile local up -d
-   ```
-
-3. **For production with monitoring**
-   ```bash
-   docker-compose --profile production --profile monitoring up -d
-   ```
-
-## 📚 Documentation
-
-### Smart Contract Documentation
-
-#### Protocol Initialization
-```rust
-// Initialize the main protocol
-pub fn initialize_protocol(
-    ctx: Context<InitializeProtocol>,
-    admin: Pubkey,
-    fee_rate: u64,
-) -> Result<()>
+### Context / container view
+```mermaid
+flowchart LR
+    lender["Lender wallet"]
+    borrower["Borrower wallet"]
+    liquidator["Liquidator bot"]
+    admin["Admin multisig"]
+    subgraph offchain["Off-chain"]
+        app["Next.js dashboard - @solana/kit"]
+        pyth_hermes["Pyth Hermes price service"]
+    end
+    subgraph solana["Solana"]
+        lending["Lending program"]
+        governance["Governance-token program"]
+        receiver["Pyth Receiver program - PriceUpdateV2 accounts"]
+        token["SPL Token / Token-2022"]
+    end
+    lender --> app
+    borrower --> app
+    app -->|"RPC reads + signed txs"| lending
+    app -->|"proposals"| governance
+    liquidator -->|"liquidate"| lending
+    admin -->|"create_market / pause / risk params"| lending
+    pyth_hermes -->|"signed price updates"| receiver
+    lending -->|"reads prices"| receiver
+    lending -->|"CPI transfers, mint and burn shares"| token
+    governance -->|"CPI stake vault"| token
 ```
 
-#### Pool Management
-```rust
-// Create a new lending pool
-pub fn initialize_pool(
-    ctx: Context<InitializePool>,
-    asset_mint: Pubkey,
-    collateral_factor: u64,
-    reserve_factor: u64,
-    liquidation_threshold: u64,
-    liquidation_bonus: u64,
-) -> Result<()>
+### Borrow flow
+```mermaid
+sequenceDiagram
+    actor B as Borrower
+    participant L as Lending program
+    participant O as Pyth PriceUpdateV2
+    participant T as Token program
+    B->>L: open_position()
+    B->>L: deposit_collateral(amount)
+    L->>T: transfer collateral to market vault
+    B->>L: borrow(amount) with collateral and loan price accounts
+    L->>L: accrue_interest(now) - update borrow index, reserves
+    L->>O: read prices - feed id, age, verification, confidence
+    L->>L: check debt value <= collateral value x LTV
+    L->>T: transfer loan asset from vault (market PDA signs)
+    L-->>B: Borrowed event
 ```
 
-#### Core Operations
-```rust
-// Supply assets to earn interest
-pub fn supply(ctx: Context<Supply>, amount: u64) -> Result<()>
-
-// Borrow against collateral
-pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()>
-
-// Repay borrowed amount
-pub fn repay(ctx: Context<Repay>, amount: u64) -> Result<()>
-
-// Withdraw supplied assets
-pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()>
+### Liquidation and flash loan
+```mermaid
+sequenceDiagram
+    actor K as Liquidator
+    participant L as Lending program
+    participant T as Token program
+    K->>L: liquidate(max_repay)
+    L->>L: accrue, price position, require debt > collateral x threshold
+    L->>L: repay = min(max_repay, 50% of debt), seize = repay value x (1 + bonus)
+    K->>T: repay transferred into loan vault
+    L->>T: collateral sent to liquidator
+    Note over K,L: Flash loan - one transaction
+    K->>L: ix 0 flash_borrow(amount) - introspects ix list for matching flash_repay
+    K->>K: ix 1..n arbitrage or refinance
+    K->>L: ix n+1 flash_repay(amount) - amount plus fee back to vault
 ```
 
-#### Advanced Features
-```rust
-// Execute flash loan
-pub fn flash_loan(
-    ctx: Context<FlashLoan>,
-    amount: u64,
-    params: Vec<u8>,
-) -> Result<()>
-
-// Liquidate unhealthy positions
-pub fn liquidate(
-    ctx: Context<Liquidate>,
-    debt_to_cover: u64,
-    receive_a_token: bool,
-) -> Result<()>
+### On-chain accounts
+```mermaid
+erDiagram
+    PROTOCOL ||--o{ MARKET : "admin creates"
+    MARKET ||--o{ POSITION : "has"
+    MARKET ||--|| SHARE_MINT : "mints supply shares"
+    MARKET ||--|| COLLATERAL_VAULT : "owns"
+    MARKET ||--|| LOAN_VAULT : "owns"
+    PROTOCOL {
+        pubkey admin
+        bool paused
+        u64 market_count
+    }
+    MARKET {
+        pubkey collateral_mint
+        pubkey loan_mint
+        bytes collateral_feed_id
+        bytes loan_feed_id
+        u64 total_deposits
+        u64 total_borrows
+        u64 total_reserves
+        u128 borrow_index
+    }
+    POSITION {
+        pubkey owner
+        u64 collateral_amount
+        u128 borrow_scaled
+    }
 ```
 
-### Frontend Integration
+PDA seeds: `protocol`, `market + collateral_mint + loan_mint`, `collateral_vault + market`,
+`loan_vault + market`, `share_mint + market`, `position + market + owner`.
 
-#### Wallet Connection
-```typescript
-import { useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-
-function App() {
-  const { connected, publicKey } = useWallet()
-  
-  return (
-    <div>
-      <WalletMultiButton />
-      {connected && <Dashboard />}
-    </div>
-  )
-}
+## Project structure
+```
+defi-lending-protocol/
+├── Anchor.toml, Cargo.toml, Cargo.lock    # Anchor 1.2.1 workspace (Rust 2024)
+├── programs/
+│   ├── defi-lending-protocol/
+│   │   ├── src/
+│   │   │   ├── lib.rs                      # instruction entrypoints
+│   │   │   ├── state.rs                    # Protocol, Market, MarketConfig, Position
+│   │   │   ├── math.rs                     # pure fixed-point math + unit tests
+│   │   │   ├── oracle.rs                   # Pyth PriceUpdateV2 validation
+│   │   │   ├── token.rs, events.rs, errors.rs, constants.rs
+│   │   │   └── instructions/               # admin, supply, position, borrow, liquidate, flash_loan
+│   │   └── tests/lending.rs                # LiteSVM end-to-end tests
+│   └── governance-token/
+│       ├── src/                            # staking, proposals, voting
+│       └── tests/governance.rs
+├── app/                                    # Next.js 16 dashboard (@solana/kit)
+├── scripts/deploy.sh
+├── docker-compose.yml                      # runs the dashboard container
+└── SECURITY.md
 ```
 
-#### Program Interaction
-```typescript
-import { useProgram } from '../hooks/useProgram'
+## Running locally
 
-function LendingInterface() {
-  const { program } = useProgram()
-  
-  const supply = async (amount: number) => {
-    await program.methods
-      .supply(new BN(amount))
-      .accounts({
-        // ... accounts
-      })
-      .rpc()
-  }
-}
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-#### Frontend (`.env.local`)
-```env
-NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com
-NEXT_PUBLIC_NETWORK=devnet
-NEXT_PUBLIC_PROGRAM_ID=DLendpNGzTTDdRsQHBJyYgQV9qR8JwKyFfvKSzWE8hT
-```
-
-#### Docker (`.env`)
-```env
-NODE_ENV=production
-POSTGRES_PASSWORD=secure_password
-REDIS_PASSWORD=secure_password
-SOLANA_NETWORK=devnet
-```
-
-### Program Configuration
-
-#### Interest Rate Models
-```rust
-InterestRateStrategy {
-    optimal_utilization_rate: 8000, // 80%
-    base_variable_borrow_rate: 0,   // 0%
-    variable_rate_slope1: 400,      // 4%
-    variable_rate_slope2: 6000,     // 60%
-    stable_rate_slope1: 200,        // 2%
-    stable_rate_slope2: 6000,       // 60%
-}
-```
-
-#### Pool Parameters
-```rust
-ReserveConfig {
-    ltv: 7500,                    // 75% Loan-to-Value
-    liquidation_threshold: 8000,   // 80% Liquidation threshold
-    liquidation_bonus: 1000,       // 10% Liquidation bonus
-    reserve_factor: 1000,          // 10% Reserve factor
-    borrowing_enabled: true,
-    stable_borrowing_enabled: true,
-}
-```
-
-## 🧪 Testing
-
-### Run All Tests
+### Programs
+Prerequisites: Rust stable, [Agave CLI 4.3.x](https://docs.anza.xyz/cli/install),
+[Anchor CLI 1.2.1](https://www.anchor-lang.com/docs/installation) (`avm install 1.2.1`).
 ```bash
-anchor test
+cd defi-lending-protocol
+anchor build                  # SBF binaries, IDL (target/idl) and TS types (target/types)
+cargo test --workspace        # unit + LiteSVM end-to-end tests
+./scripts/deploy.sh devnet    # anchor keys sync + build + deploy with your keypairs
 ```
 
-### Run Specific Test Suite
+### Dashboard without Docker
 ```bash
-# Protocol tests
-anchor test --skip-deploy -- --grep "Protocol"
-
-# Lending tests
-anchor test --skip-deploy -- --grep "Lending"
-
-# Governance tests
-anchor test --skip-deploy -- --grep "Governance"
+cd defi-lending-protocol/app
+cp .env.example .env.local    # set RPC URL / program ids
+npm ci
+npm run dev                   # http://localhost:3000
 ```
 
-### Frontend Tests
+### Dashboard with Docker
 ```bash
-cd app
-npm test
+cd defi-lending-protocol
+docker compose up --build     # http://localhost:3000
 ```
 
-### Integration Tests
-```bash
-# Start local validator
-solana-test-validator
+## Testing
+| Suite | Command | Coverage |
+| --- | --- | --- |
+| Math unit tests | `cargo test --workspace --lib` | rate model, accrual, shares, debt rounding, USD valuation, LTV/health, flash fee, proposal outcome |
+| Program E2E (LiteSVM) | `anchor build && cargo test --workspace` | supply → borrow → 1-year accrual → repay → withdraw with interest; LTV limits; liquidation after price drop; stale / wrong-feed oracle; flash loan with and without repay; admin pause; governance stake → propose → vote → lock → finalise → unstake |
+| Frontend | `cd app && npm run lint && npm run typecheck && npm test && npm run build` | account codecs, rate-model math, formatting |
 
-# Run integration tests
-npm run test:integration
-```
+## Configuration
+| Variable / setting | Where | Default |
+| --- | --- | --- |
+| `NEXT_PUBLIC_RPC_URL` | `app/.env.local` / Docker build arg | `https://api.devnet.solana.com` |
+| `NEXT_PUBLIC_CLUSTER` | `app/.env.local` / Docker build arg | `devnet` |
+| `NEXT_PUBLIC_LENDING_PROGRAM_ID` | `app/.env.local` / Docker build arg | `4sohRUrhAnm75sFwUbeE6tJHRQCNq5MMf4PEYEUi1WdD` |
+| `NEXT_PUBLIC_GOVERNANCE_PROGRAM_ID` | `app/.env.local` / Docker build arg | `JCFC4bviKZmiVdsDkvzXjRCzE9Yc7P1VumkgkiBvQ43c` |
+| Program ids | `declare_id!` + `Anchor.toml` | as above (`anchor keys sync` to use your own) |
+| Market risk parameters | `create_market` / `update_market` args | e.g. LTV 75%, threshold 80%, bonus 5%, reserve 10%, flash fee 9 bps, max price age 60 s |
 
-## 🔐 Security Considerations
+No secrets are required; wallets sign client-side and keypairs never leave the developer machine
+(`*-keypair.json` is git-ignored).
 
-### Smart Contract Security
+## Design decisions
+- **Isolated markets instead of a shared cross-collateral pool**: simpler, auditable risk per pair
+  and a single health computation per instruction (two price accounts, no remaining-accounts loops).
+- **Internal accounting over vault balances** prevents donation/inflation attacks on share pricing.
+- **Index-based debt** (`borrow_scaled`) makes interest accrual O(1) per market rather than per user.
+- **Pyth pull oracle** (`PriceUpdateV2`) is the current Solana standard; prices are posted in the same
+  transaction by the client, so freshness can be strict (60 s in tests).
+- **Instruction-introspection flash loans** keep the program free of arbitrary CPI callbacks and
+  re-entrancy concerns.
+- **Governance records outcomes; execution stays with a multisig**, avoiding an on-chain arbitrary
+  instruction executor in a demo codebase.
+- **LiteSVM over `solana-test-validator`**: real SBF binaries and real SPL programs, tests finish in
+  under a second and run in CI without a validator.
+- **`@solana/kit` + wallet-standard** in the frontend replaces web3.js v1 and the legacy wallet
+  adapter; account layouts are decoded with kit codecs that are unit tested.
 
-1. **Access Controls**
-   - Admin-only functions protected with proper checks
-   - User authorization validated for all operations
-   - Role-based permissions for protocol management
-
-2. **Mathematical Safety**
-   - All arithmetic operations use checked math
-   - Overflow protection in interest calculations
-   - Precision handling for decimal operations
-
-3. **Oracle Security**
-   - Price staleness checks
-   - Confidence interval validation
-   - Multiple oracle support for redundancy
-
-4. **Liquidation Protection**
-   - Health factor monitoring
-   - Automated liquidation triggers
-   - Liquidation bonus caps
-
-### Frontend Security
-
-1. **Wallet Integration**
-   - Secure wallet adapter implementation
-   - Transaction verification before signing
-   - User confirmation for all operations
-
-2. **Input Validation**
-   - Client-side input sanitization
-   - Amount validation and limits
-   - Error handling and user feedback
-
-### Operational Security
-
-1. **Key Management**
-   - Secure keypair generation
-   - Multi-signature for admin operations
-   - Hardware wallet support
-
-2. **Monitoring**
-   - Real-time health monitoring
-   - Alert system for anomalies
-   - Automated backup procedures
-
-## 📊 Monitoring and Analytics
-
-### Built-in Metrics
-
-- **Protocol TVL** (Total Value Locked)
-- **Utilization Rates** per pool
-- **Interest Rates** (supply and borrow)
-- **Health Factors** of positions
-- **Liquidation Events**
-- **Flash Loan Usage**
-
-### Grafana Dashboard
-
-Access monitoring dashboard at `http://localhost:3001` (when running with monitoring profile)
-
-Default credentials: `admin/admin`
-
-### Health Checks
-
-```bash
-# Check protocol health
-curl http://localhost:3000/api/health
-
-# Check specific pool health
-curl http://localhost:3000/api/pools/USDC/health
-```
-
-## 🚀 Deployment
-
-### Development Deployment
-
-1. **Local Test Validator**
-   ```bash
-   # Start test validator
-   solana-test-validator
-   
-   # Deploy programs
-   ./scripts/deploy.sh localnet
-   ```
-
-2. **Devnet Deployment**
-   ```bash
-   # Deploy to devnet
-   ./scripts/deploy.sh devnet
-   
-   # Verify deployment
-   solana program show DLendpNGzTTDdRsQHBJyYgQV9qR8JwKyFfvKSzWE8hT
-   ```
-
-### Production Deployment
-
-1. **Mainnet Deployment**
-   ```bash
-   # Deploy to mainnet (requires sufficient SOL)
-   ./scripts/deploy.sh mainnet
-   ```
-
-2. **Frontend Deployment**
-   ```bash
-   # Build optimized frontend
-   cd app && npm run build
-   
-   # Deploy to Vercel/Netlify
-   npx vercel deploy
-   ```
-
-## 🤝 Contributing
-
-### Development Workflow
-
-1. **Fork the repository**
-2. **Create a feature branch**
-   ```bash
-   git checkout -b feature/awesome-feature
-   ```
-3. **Make changes and test**
-   ```bash
-   anchor test
-   npm test
-   ```
-4. **Commit changes**
-   ```bash
-   git commit -m "feat: add awesome feature"
-   ```
-5. **Push and create PR**
-   ```bash
-   git push origin feature/awesome-feature
-   ```
-
-### Code Standards
-
-- **Rust**: Follow Rust standard conventions
-- **TypeScript**: Use ESLint and Prettier
-- **Commits**: Follow conventional commit format
-- **Testing**: Maintain >90% test coverage
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Solana Foundation** for the blockchain infrastructure
-- **Anchor Framework** for smart contract development
-- **Pyth Network** for price oracle services
-- **Switchboard** for additional oracle functionality
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 📞 Support
-
-- **Documentation**: [Link to docs]
-- **Discord**: [Discord invite]
-- **Twitter**: [@DefiLendingProtocol]
-
-## 🗺️ Roadmap
-
-### Q1 2024
-- ✅ Core lending protocol
-- ✅ Basic governance
-- ✅ Frontend interface
-
-### Q2 2024
-- 🔄 Flash loan marketplace
-- 🔄 Cross-chain bridging
-- 🔄 Mobile application
-
-### Q3 2024
-- ⏳ Leveraged trading
-- ⏳ Insurance pools
-- ⏳ Advanced analytics
-
-### Q4 2024
-- ⏳ Institutional features
-- ⏳ Layer 2 integration
-- ⏳ Global expansion
-
----
-
-**Built with ❤️ on Solana**
+## What changed in the 2026 modernisation
+The previous version targeted Anchor 0.29 / Solana 1.16, did not compile (missing modules, invalid
+program ids, duplicated module trees) and its frontend used mocked transactions. Both programs were
+rewritten around a coherent design on Anchor 1.2.1, with real tests and CI.
