@@ -6,11 +6,12 @@
  * dashboard runs anywhere without a backend, every reload looks the same and
  * tests/screenshots are reproducible. The fleet mirrors the Go simulator's
  * catalogue (profiles, reporting intervals, RATs, PLMNs, firmware builds,
- * cell id format) and the scenario replays its fault types on a 15-minute loop:
+ * cell id format) and the scenario replays its fault types on a 20-minute loop with quiet periods in between:
  * a cell outage that spreads across one tracking area, congestion, a firmware
  * regression, a roaming misconfiguration and an APN error.
  */
 import { hash32, siteLocation } from "../geo";
+import type { MonthBaseline } from "../value";
 import { CUSTOMER, REMEDIATION, ROOT_ES, RUNBOOKS, SCOPE_ES } from "./demo-content";
 import type {
   Anomaly,
@@ -27,7 +28,7 @@ import type {
   Snapshot,
 } from "./types";
 
-export const CYCLE_SECONDS = 900;
+export const CYCLE_SECONDS = 1200;
 export const DEFAULT_START_T = 105; // the spreading outage starts 15 s after the page opens
 
 export interface DemoTenant {
@@ -37,12 +38,38 @@ export interface DemoTenant {
   homeCells: number;
   roamingCellsPerPlmn: number;
   seed: number;
+  /** Labelled demo seed for month-to-date figures recorded before the session (SLA, MTTR). */
+  baseline: MonthBaseline;
 }
 
 export const DEMO_TENANTS: DemoTenant[] = [
-  { id: "acme-utilities", name: "Acme Utilities", devices: 1_000_000, homeCells: 2048, roamingCellsPerPlmn: 96, seed: 42 },
-  { id: "globex-logistics", name: "Globex Logistics", devices: 250_000, homeCells: 768, roamingCellsPerPlmn: 64, seed: 7 },
-  { id: "andes-energia", name: "Andes Energía", devices: 400_000, homeCells: 1024, roamingCellsPerPlmn: 48, seed: 11 },
+  {
+    id: "acme-utilities",
+    name: "Acme Utilities",
+    devices: 1_000_000,
+    homeCells: 2048,
+    roamingCellsPerPlmn: 96,
+    seed: 42,
+    baseline: { availability: 0.9981, mttrSeconds: 47 * 60, incidents: 214 },
+  },
+  {
+    id: "globex-logistics",
+    name: "Globex Logistics",
+    devices: 250_000,
+    homeCells: 768,
+    roamingCellsPerPlmn: 64,
+    seed: 7,
+    baseline: { availability: 0.9976, mttrSeconds: 52 * 60, incidents: 96 },
+  },
+  {
+    id: "andes-energia",
+    name: "Andes Energía",
+    devices: 400_000,
+    homeCells: 1024,
+    roamingCellsPerPlmn: 48,
+    seed: 11,
+    baseline: { availability: 0.9969, mttrSeconds: 63 * 60, incidents: 131 },
+  },
 ];
 
 export function demoTenant(id: string): DemoTenant {
@@ -151,7 +178,7 @@ export function scenario(t: DemoTenant): DemoFault[] {
   const outageCells = [origin, ...neighbours].map((c, i) => ({ id: c.id, from: 120 + i * 14, to: 400 - i * 9 }));
   const congested = home[Math.min(home.length - 1, 12 * 64 + 9)]!;
   const faults: DemoFault[] = [
-    { key: "apn", kind: "apn_error", scopeType: "apn", scope: "track.fleet.iot", start: 15, end: 70, severity: "high", cells: [] },
+    { key: "apn", kind: "apn_error", scopeType: "apn", scope: "track.fleet.iot", start: 15, end: 60, severity: "high", cells: [] },
     {
       key: "outage",
       kind: "cell_outage",
@@ -167,22 +194,22 @@ export function scenario(t: DemoTenant): DemoFault[] {
       kind: "congestion",
       scopeType: "cell",
       scope: congested.id,
-      start: 470,
-      end: 560,
+      start: 560,
+      end: 640,
       severity: "medium",
-      cells: [{ id: congested.id, from: 470, to: 560 }],
+      cells: [{ id: congested.id, from: 560, to: 640 }],
     },
     {
       key: "firmware",
       kind: "firmware_regression",
       scopeType: "firmware",
       scope: "MTR-3.3.1",
-      start: 610,
-      end: 700,
+      start: 780,
+      end: 850,
       severity: "high",
       cells: [],
     },
-    { key: "roaming", kind: "roaming_misconfig", scopeType: "plmn", scope: "26201", start: 760, end: 850, severity: "medium", cells: [] },
+    { key: "roaming", kind: "roaming_misconfig", scopeType: "plmn", scope: "26201", start: 1000, end: 1070, severity: "medium", cells: [] },
   ];
   faultCache.set(t.id, faults);
   return faults;
@@ -274,7 +301,7 @@ export class DemoEngine {
       }
       if (f.kind === "roaming_misconfig") {
         const lvl = faultLevel(f, tc);
-        if (lvl > 0) for (const c of this.cells) if (c.plmn === f.scope) out.set(c.id, { fail: 0.8 * lvl, kind: f.kind });
+        if (lvl > 0) for (const c of this.cells) if (c.plmn === f.scope) out.set(c.id, { fail: 0.25 * lvl, kind: f.kind });
       }
     }
     return out;

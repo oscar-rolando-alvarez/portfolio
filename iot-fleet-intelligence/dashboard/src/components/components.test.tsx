@@ -7,7 +7,7 @@ import en from "../../messages/en.json";
 import es from "../../messages/es.json";
 import { DemoEngine } from "@/lib/stream/demo";
 import { useStore } from "@/lib/store";
-import { IncidentDetail } from "./incidents/incident-detail";
+import { carrierLabel, IncidentDetail } from "./incidents/incident-detail";
 import { KpiTile } from "./ui/kpi-tile";
 import { Segmented } from "./ui/primitives";
 
@@ -62,6 +62,24 @@ describe("IncidentDetail", () => {
     await user.click(within(dialog).getByRole("button", { name: "Confirm" }));
     expect(useStore.getState().actions[v.incident.incident_id]?.kind).toBe("approved");
     expect(await screen.findByTestId("hitl-result")).toHaveTextContent(/Remediation approved/);
+  });
+});
+
+describe("carrierLabel", () => {
+  it("does not repeat a country the operator name already contains", () => {
+    expect(carrierLabel({ operator: "Home network (US)", country: "US" })).toBe("Home network (US)");
+    expect(carrierLabel({ operator: "Roaming partner DE-1", country: "DE" })).toBe("Roaming partner DE-1 (DE)");
+    expect(carrierLabel({ country: "FR" })).toBe("FR");
+    expect(carrierLabel({ operator: "Op" })).toBe("Op");
+  });
+
+  it("renders the enrichment card without a duplicated suffix in both locales", () => {
+    for (const locale of ["en", "es"] as const) {
+      const { unmount } = wrap(locale, <IncidentDetail view={view()} />);
+      expect(screen.getByText(/Home network \(US\)/)).toBeInTheDocument();
+      expect(screen.queryByText(/\(US\) \(US\)/)).toBeNull();
+      unmount();
+    }
   });
 });
 

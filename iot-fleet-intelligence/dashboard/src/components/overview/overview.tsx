@@ -15,7 +15,8 @@ import { formatCompact, formatDuration, formatMoney, formatNumber, formatPercent
 import { useFleetSize, useNow } from "@/lib/hooks";
 import { activeBySeverity, sortedIncidents, windowed } from "@/lib/stream/reducer";
 import { useStore } from "@/lib/store";
-import { DEFAULT_ASSUMPTIONS, meanDetectionLead, meanTimeToRemediate, slaCompliance, valueSummary, type Assumptions } from "@/lib/value";
+import { demoTenant } from "@/lib/stream/demo";
+import { DEFAULT_ASSUMPTIONS, meanDetectionLead, meanTimeToRemediate, monthlySla, valueSummary, type Assumptions } from "@/lib/value";
 
 function delta(
   locale: string,
@@ -60,8 +61,13 @@ export function Overview() {
   const sev = activeBySeverity(stream);
   const activeTotal = sev.critical + sev.high + sev.medium + sev.low;
   const mttd = meanDetectionLead(incidents);
-  const mttr = meanTimeToRemediate(incidents, actions);
-  const sla = slaCompliance(hist, assumptions.slaAvailabilityTarget);
+  const mode = useStore((s) => s.mode);
+  const tenant = useStore((s) => s.tenant);
+  // month-to-date figures before this session: a labelled seed in demo mode, none in live mode
+  const baseline = mode === "demo" ? demoTenant(tenant).baseline : null;
+  const mttr = meanTimeToRemediate(incidents, actions, baseline);
+  const sla = now ? monthlySla(stream.history, assumptions.slaAvailabilityTarget, now, baseline) : null;
+  const scopeNote = baseline ? t("mtdDemo") : t("mtdLive");
   const money = (usd: number, compact = true) => formatMoney(locale, usd, currency, { compact, copPerUsd: assumptions.copPerUsd });
   const vsLabel = tc("vsAgo", { minutes: 5 });
 
@@ -120,10 +126,25 @@ export function Overview() {
           testId="kpi-sla"
           label={t("sla")}
           icon={<ShieldCheck />}
-          loading={loading}
-          value={sla ?? undefined}
-          format={(v) => formatPercent(locale, v, 1)}
-          footnote={t("slaFoot", { target: formatPercent(locale, assumptions.slaAvailabilityTarget, 1) })}
+          loading={loading || !sla}
+          hint={t("slaHint", { target: formatPercent(locale, assumptions.slaAvailabilityTarget, 1) })}
+          display={
+            sla ? (
+              <div className="flex items-baseline gap-3">
+                <span className="tabular">{formatPercent(locale, sla.availability, 2)}</span>
+                <Badge tone={sla.within ? "good" : "critical"}>{sla.within ? t("slaWithin") : t("slaBreach")}</Badge>
+              </div>
+            ) : undefined
+          }
+          footnote={
+            sla
+              ? `${t("slaFoot", {
+                  target: formatPercent(locale, sla.target, 1),
+                  budget: formatPercent(locale, sla.budgetUsed, 0),
+                  recent: sla.recent === null ? "—" : formatPercent(locale, sla.recent, 2),
+                })} · ${scopeNote}`
+              : undefined
+          }
         />
         <KpiTile
           testId="kpi-mttd"
@@ -139,7 +160,8 @@ export function Overview() {
           icon={<Clock />}
           loading={loading}
           display={mttr === null ? "—" : formatDuration(locale, mttr)}
-          footnote={t("mttrFoot")}
+          hint={t("mttrHint")}
+          footnote={`${t("mttrFoot")} · ${scopeNote}`}
         />
         <KpiTile
           testId="kpi-truckrolls"

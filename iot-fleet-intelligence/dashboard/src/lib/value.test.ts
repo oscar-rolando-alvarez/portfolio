@@ -9,7 +9,7 @@ import {
   monthProgress,
   remoteFixableShare,
   sessionLlmSpend,
-  slaCompliance,
+  monthlySla,
   valueSummary,
 } from "./value";
 
@@ -39,8 +39,21 @@ describe("value model", () => {
 
   it("derives SLA compliance, detection lead and time to remediate", () => {
     const p = (availability: number) => ({ ts: 0, eventsPerSec: 1, devicesOnline: 1, availability, anomalyScore: 0 });
-    expect(slaCompliance([p(0.999), p(0.99), p(0.996), p(0.9)], 0.995)).toBe(0.5);
-    expect(slaCompliance([], 0.995)).toBeNull();
+    expect(monthlySla([], 0.995, MID_OCT, null)).toBeNull();
+    // live mode (no baseline): the observed window is the whole story
+    const live = monthlySla([p(0.999), p(0.99)], 0.995, MID_OCT, null)!;
+    expect(live.availability).toBeCloseTo(0.9945, 6);
+    expect(live.within).toBe(false);
+    // demo baseline (~15 days at 99.81%) + a 15-minute outage window at 99.2%
+    const base = { availability: 0.9981, mttrSeconds: 2820, incidents: 214 };
+    const outage = Array.from({ length: 900 }, () => p(0.992));
+    const m = monthlySla(outage, 0.995, MID_OCT, base)!;
+    expect(m.recent).toBeCloseTo(0.992, 6); // the recent window dips visibly
+    expect(m.availability).toBeGreaterThan(0.998); // the month barely moves
+    expect(m.availability).toBeLessThan(0.9981);
+    expect(m.within).toBe(true);
+    expect(m.budgetUsed).toBeCloseTo((1 - m.availability) / 0.005, 6);
+    expect(monthlySla([], 0.995, MID_OCT, base)!.availability).toBe(0.9981);
     expect(meanDetectionLead(incidents)).toBeGreaterThan(30);
     expect(meanDetectionLead([])).toBeNull();
     const first = incidents[0]!;
@@ -49,6 +62,15 @@ describe("value model", () => {
       meanTimeToRemediate([{ ...first, incident: { ...first.incident, status: "DIAGNOSED" } }], { [first.incident.incident_id]: { at } }),
     ).toBe(120);
     expect(meanTimeToRemediate([], {})).toBeNull();
+    const mttrBase = { availability: 0.998, mttrSeconds: 3000, incidents: 99 };
+    expect(meanTimeToRemediate([], {}, mttrBase)).toBe(3000);
+    expect(
+      meanTimeToRemediate(
+        [{ ...first, incident: { ...first.incident, status: "DIAGNOSED" } }],
+        { [first.incident.incident_id]: { at } },
+        mttrBase,
+      ),
+    ).toBeCloseTo((3000 * 99 + 120) / 100, 6);
     expect(remoteFixableShare([])).toBeNull();
   });
 

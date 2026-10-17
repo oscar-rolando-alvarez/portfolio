@@ -64,7 +64,7 @@ Real live mode (`make demo-ui`: 50k simulated devices through Kafka, the platfor
 
 | Screen | What it answers |
 |---|---|
-| **Executive overview** | Fleet availability, devices online, active incidents by severity, MTTD (live signal -> confirmed incident), mean time to remediate, SLA compliance, truck rolls avoided and money saved, platform cost per device, LLM spend, and a "value delivered this month" narrative - every number traceable to an editable assumptions panel and the dated pricing table. |
+| **Executive overview** | Fleet availability, devices online, active incidents by severity, MTTD (live signal -> confirmed incident), mean time to remediate, month-to-date availability SLA with error budget, truck rolls avoided and money saved, platform cost per device, LLM spend, and a "value delivered this month" narrative - every number traceable to an editable assumptions panel and the dated pricing table. |
 | **Live operations** | Events/s (5 or 15 min), RSRP/SINR distributions, network-type mix, anomaly timeline with live signals and confirmed incidents, top degraded cells / firmware builds / visited networks / APNs. |
 | **Geo map** | Every cell site coloured by health with a heat layer weighted by impacted devices (MapLibre GL, key-less OpenFreeMap basemap); click a site for its metrics and related incidents. |
 | **Incidents & AI** | Live incident feed; detail with signals, enrichment (cell tower, weather, carrier, operator status feed), the diagnosis in the active language (root cause, confidence, evidence, remediation plan with owners, truck roll yes/no, customer message), guardrail outcome and notes, and an approve-remediation / dispatch decision (recorded locally). |
@@ -75,7 +75,7 @@ numbers, dates and USD/COP), loading skeletons, empty and error states, keyboard
 
 **Live vs demo.** *Live* streams the gateway's frames through the dashboard's same-origin `/api/stream` proxy
 (the tenant API key never reaches the browser). *Demo* runs with no backend at all: a deterministic in-browser
-generator emits the same frames, mirroring the simulator's catalogue and fault scenarios on a 15-minute loop
+generator emits the same frames, mirroring the simulator's catalogue and fault scenarios on a 20-minute loop with quiet periods
 (`?demoAt=<second>` pins any moment). The header always says which one you are looking at. Design:
 [ADR 0008](docs/adr/0008-realtime-transport-sse.md), [ADR 0009](docs/adr/0009-dashboard-demo-mode-and-i18n.md).
 
@@ -86,6 +86,16 @@ make demo-ui-check  # asserts the live path end to end (also runs in CI)
 
 cd dashboard && npm ci && npm run dev    # demo mode only, no backend: http://localhost:3000
 ```
+
+**How the KPIs are defined** (also in each tile's tooltip):
+- *Availability SLA (month to date)* - the month's mean connected share of device reports, time-weighted, against
+  the contractual target (default 99.5%, editable); error budget used = (1 - availability) / (1 - target). The
+  tile also shows the last 15 minutes, which is where an outage is visible: a cell outage pulls the recent
+  window to ~99.3% while the month stays ~99.8%. In demo mode the month-to-date history before the session is a
+  **labelled seed** per tenant (e.g. Acme 99.81%); in live mode the figure covers only what the gateway has seen.
+- *Mean time to remediate* - confirmed incident -> approved remediation, dispatch or resolution; month to date
+  (demo: seed of 47 min over 214 incidents blended with this session; live: session only).
+- *Mean time to detect* - gateway live anomaly onset -> platform-confirmed incident.
 
 > Demo-mode figures, the value model and screenshots are illustrative. Truck rolls avoided and savings are
 > **estimates from editable assumptions** (defaults: 0.3 connectivity truck rolls per 1k devices per month,

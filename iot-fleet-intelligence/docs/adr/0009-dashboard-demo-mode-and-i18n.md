@@ -15,10 +15,10 @@ USD and COP. Screenshots and end-to-end tests must be reproducible.
   generator that emits the same shapes. The header always shows which one is active; live is offered only when the
   server reports a configured gateway.
 - **Demo mode is deterministic**: every frame is a pure function of (tenant, scenario second). The fleet mirrors
-  the simulator's catalogue (profiles, intervals, RATs, PLMNs, firmware builds, cell-id format) and a 15-minute
+  the simulator's catalogue (profiles, intervals, RATs, PLMNs, firmware builds, cell-id format) and a 20-minute
   loop replays its fault types: a cell outage spreading across one tracking area, congestion, a firmware
   regression, a roaming misconfiguration and an APN error. Incidents carry the same bilingual diagnoses the
-  platform's fake model produces. `?demoAt=<second>` pins any moment for tests, screenshots and demos.
+  platform's fake model produces. Faults are spaced so the fleet is healthy most of the loop, and month-to-date KPIs (availability SLA, MTTR) start from a per-tenant seed labelled "demo baseline" in the UI, so a single injected outage reads like it would in production: a visible dip in the recent window, a small move in the monthly figure. `?demoAt=<second>` pins any moment for tests, screenshots and demos.
 - **Cell positions** come from one portable hash (FNV-1a + murmur3 finalizer) implemented in Python (enrichment
   fixture) and TypeScript (map), with shared golden vectors, so the map and incident enrichment agree.
 - **Cost numbers** come from a TypeScript port of the estimator, tested to the cent against a golden file that

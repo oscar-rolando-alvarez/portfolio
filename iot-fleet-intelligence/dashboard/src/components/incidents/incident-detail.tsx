@@ -88,6 +88,14 @@ function Pipeline({ view, action }: { view: IncidentView; action?: RemediationAc
   );
 }
 
+/** "Operator (CC)" without repeating a country the operator name already carries, e.g. "Home network (US)". */
+export function carrierLabel(d: Record<string, unknown>): string {
+  const operator = String(d.operator ?? "").trim();
+  const country = String(d.country ?? "").trim();
+  if (!country || operator.includes(`(${country})`)) return operator || country;
+  return operator ? `${operator} (${country})` : country;
+}
+
 function EnrichmentCard({ item }: { item: EnrichmentItem }) {
   const t = useTranslations("incidents");
   const d = item.data as Record<string, unknown>;
@@ -109,7 +117,8 @@ function EnrichmentCard({ item }: { item: EnrichmentItem }) {
   if (item.source === "carrier")
     body = (
       <span>
-        {String(d.operator)} ({String(d.country)}){d.roaming_agreement ? ` · ${t("roamingAgreement")}` : ""}
+        {carrierLabel(d)}
+        {d.roaming_agreement ? ` · ${t("roamingAgreement")}` : ""}
       </span>
     );
   if (item.source === "status_feed") {

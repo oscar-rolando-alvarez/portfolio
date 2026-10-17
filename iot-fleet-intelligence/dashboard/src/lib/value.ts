@@ -87,10 +87,52 @@ export function valueSummary(
   };
 }
 
-/** Share of samples meeting the availability target (SLA compliance over the window). */
-export function slaCompliance(history: Point[], target: number): number | null {
-  if (history.length === 0) return null;
-  return history.filter((p) => p.availability >= target).length / history.length;
+/**
+ * Month-to-date figures recorded before this session. In demo mode they are a labelled
+ * seed per tenant; in live mode there is none and the metrics cover the observed window only.
+ */
+export interface MonthBaseline {
+  availability: number; // mean connected share of reports, month to date
+  mttrSeconds: number; // mean confirmed -> remediated, month to date
+  incidents: number; // remediated incidents behind mttrSeconds
+}
+
+export interface MonthlySla {
+  /** month-to-date availability: time-weighted mean of the baseline and the observed seconds */
+  availability: number;
+  target: number;
+  within: boolean;
+  /** share of the month's error budget (1 - target) consumed so far */
+  budgetUsed: number;
+  /** mean availability over the observed window (what moves visibly during an outage) */
+  recent: number | null;
+  observedSeconds: number;
+}
+
+/**
+ * Availability SLA, the way contracts measure it: the month's mean availability against the target
+ * (e.g. 99.5%), with the error budget consumed so far. A short outage moves the recent window a lot
+ * and the monthly figure a little - which is exactly the distinction a buyer needs.
+ */
+export function monthlySla(history: Point[], target: number, nowMs: number, baseline: MonthBaseline | null): MonthlySla | null {
+  const observed = history.length;
+  const recent = observed ? history.reduce((s, p) => s + p.availability, 0) / observed : null;
+  if (recent === null && !baseline) return null;
+  const elapsed = Math.max(observed, monthProgress(nowMs).day * 86_400);
+  const baseSeconds = baseline ? Math.max(0, elapsed - observed) : 0;
+  const availability =
+    baseline && recent !== null
+      ? (baseline.availability * baseSeconds + recent * observed) / (baseSeconds + observed)
+      : (recent ?? baseline!.availability);
+  const budget = 1 - target;
+  return {
+    availability,
+    target,
+    within: availability >= target,
+    budgetUsed: budget > 0 ? Math.max(0, (1 - availability) / budget) : 0,
+    recent,
+    observedSeconds: observed,
+  };
 }
 
 /** Mean seconds between the gateway's live anomaly signal and the confirmed incident. */
@@ -99,8 +141,25 @@ export function meanDetectionLead(incidents: IncidentView[]): number | null {
   return leads.length ? leads.reduce((s, x) => s + x, 0) / leads.length : null;
 }
 
-/** Mean seconds from incident confirmation to remediation approval/dispatch or resolution. */
-export function meanTimeToRemediate(incidents: IncidentView[], actions: Record<string, { at: number } | undefined>): number | null {
+/**
+ * Mean seconds from incident confirmation to remediation approval/dispatch or resolution,
+ * blended (count-weighted) with the month-to-date baseline when one exists.
+ */
+export function meanTimeToRemediate(
+  incidents: IncidentView[],
+  actions: Record<string, { at: number } | undefined>,
+  baseline: MonthBaseline | null = null,
+): number | null {
+  const session = sessionTimeToRemediate(incidents, actions);
+  if (!baseline) return session.mean;
+  if (session.mean === null) return baseline.mttrSeconds;
+  return (baseline.mttrSeconds * baseline.incidents + session.mean * session.count) / (baseline.incidents + session.count);
+}
+
+function sessionTimeToRemediate(
+  incidents: IncidentView[],
+  actions: Record<string, { at: number } | undefined>,
+): { mean: number | null; count: number } {
   const durations: number[] = [];
   for (const v of incidents) {
     const opened = v.detection.confirmedMs || Date.parse(v.incident.opened_at);
@@ -109,7 +168,7 @@ export function meanTimeToRemediate(incidents: IncidentView[], actions: Record<s
     else if (v.incident.status === "RESOLVED") durations.push((Date.parse(v.incident.last_seen_at) - opened) / 1000);
   }
   const ok = durations.filter((d) => d > 0);
-  return ok.length ? ok.reduce((s, x) => s + x, 0) / ok.length : null;
+  return { mean: ok.length ? ok.reduce((s, x) => s + x, 0) / ok.length : null, count: ok.length };
 }
 
 /** Tokens and list-price spend of the diagnoses seen this session (large tier). */
