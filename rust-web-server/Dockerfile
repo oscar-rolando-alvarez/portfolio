@@ -1,79 +1,52 @@
-# Multi-stage Dockerfile for optimized production builds
+# syntax=docker/dockerfile:1.7
 
-# Stage 1: Build stage
-FROM rust:1.75-slim-bullseye as builder
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    libpq-dev \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app user
-RUN adduser --disabled-password --gecos '' --shell /bin/bash --home /app appuser
-
-# Set the working directory
+# ---- Build stage --------------------------------------------------------
+FROM rust:1.99.1-slim-trixie AS builder
 WORKDIR /app
 
-# Copy manifests
+# Cache dependencies separately from application sources.
+# rust-toolchain.toml is intentionally not copied: the base image already
+# provides the pinned toolchain.
 COPY Cargo.toml Cargo.lock ./
+RUN mkdir -p src benches \
+    && echo 'fn main() {}' > src/main.rs \
+    && touch src/lib.rs \
+    && echo 'fn main() {}' > benches/server_benchmark.rs \
+    && cargo build --release --locked --bin rust-web-server \
+    && rm -rf src benches
 
-# Create a dummy main.rs to build dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-
-# Build dependencies (cached layer)
-RUN cargo build --release && rm -rf src target/release/deps/rust_web_server*
-
-# Copy source code
 COPY src ./src
+COPY benches ./benches
 COPY migrations ./migrations
+RUN touch src/main.rs src/lib.rs \
+    && cargo build --release --locked --bin rust-web-server
 
-# Build the application
-RUN cargo build --release
+# ---- Runtime stage ------------------------------------------------------
+FROM debian:trixie-slim AS runtime
 
-# Stage 2: Runtime stage
-FROM debian:bullseye-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app \
+    && mkdir -p /app/uploads /app/static \
+    && chown -R app:app /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libpq5 \
-    libssl1.1 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app user
-RUN adduser --disabled-password --gecos '' --shell /bin/bash --home /app appuser
-
-# Create necessary directories
-RUN mkdir -p /app/uploads /app/static /app/logs
-
-# Copy the binary from builder stage
 COPY --from=builder /app/target/release/rust-web-server /usr/local/bin/rust-web-server
 
-# Copy migrations
-COPY --from=builder /app/migrations /app/migrations
-
-# Set ownership
-RUN chown -R appuser:appuser /app
-
-# Switch to app user
-USER appuser
+USER 10001:10001
 WORKDIR /app
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/api/health || exit 1
+ENV APP_HOST=0.0.0.0 \
+    APP_PORT=8080 \
+    APP_UPLOAD_DIR=/app/uploads \
+    APP_STATIC_DIR=/app/static \
+    APP_LOGGING__FORMAT=json \
+    RUST_LOG=info
 
-# Expose port
 EXPOSE 8080
 
-# Set environment variables
-ENV RUST_LOG=info
-ENV APP_HOST=0.0.0.0
-ENV APP_PORT=8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["rust-web-server", "healthcheck"]
 
-# Run the application
-CMD ["rust-web-server"]
+ENTRYPOINT ["rust-web-server"]

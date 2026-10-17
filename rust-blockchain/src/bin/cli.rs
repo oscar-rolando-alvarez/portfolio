@@ -1,827 +1,595 @@
-use clap::{Arg, Command};
-use colored::*;
+use clap::{Args, Parser, Subcommand};
+use colored::Colorize;
 use rust_blockchain::{
-    api::start_api_server,
-    bip39_wallet::BIP39Wallet,
+    Amount,
+    api::HEALTH_PATH,
+    bip39_wallet::{BIP39Wallet, WordCount},
     blockchain::{Blockchain, BlockchainConfig},
     mining::{Miner, MiningConfig},
-    network::{P2PNetwork, NetworkHandle},
-    smart_contracts::SmartContractVM,
+    node::{self, NodeOptions},
+    smart_contracts::{ContractCall, ContractDeployment, ContractParameter, SmartContractVM},
     wallet::Wallet,
-    Amount, Block, Transaction,
 };
-use std::io::{self, Write};
-use tokio;
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::time::Duration;
 
-#[tokio::main]
-async fn main() {
-    env_logger::init();
+/// Command line tool for the blockchain.
+#[derive(Debug, Parser)]
+#[command(name = "blockchain-cli", version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
-    let matches = Command::new("blockchain-cli")
-        .version("0.1.0")
-        .author("Blockchain Developer")
-        .about("A comprehensive blockchain CLI tool")
-        .subcommand(
-            Command::new("blockchain")
-                .about("Blockchain operations")
-                .subcommand(
-                    Command::new("init")
-                        .about("Initialize a new blockchain")
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("network")
-                                .short('n')
-                                .long("network")
-                                .value_name("NETWORK")
-                                .help("Network type (mainnet, testnet)")
-                                .default_value("testnet"),
-                        ),
-                )
-                .subcommand(
-                    Command::new("info")
-                        .about("Get blockchain information")
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        ),
-                )
-                .subcommand(
-                    Command::new("blocks")
-                        .about("List recent blocks")
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("count")
-                                .short('c')
-                                .long("count")
-                                .value_name("COUNT")
-                                .help("Number of blocks to show")
-                                .default_value("10"),
-                        ),
-                ),
-        )
-        .subcommand(
-            Command::new("wallet")
-                .about("Wallet operations")
-                .subcommand(
-                    Command::new("create")
-                        .about("Create a new wallet")
-                        .arg(
-                            Arg::new("name")
-                                .short('n')
-                                .long("name")
-                                .value_name("NAME")
-                                .help("Wallet name")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("words")
-                                .short('w')
-                                .long("words")
-                                .value_name("WORDS")
-                                .help("Number of mnemonic words (12 or 24)")
-                                .default_value("12"),
-                        ),
-                )
-                .subcommand(
-                    Command::new("restore")
-                        .about("Restore wallet from mnemonic")
-                        .arg(
-                            Arg::new("name")
-                                .short('n')
-                                .long("name")
-                                .value_name("NAME")
-                                .help("Wallet name")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("mnemonic")
-                                .short('m')
-                                .long("mnemonic")
-                                .value_name("MNEMONIC")
-                                .help("Mnemonic phrase")
-                                .required(true),
-                        ),
-                )
-                .subcommand(
-                    Command::new("balance")
-                        .about("Check wallet balance")
-                        .arg(
-                            Arg::new("wallet")
-                                .short('w')
-                                .long("wallet")
-                                .value_name("WALLET")
-                                .help("Wallet file path")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        ),
-                )
-                .subcommand(
-                    Command::new("send")
-                        .about("Send a transaction")
-                        .arg(
-                            Arg::new("wallet")
-                                .short('w')
-                                .long("wallet")
-                                .value_name("WALLET")
-                                .help("Wallet file path")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("to")
-                                .short('t')
-                                .long("to")
-                                .value_name("ADDRESS")
-                                .help("Recipient address")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("amount")
-                                .short('a')
-                                .long("amount")
-                                .value_name("AMOUNT")
-                                .help("Amount to send")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("fee")
-                                .short('f')
-                                .long("fee")
-                                .value_name("FEE")
-                                .help("Transaction fee")
-                                .default_value("1000"),
-                        )
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        ),
-                ),
-        )
-        .subcommand(
-            Command::new("mining")
-                .about("Mining operations")
-                .subcommand(
-                    Command::new("start")
-                        .about("Start mining")
-                        .arg(
-                            Arg::new("address")
-                                .short('a')
-                                .long("address")
-                                .value_name("ADDRESS")
-                                .help("Mining reward address")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("threads")
-                                .short('t')
-                                .long("threads")
-                                .value_name("THREADS")
-                                .help("Number of mining threads")
-                                .default_value("1"),
-                        )
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        ),
-                ),
-        )
-        .subcommand(
-            Command::new("network")
-                .about("Network operations")
-                .subcommand(
-                    Command::new("start")
-                        .about("Start P2P network node")
-                        .arg(
-                            Arg::new("port")
-                                .short('p')
-                                .long("port")
-                                .value_name("PORT")
-                                .help("P2P port")
-                                .default_value("8333"),
-                        )
-                        .arg(
-                            Arg::new("api-port")
-                                .long("api-port")
-                                .value_name("API_PORT")
-                                .help("API server port")
-                                .default_value("8080"),
-                        )
-                        .arg(
-                            Arg::new("data-dir")
-                                .short('d')
-                                .long("data-dir")
-                                .value_name("DIR")
-                                .help("Data directory path")
-                                .required(true),
-                        ),
-                ),
-        )
-        .subcommand(
-            Command::new("contract")
-                .about("Smart contract operations")
-                .subcommand(
-                    Command::new("deploy")
-                        .about("Deploy a smart contract")
-                        .arg(
-                            Arg::new("code")
-                                .short('c')
-                                .long("code")
-                                .value_name("CODE")
-                                .help("Contract code file (WASM)")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("deployer")
-                                .short('d')
-                                .long("deployer")
-                                .value_name("ADDRESS")
-                                .help("Deployer address")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("gas")
-                                .short('g')
-                                .long("gas")
-                                .value_name("GAS")
-                                .help("Gas limit")
-                                .default_value("1000000"),
-                        ),
-                )
-                .subcommand(
-                    Command::new("call")
-                        .about("Call a smart contract function")
-                        .arg(
-                            Arg::new("address")
-                                .short('a')
-                                .long("address")
-                                .value_name("ADDRESS")
-                                .help("Contract address")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("function")
-                                .short('f')
-                                .long("function")
-                                .value_name("FUNCTION")
-                                .help("Function name")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("caller")
-                                .short('c')
-                                .long("caller")
-                                .value_name("CALLER")
-                                .help("Caller address")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::new("gas")
-                                .short('g')
-                                .long("gas")
-                                .value_name("GAS")
-                                .help("Gas limit")
-                                .default_value("100000"),
-                        ),
-                ),
-        )
-        .get_matches();
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Blockchain operations on a local data directory
+    #[command(subcommand)]
+    Blockchain(BlockchainCommand),
+    /// Wallet operations
+    #[command(subcommand)]
+    Wallet(WalletCommand),
+    /// Mining operations on a local data directory
+    #[command(subcommand)]
+    Mining(MiningCommand),
+    /// Run a P2P node with the HTTP API
+    #[command(subcommand)]
+    Network(NetworkCommand),
+    /// Smart contract operations (in-process VM)
+    #[command(subcommand)]
+    Contract(ContractCommand),
+    /// Check that a node's HTTP API is healthy (exit code 0 when healthy)
+    Health {
+        /// API address as host:port
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: String,
+    },
+}
 
-    match matches.subcommand() {
-        Some(("blockchain", blockchain_matches)) => {
-            handle_blockchain_commands(blockchain_matches).await;
+#[derive(Debug, Args)]
+struct ChainArgs {
+    /// Data directory path
+    #[arg(short = 'd', long, value_name = "DIR")]
+    data_dir: PathBuf,
+
+    /// Chain difficulty in leading zero bits used for a new chain
+    #[arg(long, value_name = "BITS")]
+    difficulty: Option<u32>,
+}
+
+impl ChainArgs {
+    fn open(&self, network: Option<&str>) -> rust_blockchain::Result<Blockchain> {
+        std::fs::create_dir_all(&self.data_dir)?;
+        let mut config = BlockchainConfig::default();
+        if let Some(network) = network {
+            config.network = network.to_string();
         }
-        Some(("wallet", wallet_matches)) => {
-            handle_wallet_commands(wallet_matches).await;
+        if let Some(bits) = self.difficulty {
+            config.genesis_difficulty = bits;
         }
-        Some(("mining", mining_matches)) => {
-            handle_mining_commands(mining_matches).await;
-        }
-        Some(("network", network_matches)) => {
-            handle_network_commands(network_matches).await;
-        }
-        Some(("contract", contract_matches)) => {
-            handle_contract_commands(contract_matches).await;
-        }
-        _ => {
-            println!("{}", "No subcommand provided. Use --help for usage information.".red());
+        Blockchain::new(config, self.data_dir.join("blockchain.db"))
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum BlockchainCommand {
+    /// Initialize a new blockchain
+    Init {
+        #[command(flatten)]
+        chain: ChainArgs,
+        /// Network name
+        #[arg(short = 'n', long, default_value = "testnet")]
+        network: String,
+    },
+    /// Show blockchain information
+    Info {
+        #[command(flatten)]
+        chain: ChainArgs,
+    },
+    /// List recent blocks
+    Blocks {
+        #[command(flatten)]
+        chain: ChainArgs,
+        /// Number of blocks to show
+        #[arg(short = 'c', long, default_value_t = 10)]
+        count: u64,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum WalletCommand {
+    /// Create a new BIP39 wallet and save it to <name>.wallet
+    Create {
+        #[arg(short = 'n', long)]
+        name: String,
+        /// Number of mnemonic words (12 or 24)
+        #[arg(short = 'w', long, default_value_t = 12)]
+        words: u32,
+        /// Output file (defaults to <name>.wallet)
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
+    },
+    /// Restore a wallet from a mnemonic phrase
+    Restore {
+        #[arg(short = 'n', long)]
+        name: String,
+        #[arg(short = 'm', long)]
+        mnemonic: String,
+        /// Optional BIP39 passphrase
+        #[arg(short = 'p', long, default_value = "")]
+        passphrase: String,
+        /// Output file (defaults to <name>.wallet)
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
+    },
+    /// Show the addresses stored in a wallet file
+    Addresses {
+        #[arg(short = 'w', long)]
+        wallet: PathBuf,
+    },
+    /// Check wallet balance against a local data directory
+    Balance {
+        #[arg(short = 'w', long)]
+        wallet: PathBuf,
+        #[command(flatten)]
+        chain: ChainArgs,
+    },
+    /// Create and sign a transaction; submit it to a node or print it as JSON
+    Send {
+        #[arg(short = 'w', long)]
+        wallet: PathBuf,
+        /// Recipient address
+        #[arg(short = 't', long)]
+        to: String,
+        /// Amount in base units
+        #[arg(short = 'a', long)]
+        amount: Amount,
+        /// Fee in base units
+        #[arg(short = 'f', long, default_value_t = 1000)]
+        fee: Amount,
+        #[command(flatten)]
+        chain: ChainArgs,
+        /// Node API (host:port) to submit the transaction to
+        #[arg(long)]
+        node: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MiningCommand {
+    /// Mine blocks into a local data directory
+    Start {
+        /// Mining reward address
+        #[arg(short = 'a', long)]
+        address: String,
+        /// Number of mining threads
+        #[arg(short = 't', long, default_value_t = 1)]
+        threads: usize,
+        /// Number of blocks to mine
+        #[arg(short = 'b', long, default_value_t = 1)]
+        blocks: u64,
+        #[command(flatten)]
+        chain: ChainArgs,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum NetworkCommand {
+    /// Start a P2P node with the HTTP API
+    Start {
+        /// P2P port
+        #[arg(short = 'p', long, default_value_t = 8333)]
+        port: u16,
+        /// API server port
+        #[arg(long, default_value_t = 8080)]
+        api_port: u16,
+        /// API server host
+        #[arg(long, default_value = "127.0.0.1")]
+        api_host: String,
+        /// Bootstrap peer multiaddress (repeatable)
+        #[arg(short = 'b', long = "bootstrap")]
+        bootstrap: Vec<String>,
+        #[command(flatten)]
+        chain: ChainArgs,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ContractCommand {
+    /// Compile and deploy a contract, reporting its address and gas
+    Deploy {
+        /// Contract code file (.wasm or .wat)
+        #[arg(short = 'c', long)]
+        code: PathBuf,
+        /// Deployer address
+        #[arg(short = 'd', long)]
+        deployer: String,
+        /// Gas limit
+        #[arg(short = 'g', long, default_value_t = 1_000_000)]
+        gas: u64,
+    },
+    /// Deploy a contract and call one of its functions in a fresh VM
+    Call {
+        /// Contract code file (.wasm or .wat)
+        #[arg(long)]
+        code: PathBuf,
+        /// Function name
+        #[arg(short = 'f', long)]
+        function: String,
+        /// Caller address
+        #[arg(short = 'c', long)]
+        caller: String,
+        /// Gas limit
+        #[arg(short = 'g', long, default_value_t = 100_000)]
+        gas: u64,
+        /// Integer arguments passed to the function
+        #[arg(long = "arg")]
+        args: Vec<u64>,
+    },
+}
+
+fn main() -> ExitCode {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        Command::Blockchain(cmd) => blockchain_command(cmd),
+        Command::Wallet(cmd) => wallet_command(cmd),
+        Command::Mining(cmd) => mining_command(cmd),
+        Command::Network(cmd) => network_command(cmd),
+        Command::Contract(cmd) => contract_command(cmd),
+        Command::Health { addr } => health_command(&addr),
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{}", format!("Error: {e}").red());
+            ExitCode::FAILURE
         }
     }
 }
 
-async fn handle_blockchain_commands(matches: &clap::ArgMatches) {
-    match matches.subcommand() {
-        Some(("init", init_matches)) => {
-            let data_dir = init_matches.get_one::<String>("data-dir").unwrap();
-            let network = init_matches.get_one::<String>("network").unwrap();
+type CliResult = Result<(), Box<dyn std::error::Error>>;
 
-            println!("{}", format!("Initializing blockchain in {}...", data_dir).green());
+fn blockchain_command(cmd: BlockchainCommand) -> CliResult {
+    match cmd {
+        BlockchainCommand::Init { chain, network } => {
+            let blockchain = chain.open(Some(&network))?;
+            println!("{}", "Blockchain initialized".green());
+            println!("Network: {}", network.cyan());
+            println!(
+                "Data directory: {}",
+                chain.data_dir.display().to_string().cyan()
+            );
+            println!("Genesis: {}", blockchain.get_best_block_hash().yellow());
+        }
+        BlockchainCommand::Info { chain } => {
+            let stats = chain.open(None)?.get_chain_stats();
+            println!("{}", "Blockchain Information".bold().green());
+            println!("Height: {}", stats.height.to_string().cyan());
+            println!("Best block: {}", stats.best_block_hash.yellow());
+            println!("Difficulty: {}", stats.difficulty.to_string().cyan());
+            println!(
+                "Next difficulty: {}",
+                stats.next_difficulty.to_string().cyan()
+            );
+            println!(
+                "Total transactions: {}",
+                stats.total_transactions.to_string().cyan()
+            );
+            println!("Total supply: {}", format_amount(stats.total_supply).cyan());
+            println!("UTXO count: {}", stats.utxo_count.to_string().cyan());
+        }
+        BlockchainCommand::Blocks { chain, count } => {
+            let blockchain = chain.open(None)?;
+            println!("{}", "Recent Blocks".bold().green());
+            let tip = blockchain.get_chain_height();
+            for height in (0..=tip).rev().take(count as usize) {
+                if let Some(block) = blockchain.get_block_by_height(height) {
+                    println!(
+                        "Block #{}: {} ({} txs)",
+                        height.to_string().cyan(),
+                        block.hash()[..16].yellow(),
+                        block.transactions.len().to_string().magenta()
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
-            let config = BlockchainConfig {
-                network: network.clone(),
-                ..Default::default()
+fn save_wallet(wallet: &BIP39Wallet, output: Option<PathBuf>) -> rust_blockchain::Result<PathBuf> {
+    let path = output.unwrap_or_else(|| PathBuf::from(format!("{}.wallet", wallet.wallet.name)));
+    wallet.wallet.save_to_file(&path)?;
+    Ok(path)
+}
+
+fn wallet_command(cmd: WalletCommand) -> CliResult {
+    match cmd {
+        WalletCommand::Create {
+            name,
+            words,
+            output,
+        } => {
+            let word_count = match words {
+                12 => WordCount::Words12,
+                24 => WordCount::Words24,
+                other => {
+                    return Err(format!("unsupported word count {other} (use 12 or 24)").into());
+                }
             };
+            let wallet = BIP39Wallet::new(name.clone(), word_count)?;
+            let path = save_wallet(&wallet, output)?;
 
-            let db_path = format!("{}/blockchain.db", data_dir);
-            std::fs::create_dir_all(data_dir).expect("Failed to create data directory");
-
-            match Blockchain::new(config, &db_path) {
-                Ok(_) => {
-                    println!("{}", "Blockchain initialized successfully!".green());
-                    println!("Network: {}", network.cyan());
-                    println!("Data directory: {}", data_dir.cyan());
-                }
-                Err(e) => {
-                    println!("{}", format!("Failed to initialize blockchain: {}", e).red());
-                }
+            println!("{}", "Wallet created".green());
+            println!("Name: {}", name.cyan());
+            println!("File: {}", path.display().to_string().cyan());
+            if let Some(mnemonic) = wallet.get_mnemonic() {
+                println!(
+                    "{}",
+                    "Write down your mnemonic phrase and keep it safe:"
+                        .yellow()
+                        .bold()
+                );
+                println!("{}", mnemonic.red().bold());
+            }
+            println!("First address: {}", wallet.wallet.addresses[0].cyan());
+        }
+        WalletCommand::Restore {
+            name,
+            mnemonic,
+            passphrase,
+            output,
+        } => {
+            let wallet = BIP39Wallet::from_mnemonic(name.clone(), &mnemonic, &passphrase)?;
+            let path = save_wallet(&wallet, output)?;
+            println!("{}", "Wallet restored".green());
+            println!("File: {}", path.display().to_string().cyan());
+            println!("First address: {}", wallet.wallet.addresses[0].cyan());
+        }
+        WalletCommand::Addresses { wallet } => {
+            let wallet = Wallet::load_from_file(&wallet)?;
+            for address in &wallet.addresses {
+                println!("{address}");
             }
         }
-        Some(("info", info_matches)) => {
-            let data_dir = info_matches.get_one::<String>("data-dir").unwrap();
-            let db_path = format!("{}/blockchain.db", data_dir);
-
-            match load_blockchain(&db_path) {
-                Ok(blockchain) => {
-                    let stats = blockchain.get_chain_stats();
-                    println!("{}", "Blockchain Information".bold().green());
-                    println!("Height: {}", stats.height.to_string().cyan());
-                    println!("Difficulty: {}", stats.difficulty.to_string().cyan());
-                    println!("Total Transactions: {}", stats.total_transactions.to_string().cyan());
-                    println!("Total Supply: {}", format_amount(stats.total_supply).cyan());
-                    println!("Mempool Size: {}", stats.mempool_size.to_string().cyan());
-                    println!("UTXO Count: {}", stats.utxo_count.to_string().cyan());
-                }
-                Err(e) => {
-                    println!("{}", format!("Error loading blockchain: {}", e).red());
-                }
-            }
+        WalletCommand::Balance { wallet, chain } => {
+            let wallet = Wallet::load_from_file(&wallet)?;
+            let blockchain = chain.open(None)?;
+            println!("{}", "Wallet Balance".bold().green());
+            println!("Wallet: {}", wallet.name.cyan());
+            println!(
+                "Balance: {}",
+                format_amount(wallet.get_balance(blockchain.get_utxo_set())).cyan()
+            );
+            println!("Addresses: {}", wallet.addresses.len().to_string().cyan());
         }
-        Some(("blocks", blocks_matches)) => {
-            let data_dir = blocks_matches.get_one::<String>("data-dir").unwrap();
-            let count: usize = blocks_matches
-                .get_one::<String>("count")
-                .unwrap()
-                .parse()
-                .unwrap_or(10);
-            let db_path = format!("{}/blockchain.db", data_dir);
+        WalletCommand::Send {
+            wallet,
+            to,
+            amount,
+            fee,
+            chain,
+            node,
+        } => {
+            let wallet = Wallet::load_from_file(&wallet)?;
+            let blockchain = chain.open(None)?;
+            let transaction = wallet.create_transaction(
+                to.clone(),
+                amount,
+                fee,
+                blockchain.get_utxo_set(),
+                blockchain.get_chain_height(),
+            )?;
+            let body = serde_json::to_string(&transaction)?;
 
-            match load_blockchain(&db_path) {
-                Ok(blockchain) => {
-                    println!("{}", "Recent Blocks".bold().green());
-                    let current_height = blockchain.get_chain_height();
-
-                    for i in 0..count.min(current_height as usize + 1) {
-                        let height = current_height.saturating_sub(i as u64);
-                        if let Some(block) = blockchain.get_block_by_height(height) {
-                            println!(
-                                "Block #{}: {} ({} txs)",
-                                height.to_string().cyan(),
-                                blockchain.calculate_block_hash(block)[..16].yellow(),
-                                block.transactions.len().to_string().magenta()
-                            );
-                        }
+            match node {
+                Some(addr) => {
+                    let (status, response) =
+                        http_request(&addr, "POST", "/api/v1/transaction", Some(&body))?;
+                    if !(200..300).contains(&status) {
+                        return Err(
+                            format!("node rejected transaction ({status}): {response}").into()
+                        );
                     }
+                    println!("{}", "Transaction submitted".green());
+                    println!("Transaction ID: {}", transaction.id.cyan());
+                    println!("To: {}", to.cyan());
+                    println!("Amount: {}", format_amount(amount).cyan());
+                    println!("Fee: {}", format_amount(fee).cyan());
                 }
-                Err(e) => {
-                    println!("{}", format!("Error loading blockchain: {}", e).red());
-                }
+                None => println!("{body}"),
             }
-        }
-        _ => {
-            println!("{}", "Unknown blockchain command".red());
         }
     }
+    Ok(())
 }
 
-async fn handle_wallet_commands(matches: &clap::ArgMatches) {
-    match matches.subcommand() {
-        Some(("create", create_matches)) => {
-            let name = create_matches.get_one::<String>("name").unwrap();
-            let words: u32 = create_matches
-                .get_one::<String>("words")
-                .unwrap()
-                .parse()
-                .unwrap_or(12);
+fn mining_command(cmd: MiningCommand) -> CliResult {
+    let MiningCommand::Start {
+        address,
+        threads,
+        blocks,
+        chain,
+    } = cmd;
 
-            let mnemonic_type = match words {
-                24 => bip39::MnemonicType::Words24,
-                _ => bip39::MnemonicType::Words12,
-            };
+    let mut blockchain = chain.open(None)?;
+    let miner = Miner::new(MiningConfig {
+        max_threads: threads.max(1),
+        target_difficulty: blockchain.calculate_next_difficulty(),
+        miner_address: address.clone(),
+        extra_nonce: 0,
+    });
 
-            match BIP39Wallet::new(name.clone(), mnemonic_type) {
-                Ok(wallet) => {
-                    let wallet_file = format!("{}.wallet", name);
-                    if let Err(e) = wallet.wallet.save_to_file(&wallet_file) {
-                        println!("{}", format!("Failed to save wallet: {}", e).red());
-                        return;
-                    }
-
-                    println!("{}", "Wallet created successfully!".green());
-                    println!("Name: {}", name.cyan());
-                    println!("File: {}", wallet_file.cyan());
-                    
-                    if let Some(mnemonic) = wallet.get_mnemonic() {
-                        println!("{}", "IMPORTANT: Save your mnemonic phrase safely!".yellow().bold());
-                        println!("Mnemonic: {}", mnemonic.red().bold());
-                    }
-
-                    if !wallet.wallet.addresses.is_empty() {
-                        println!("First address: {}", wallet.wallet.addresses[0].cyan());
-                    }
-                }
-                Err(e) => {
-                    println!("{}", format!("Failed to create wallet: {}", e).red());
-                }
-            }
-        }
-        Some(("restore", restore_matches)) => {
-            let name = restore_matches.get_one::<String>("name").unwrap();
-            let mnemonic = restore_matches.get_one::<String>("mnemonic").unwrap();
-
-            match BIP39Wallet::from_mnemonic(name.clone(), mnemonic, "") {
-                Ok(wallet) => {
-                    let wallet_file = format!("{}.wallet", name);
-                    if let Err(e) = wallet.wallet.save_to_file(&wallet_file) {
-                        println!("{}", format!("Failed to save wallet: {}", e).red());
-                        return;
-                    }
-
-                    println!("{}", "Wallet restored successfully!".green());
-                    println!("Name: {}", name.cyan());
-                    println!("File: {}", wallet_file.cyan());
-                    
-                    if !wallet.wallet.addresses.is_empty() {
-                        println!("First address: {}", wallet.wallet.addresses[0].cyan());
-                    }
-                }
-                Err(e) => {
-                    println!("{}", format!("Failed to restore wallet: {}", e).red());
-                }
-            }
-        }
-        Some(("balance", balance_matches)) => {
-            let wallet_file = balance_matches.get_one::<String>("wallet").unwrap();
-            let data_dir = balance_matches.get_one::<String>("data-dir").unwrap();
-            let db_path = format!("{}/blockchain.db", data_dir);
-
-            match (Wallet::load_from_file(wallet_file), load_blockchain(&db_path)) {
-                (Ok(wallet), Ok(blockchain)) => {
-                    let balance = wallet.get_balance(blockchain.get_utxo_set());
-                    println!("{}", "Wallet Balance".bold().green());
-                    println!("Wallet: {}", wallet.name.cyan());
-                    println!("Balance: {}", format_amount(balance).cyan());
-                    println!("Addresses: {}", wallet.addresses.len().to_string().cyan());
-                }
-                (Err(e), _) => {
-                    println!("{}", format!("Failed to load wallet: {}", e).red());
-                }
-                (_, Err(e)) => {
-                    println!("{}", format!("Failed to load blockchain: {}", e).red());
-                }
-            }
-        }
-        Some(("send", send_matches)) => {
-            let wallet_file = send_matches.get_one::<String>("wallet").unwrap();
-            let to_address = send_matches.get_one::<String>("to").unwrap();
-            let amount: Amount = send_matches
-                .get_one::<String>("amount")
-                .unwrap()
-                .parse()
-                .expect("Invalid amount");
-            let fee: Amount = send_matches
-                .get_one::<String>("fee")
-                .unwrap()
-                .parse()
-                .expect("Invalid fee");
-            let data_dir = send_matches.get_one::<String>("data-dir").unwrap();
-            let db_path = format!("{}/blockchain.db", data_dir);
-
-            match (Wallet::load_from_file(wallet_file), load_blockchain(&db_path)) {
-                (Ok(wallet), Ok(mut blockchain)) => {
-                    if wallet.addresses.is_empty() {
-                        println!("{}", "No addresses in wallet".red());
-                        return;
-                    }
-
-                    let from_address = &wallet.addresses[0];
-                    match wallet.create_transaction(
-                        to_address.clone(),
-                        amount,
-                        fee,
-                        blockchain.get_utxo_set(),
-                        blockchain.get_chain_height(),
-                    ) {
-                        Ok(transaction) => {
-                            match blockchain.add_transaction(transaction.clone()) {
-                                Ok(_) => {
-                                    println!("{}", "Transaction submitted successfully!".green());
-                                    println!("Transaction ID: {}", transaction.id.cyan());
-                                    println!("From: {}", from_address.cyan());
-                                    println!("To: {}", to_address.cyan());
-                                    println!("Amount: {}", format_amount(amount).cyan());
-                                    println!("Fee: {}", format_amount(fee).cyan());
-                                }
-                                Err(e) => {
-                                    println!("{}", format!("Failed to submit transaction: {}", e).red());
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("{}", format!("Failed to create transaction: {}", e).red());
-                        }
-                    }
-                }
-                (Err(e), _) => {
-                    println!("{}", format!("Failed to load wallet: {}", e).red());
-                }
-                (_, Err(e)) => {
-                    println!("{}", format!("Failed to load blockchain: {}", e).red());
-                }
-            }
-        }
-        _ => {
-            println!("{}", "Unknown wallet command".red());
-        }
+    println!("{}", "Starting mining".green());
+    println!("Miner address: {}", address.cyan());
+    for _ in 0..blocks {
+        let template = blockchain.block_template(950_000, 1000);
+        let block = miner.mine_block(
+            template.transactions,
+            template.previous_hash,
+            template.height,
+            template.difficulty,
+        )?;
+        println!(
+            "Mined block #{} {} (nonce {}, {} txs)",
+            block.header.height.to_string().cyan(),
+            block.hash().yellow(),
+            block.header.nonce,
+            block.transactions.len()
+        );
+        blockchain.add_block(block)?;
     }
+    println!(
+        "Balance of {}: {}",
+        address,
+        format_amount(blockchain.get_balance(&address)).cyan()
+    );
+    Ok(())
 }
 
-async fn handle_mining_commands(matches: &clap::ArgMatches) {
-    match matches.subcommand() {
-        Some(("start", start_matches)) => {
-            let address = start_matches.get_one::<String>("address").unwrap();
-            let threads: usize = start_matches
-                .get_one::<String>("threads")
-                .unwrap()
-                .parse()
-                .unwrap_or(1);
-            let data_dir = start_matches.get_one::<String>("data-dir").unwrap();
-            let db_path = format!("{}/blockchain.db", data_dir);
+fn network_command(cmd: NetworkCommand) -> CliResult {
+    let NetworkCommand::Start {
+        port,
+        api_port,
+        api_host,
+        bootstrap,
+        chain,
+    } = cmd;
 
-            match load_blockchain(&db_path) {
-                Ok(mut blockchain) => {
-                    let config = MiningConfig {
-                        max_threads: threads,
-                        target_difficulty: blockchain.get_difficulty(),
-                        miner_address: address.clone(),
-                        extra_nonce: 0,
-                    };
+    let options = NodeOptions {
+        data_dir: chain.data_dir,
+        difficulty: chain.difficulty,
+        p2p_port: port,
+        api_port,
+        api_host,
+        bootstrap,
+        ..Default::default()
+    };
 
-                    let miner = Miner::new(config);
-                    println!("{}", "Starting mining...".green());
-                    println!("Miner address: {}", address.cyan());
-                    println!("Threads: {}", threads.to_string().cyan());
-                    println!("Current difficulty: {}", blockchain.get_difficulty().to_string().cyan());
-
-                    // Get transactions from mempool
-                    let transactions = blockchain.get_transactions_for_mining(950_000, 1000);
-                    println!("Mining {} transactions", transactions.len().to_string().cyan());
-
-                    let previous_hash = if let Some(latest_block) = blockchain.get_latest_block() {
-                        blockchain.calculate_block_hash(latest_block)
-                    } else {
-                        "0".repeat(64)
-                    };
-
-                    match miner.mine_block(
-                        transactions,
-                        previous_hash,
-                        blockchain.get_chain_height() + 1,
-                        blockchain.get_difficulty(),
-                    ) {
-                        Ok(block) => {
-                            println!("{}", "Block mined successfully!".green().bold());
-                            println!("Block height: {}", block.header.height.to_string().cyan());
-                            println!("Block hash: {}", blockchain.calculate_block_hash(&block).yellow());
-                            println!("Nonce: {}", block.header.nonce.to_string().cyan());
-                            println!("Transactions: {}", block.transactions.len().to_string().cyan());
-
-                            match blockchain.add_block(block) {
-                                Ok(_) => {
-                                    println!("{}", "Block added to blockchain!".green());
-                                }
-                                Err(e) => {
-                                    println!("{}", format!("Failed to add block: {}", e).red());
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("{}", format!("Mining failed: {}", e).red());
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("{}", format!("Failed to load blockchain: {}", e).red());
-                }
-            }
-        }
-        _ => {
-            println!("{}", "Unknown mining command".red());
-        }
-    }
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(node::run(options))?;
+    Ok(())
 }
 
-async fn handle_network_commands(matches: &clap::ArgMatches) {
-    match matches.subcommand() {
-        Some(("start", start_matches)) => {
-            let port = start_matches.get_one::<String>("port").unwrap();
-            let api_port = start_matches.get_one::<String>("api-port").unwrap();
-            let data_dir = start_matches.get_one::<String>("data-dir").unwrap();
-            let db_path = format!("{}/blockchain.db", data_dir);
-
-            match load_blockchain(&db_path) {
-                Ok(blockchain) => {
-                    println!("{}", "Starting blockchain node...".green());
-                    println!("P2P port: {}", port.cyan());
-                    println!("API port: {}", api_port.cyan());
-                    println!("Data directory: {}", data_dir.cyan());
-
-                    // Start API server
-                    let api_addr = format!("127.0.0.1:{}", api_port);
-                    let api_handle = tokio::spawn(async move {
-                        if let Err(e) = start_api_server(blockchain, &api_addr).await {
-                            println!("{}", format!("API server error: {}", e).red());
-                        }
-                    });
-
-                    // Start P2P network
-                    match P2PNetwork::new().await {
-                        Ok((mut network, mut handle)) => {
-                            let p2p_addr: libp2p::Multiaddr = format!("/ip4/127.0.0.1/tcp/{}", port)
-                                .parse()
-                                .expect("Invalid multiaddr");
-
-                            if let Err(e) = handle.start_listening(p2p_addr).await {
-                                println!("{}", format!("Failed to start P2P listener: {}", e).red());
-                                return;
-                            }
-
-                            println!("{}", "Node started successfully!".green().bold());
-                            println!("Press Ctrl+C to stop the node");
-
-                            // Run network
-                            let network_handle = tokio::spawn(async move {
-                                network.run().await;
-                            });
-
-                            // Wait for either task to complete
-                            tokio::select! {
-                                _ = api_handle => {
-                                    println!("API server stopped");
-                                }
-                                _ = network_handle => {
-                                    println!("P2P network stopped");
-                                }
-                                _ = tokio::signal::ctrl_c() => {
-                                    println!("\nShutting down node...");
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("{}", format!("Failed to create P2P network: {}", e).red());
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("{}", format!("Failed to load blockchain: {}", e).red());
-                }
-            }
-        }
-        _ => {
-            println!("{}", "Unknown network command".red());
-        }
-    }
+fn read_code(path: &Path) -> std::io::Result<Vec<u8>> {
+    std::fs::read(path)
 }
 
-async fn handle_contract_commands(matches: &clap::ArgMatches) {
-    match matches.subcommand() {
-        Some(("deploy", deploy_matches)) => {
-            let code_file = deploy_matches.get_one::<String>("code").unwrap();
-            let deployer = deploy_matches.get_one::<String>("deployer").unwrap();
-            let gas_limit: u64 = deploy_matches
-                .get_one::<String>("gas")
-                .unwrap()
-                .parse()
-                .expect("Invalid gas limit");
-
-            match std::fs::read(code_file) {
-                Ok(code) => {
-                    let mut vm = SmartContractVM::new().expect("Failed to create VM");
-                    let deployment = rust_blockchain::smart_contracts::ContractDeployment {
-                        code,
-                        constructor_params: Vec::new(),
-                        deployer: deployer.clone(),
-                        gas_limit,
-                        value: 0,
-                    };
-
-                    match vm.deploy_contract(deployment) {
-                        Ok(address) => {
-                            println!("{}", "Contract deployed successfully!".green());
-                            println!("Contract address: {}", address.cyan());
-                            println!("Deployer: {}", deployer.cyan());
-                            println!("Gas limit: {}", gas_limit.to_string().cyan());
-                        }
-                        Err(e) => {
-                            println!("{}", format!("Deployment failed: {}", e).red());
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("{}", format!("Failed to read code file: {}", e).red());
-                }
-            }
-        }
-        Some(("call", call_matches)) => {
-            let address = call_matches.get_one::<String>("address").unwrap();
-            let function = call_matches.get_one::<String>("function").unwrap();
-            let caller = call_matches.get_one::<String>("caller").unwrap();
-            let gas_limit: u64 = call_matches
-                .get_one::<String>("gas")
-                .unwrap()
-                .parse()
-                .expect("Invalid gas limit");
-
-            let mut vm = SmartContractVM::new().expect("Failed to create VM");
-            let call = rust_blockchain::smart_contracts::ContractCall {
-                contract_address: address.clone(),
-                caller: caller.clone(),
-                function_name: function.clone(),
-                parameters: Vec::new(),
-                gas_limit,
+fn contract_command(cmd: ContractCommand) -> CliResult {
+    let mut vm = SmartContractVM::new()?;
+    match cmd {
+        ContractCommand::Deploy {
+            code,
+            deployer,
+            gas,
+        } => {
+            let address = vm.deploy_contract(ContractDeployment {
+                code: read_code(&code)?,
+                constructor_params: Vec::new(),
+                deployer: deployer.clone(),
+                gas_limit: gas,
                 value: 0,
-            };
+            })?;
+            let contract = vm
+                .get_contract(&address)
+                .ok_or("contract missing after deploy")?;
+            println!("{}", "Contract deployed".green());
+            println!("Contract address: {}", address.cyan());
+            println!("Deployer: {}", deployer.cyan());
+            println!("Gas used: {}", contract.gas_used.to_string().cyan());
+        }
+        ContractCommand::Call {
+            code,
+            function,
+            caller,
+            gas,
+            args,
+        } => {
+            let address = vm.deploy_contract(ContractDeployment {
+                code: read_code(&code)?,
+                constructor_params: Vec::new(),
+                deployer: caller.clone(),
+                gas_limit: gas.max(100_000),
+                value: 0,
+            })?;
+            let result = vm.call_contract(ContractCall {
+                contract_address: address,
+                caller,
+                function_name: function,
+                parameters: args.into_iter().map(ContractParameter::U64).collect(),
+                gas_limit: gas,
+                value: 0,
+            })?;
 
-            match vm.call_contract(call) {
-                Ok(result) => {
-                    println!("{}", "Contract call completed!".green());
-                    println!("Success: {}", result.success.to_string().cyan());
-                    println!("Gas used: {}", result.gas_used.to_string().cyan());
-                    
-                    if let Some(error) = result.error {
-                        println!("Error: {}", error.red());
-                    }
-                    
-                    if !result.return_data.is_empty() {
-                        println!("Return data: {}", hex::encode(&result.return_data).yellow());
-                    }
-                }
-                Err(e) => {
-                    println!("{}", format!("Contract call failed: {}", e).red());
-                }
+            println!("Success: {}", result.success.to_string().cyan());
+            println!("Gas used: {}", result.gas_used.to_string().cyan());
+            if let Some(error) = result.error {
+                println!("Error: {}", error.red());
+            }
+            if !result.return_data.is_empty() {
+                println!("Return data: {}", hex::encode(&result.return_data).yellow());
             }
         }
-        _ => {
-            println!("{}", "Unknown contract command".red());
-        }
+    }
+    Ok(())
+}
+
+fn health_command(addr: &str) -> CliResult {
+    let (status, body) = http_request(addr, "GET", HEALTH_PATH, None)?;
+    if status == 200 && body.contains("\"healthy\"") {
+        println!("healthy");
+        Ok(())
+    } else {
+        Err(format!("unhealthy ({status}): {body}").into())
     }
 }
 
-fn load_blockchain(db_path: &str) -> Result<Blockchain, rust_blockchain::error::BlockchainError> {
-    let config = BlockchainConfig::default();
-    Blockchain::new(config, db_path)
+/// Minimal HTTP/1.1 client (no TLS) used for the health check and for
+/// submitting transactions, so the runtime image does not need curl.
+fn http_request(
+    addr: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Result<(u16, String), Box<dyn std::error::Error>> {
+    let socket = addr
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| format!("cannot resolve {addr}"))?;
+    let timeout = Duration::from_secs(5);
+    let mut stream = TcpStream::connect_timeout(&socket, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+
+    let body = body.unwrap_or("");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes())?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+
+    let status = response
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or("malformed HTTP response")?;
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_default();
+    Ok((status, body))
 }
 
 fn format_amount(amount: Amount) -> String {
-    let coins = amount / 100_000_000;
-    let satoshis = amount % 100_000_000;
-    format!("{}.{:08} BTC", coins, satoshis)
-}
-
-fn prompt_input(prompt: &str) -> String {
-    print!("{}: ", prompt);
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input.trim().to_string()
+    format!("{}.{:08}", amount / 100_000_000, amount % 100_000_000)
 }

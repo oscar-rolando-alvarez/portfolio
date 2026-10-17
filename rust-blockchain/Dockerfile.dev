@@ -1,43 +1,12 @@
-# Development Dockerfile with hot reloading
-FROM rust:1.75-bullseye
+# Development image: rebuilds and restarts the node when sources change.
+FROM rust:1.99.1-slim-trixie
 
-# Install development dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    cmake \
-    clang \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+RUN cargo install --locked cargo-watch
 
-# Install cargo-watch for hot reloading
-RUN cargo install cargo-watch
-
-# Install additional development tools
-RUN cargo install cargo-audit cargo-outdated cargo-tree
-
-# Create app directory
 WORKDIR /app
+ENV RUST_LOG=debug \
+    RUST_BACKTRACE=1
 
-# Copy manifests first for better layer caching
-COPY Cargo.toml Cargo.lock ./
+EXPOSE 8080 8333
 
-# Create dummy main.rs to build dependencies
-RUN mkdir -p src && echo "fn main() {}" > src/main.rs
-
-# Build dependencies
-RUN cargo build
-
-# Remove dummy file
-RUN rm src/main.rs
-
-# Set environment for development
-ENV RUST_LOG=debug
-ENV RUST_BACKTRACE=1
-
-# Expose ports for debugging
-EXPOSE 8080 8333 9229
-
-# Default command for development
-CMD ["cargo", "watch", "-x", "run"]
+CMD ["cargo", "watch", "-x", "run --bin blockchain-node -- --data-dir /data --api-host 0.0.0.0 --api-port 8080 --p2p-port 8333 --network development"]

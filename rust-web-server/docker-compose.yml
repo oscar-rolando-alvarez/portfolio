@@ -1,124 +1,56 @@
-version: '3.8'
-
+# Local stack: API + PostgreSQL + Redis.
+# Usage: cp .env.example .env && docker compose up --build
 services:
-  # Main application
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
       - "8080:8080"
     environment:
-      - APP_HOST=0.0.0.0
-      - APP_PORT=8080
-      - APP_DATABASE__URL=postgresql://postgres:password@postgres:5432/rust_web_server
-      - APP_REDIS__URL=redis://redis:6379
-      - APP_JWT__SECRET=your-super-secret-jwt-key-change-this-in-production
-      - RUST_LOG=info
-      - LOG_FORMAT=json
+      APP_DATABASE__URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/rust_web_server
+      APP_REDIS__URL: redis://redis:6379
+      APP_JWT__SECRET: ${APP_JWT__SECRET:-local-development-secret-at-least-32-chars}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+      APP_LOGGING__FORMAT: ${APP_LOGGING__FORMAT:-json}
+      RUST_LOG: ${RUST_LOG:-info}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - ./uploads:/app/uploads
-      - ./logs:/app/logs
+      - uploads:/app/uploads
     restart: unless-stopped
-    networks:
-      - app-network
 
-  # PostgreSQL database
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18.6-alpine
     environment:
-      - POSTGRES_DB=rust_web_server
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
+      POSTGRES_DB: rust_web_server
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rust_web_server"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - app-network
+      retries: 10
 
-  # Redis cache
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - app-network
-
-  # Prometheus for metrics
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    networks:
-      - app-network
-
-  # Grafana for visualization
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    restart: unless-stopped
-    networks:
-      - app-network
-
-  # Nginx reverse proxy
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - app
-    restart: unless-stopped
-    networks:
-      - app-network
+      retries: 10
 
 volumes:
   postgres_data:
   redis_data:
-  prometheus_data:
-  grafana_data:
-
-networks:
-  app-network:
-    driver: bridge
+  uploads:

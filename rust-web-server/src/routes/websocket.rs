@@ -1,10 +1,8 @@
-use crate::handlers::websocket;
 use actix_web::web;
 
+use crate::handlers::websocket;
+
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/ws")
-            .route("/", web::get().to(websocket::websocket_handler))
-            .route("/chat", web::get().to(websocket::websocket_handler)),
-    );
+    cfg.route("/ws", web::get().to(websocket::websocket_handler))
+        .route("/ws/chat", web::get().to(websocket::websocket_handler));
 }

@@ -1,338 +1,250 @@
-use crate::{error::AppError, AppState};
-use actix_web::{
-    http::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE},
-    web, HttpRequest, HttpResponse, Result,
-};
-use futures::{stream::Stream, StreamExt};
-use serde::{Deserialize, Serialize};
-use std::{
-    pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
-    task::{Context, Poll},
-    time::Duration,
-};
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
+//! Server-Sent Events: named broadcast channels plus periodic metric/status streams.
 
-/// SSE Event structure
-#[derive(Debug, Clone, Serialize)]
+use std::{sync::Arc, time::Duration};
+
+use actix_web::{
+    HttpResponse,
+    http::header::{CACHE_CONTROL, CONTENT_TYPE},
+    web::{self, Bytes},
+};
+use dashmap::DashMap;
+use futures_util::{Stream, StreamExt, stream};
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::{BroadcastStream, IntervalStream};
+use validator::Validate;
+
+use crate::{AppState, error::AppError, middleware::auth::AuthUser};
+
+const CHANNEL_CAPACITY: usize = 256;
+
+/// A single SSE frame.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SseEvent {
     pub id: Option<String>,
     pub event: Option<String>,
     pub data: String,
-    pub retry: Option<u32>,
 }
 
 impl SseEvent {
-    pub fn new(data: String) -> Self {
+    pub fn new(event: impl Into<String>, data: impl Into<String>) -> Self {
         Self {
-            id: None,
-            event: None,
-            data,
-            retry: None,
+            id: Some(uuid::Uuid::new_v4().to_string()),
+            event: Some(event.into()),
+            data: data.into(),
         }
     }
 
-    pub fn with_id(mut self, id: String) -> Self {
-        self.id = Some(id);
-        self
-    }
-
-    pub fn with_event(mut self, event: String) -> Self {
-        self.event = Some(event);
-        self
-    }
-
-    pub fn with_retry(mut self, retry: u32) -> Self {
-        self.retry = Some(retry);
-        self
-    }
-
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-
+    /// Encodes the event using the `text/event-stream` wire format.
+    pub fn encode(&self) -> String {
+        let mut out = String::new();
         if let Some(id) = &self.id {
-            result.push_str(&format!("id: {}\n", id));
+            out.push_str(&format!("id: {id}\n"));
         }
-
         if let Some(event) = &self.event {
-            result.push_str(&format!("event: {}\n", event));
+            out.push_str(&format!("event: {event}\n"));
         }
-
-        if let Some(retry) = &self.retry {
-            result.push_str(&format!("retry: {}\n", retry));
+        for line in self.data.split('\n') {
+            out.push_str(&format!("data: {line}\n"));
         }
-
-        // Handle multi-line data
-        for line in self.data.lines() {
-            result.push_str(&format!("data: {}\n", line));
-        }
-
-        result.push('\n');
-        result
+        out.push('\n');
+        out
     }
 }
 
-/// SSE broadcaster for managing multiple clients
-#[derive(Clone)]
-pub struct SseBroadcaster {
-    sender: broadcast::Sender<SseEvent>,
-    client_count: Arc<AtomicUsize>,
+/// Registry of named broadcast channels shared by all workers.
+#[derive(Clone, Default)]
+pub struct SseHub {
+    channels: Arc<DashMap<String, broadcast::Sender<SseEvent>>>,
 }
 
-impl SseBroadcaster {
-    pub fn new() -> Self {
-        let (sender, _) = broadcast::channel(1000);
-        Self {
-            sender,
-            client_count: Arc::new(AtomicUsize::new(0)),
-        }
+impl SseHub {
+    fn sender(&self, channel: &str) -> broadcast::Sender<SseEvent> {
+        self.channels
+            .entry(channel.to_string())
+            .or_insert_with(|| broadcast::channel(CHANNEL_CAPACITY).0)
+            .clone()
     }
 
-    pub fn subscribe(&self) -> BroadcastStream<SseEvent> {
-        self.client_count.fetch_add(1, Ordering::Relaxed);
-        BroadcastStream::new(self.sender.subscribe())
+    pub fn subscribe(&self, channel: &str) -> broadcast::Receiver<SseEvent> {
+        self.sender(channel).subscribe()
     }
 
-    pub fn send(&self, event: SseEvent) -> Result<(), broadcast::error::SendError<SseEvent>> {
-        self.sender.send(event)
+    /// Publishes an event and returns how many subscribers received it.
+    pub fn publish(&self, channel: &str, event: SseEvent) -> usize {
+        let delivered = self.sender(channel).send(event).unwrap_or(0);
+        // Drop channels nobody listens to anymore.
+        self.channels
+            .remove_if(channel, |_, sender| sender.receiver_count() == 0);
+        delivered
     }
 
-    pub fn client_count(&self) -> usize {
-        self.client_count.load(Ordering::Relaxed)
+    pub fn subscriber_count(&self, channel: &str) -> usize {
+        self.channels.get(channel).map_or(0, |s| s.receiver_count())
     }
 
-    pub fn disconnect_client(&self) {
-        self.client_count.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-/// SSE stream wrapper
-pub struct SseStream {
-    stream: BroadcastStream<SseEvent>,
-    broadcaster: SseBroadcaster,
-}
-
-impl SseStream {
-    pub fn new(broadcaster: SseBroadcaster) -> Self {
-        let stream = broadcaster.subscribe();
-        Self { stream, broadcaster }
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
     }
 }
 
-impl Stream for SseStream {
-    type Item = Result<web::Bytes, actix_web::Error>;
+fn sse_response<S>(stream: S) -> HttpResponse
+where
+    S: Stream<Item = Result<Bytes, actix_web::Error>> + 'static,
+{
+    HttpResponse::Ok()
+        .insert_header((CONTENT_TYPE, "text/event-stream"))
+        .insert_header((CACHE_CONTROL, "no-cache"))
+        .insert_header(("X-Accel-Buffering", "no"))
+        .streaming(stream)
+}
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.stream.poll_next_unpin(cx) {
-            Poll::Ready(Some(Ok(event))) => {
-                let data = web::Bytes::from(event.to_string());
-                Poll::Ready(Some(Ok(data)))
-            }
-            Poll::Ready(Some(Err(_))) => {
-                // Lagged behind, client disconnected or error occurred
-                Poll::Ready(None)
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+fn validate_channel(name: &str) -> Result<(), AppError> {
+    let ok = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(
+            "channel must be 1-64 characters of [A-Za-z0-9_-]".into(),
+        ))
     }
 }
 
-impl Drop for SseStream {
-    fn drop(&mut self) {
-        self.broadcaster.disconnect_client();
-    }
-}
-
-/// Query parameters for SSE endpoint
 #[derive(Debug, Deserialize)]
 pub struct SseQuery {
-    pub last_event_id: Option<String>,
     pub channel: Option<String>,
 }
 
-/// SSE endpoint handler
+/// `GET /api/events/stream?channel=name` - subscribe to a broadcast channel.
 pub async fn sse_handler(
-    req: HttpRequest,
     query: web::Query<SseQuery>,
-    data: web::Data<AppState>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
-    let broadcaster = get_or_create_broadcaster(&query.channel, &data).await;
-    
-    // Send initial connection event
-    let connect_event = SseEvent::new(
-        serde_json::json!({
-            "type": "connected",
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-            "client_count": broadcaster.client_count()
-        }).to_string()
-    )
-    .with_event("connection".to_string())
-    .with_id(uuid::Uuid::new_v4().to_string());
+    let channel = query.channel.as_deref().unwrap_or("default");
+    validate_channel(channel)?;
 
-    let _ = broadcaster.send(connect_event);
+    let hello = SseEvent::new(
+        "connection",
+        serde_json::json!({ "channel": channel, "timestamp": chrono::Utc::now().to_rfc3339() })
+            .to_string(),
+    );
+    let updates = BroadcastStream::new(state.sse.subscribe(channel))
+        // A lagging client skips missed events instead of being disconnected.
+        .filter_map(|msg| async move { msg.ok() });
 
-    let stream = SseStream::new(broadcaster);
+    let stream = stream::once(async move { hello })
+        .chain(updates)
+        .map(|event| Ok(Bytes::from(event.encode())));
 
-    Ok(HttpResponse::Ok()
-        .insert_header((CONTENT_TYPE, "text/event-stream"))
-        .insert_header((CACHE_CONTROL, "no-cache"))
-        .insert_header(("Connection", "keep-alive"))
-        .insert_header(("Access-Control-Allow-Origin", "*"))
-        .insert_header(("Access-Control-Allow-Headers", "Cache-Control"))
-        .streaming(stream))
+    Ok(sse_response(stream))
 }
 
-/// Get or create broadcaster for a channel
-async fn get_or_create_broadcaster(
-    channel: &Option<String>,
-    data: &web::Data<AppState>,
-) -> SseBroadcaster {
-    let channel_name = channel
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or("default");
-
-    // In a real application, you might want to store broadcasters in a global registry
-    // For now, we'll create a new one each time
-    SseBroadcaster::new()
-}
-
-/// Events endpoint for publishing SSE events
-pub async fn publish_event(
-    body: web::Json<PublishEventRequest>,
-    data: web::Data<AppState>,
-) -> Result<HttpResponse, AppError> {
-    let broadcaster = get_or_create_broadcaster(&body.channel, &data).await;
-    
-    let event = SseEvent::new(body.data.clone())
-        .with_event(body.event_type.clone().unwrap_or_else(|| "message".to_string()))
-        .with_id(uuid::Uuid::new_v4().to_string());
-
-    match broadcaster.send(event) {
-        Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
-            "status": "sent",
-            "client_count": broadcaster.client_count()
-        }))),
-        Err(_) => Err(AppError::Internal("Failed to send event".to_string())),
-    }
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct PublishEventRequest {
+    #[validate(length(min = 1, max = 65536))]
     pub data: String,
+    #[validate(length(min = 1, max = 64))]
     pub event_type: Option<String>,
     pub channel: Option<String>,
 }
 
-/// Real-time metrics SSE endpoint
-pub async fn metrics_sse(
-    _req: HttpRequest,
-    data: web::Data<AppState>,
+/// `POST /api/v1/events/publish` - authenticated publish to a channel.
+pub async fn publish_event(
+    _user: AuthUser,
+    body: web::Json<PublishEventRequest>,
+    state: web::Data<AppState>,
 ) -> Result<HttpResponse, AppError> {
-    let broadcaster = SseBroadcaster::new();
-    
-    // Spawn task to send periodic metrics updates
-    let metrics_broadcaster = broadcaster.clone();
-    let metrics_service = data.metrics.clone();
-    
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        
-        loop {
-            interval.tick().await;
-            
-            let metrics_summary = metrics_service.get_metrics_summary();
-            let event = SseEvent::new(
-                serde_json::to_string(&metrics_summary).unwrap_or_default()
-            )
-            .with_event("metrics".to_string())
-            .with_id(chrono::Utc::now().timestamp().to_string());
+    body.validate()?;
+    let channel = body.channel.as_deref().unwrap_or("default");
+    validate_channel(channel)?;
 
-            if metrics_broadcaster.send(event).is_err() {
-                break; // No more subscribers
-            }
-        }
-    });
+    let event = SseEvent::new(
+        body.event_type.clone().unwrap_or_else(|| "message".into()),
+        body.data.clone(),
+    );
+    let delivered = state.sse.publish(channel, event);
 
-    let stream = SseStream::new(broadcaster);
-
-    Ok(HttpResponse::Ok()
-        .insert_header((CONTENT_TYPE, "text/event-stream"))
-        .insert_header((CACHE_CONTROL, "no-cache"))
-        .insert_header(("Connection", "keep-alive"))
-        .insert_header(("Access-Control-Allow-Origin", "*"))
-        .streaming(stream))
+    Ok(HttpResponse::Accepted().json(serde_json::json!({
+        "status": "published",
+        "channel": channel,
+        "delivered_to": delivered,
+    })))
 }
 
-/// System status SSE endpoint
-pub async fn system_status_sse(
-    _req: HttpRequest,
-    data: web::Data<AppState>,
-) -> Result<HttpResponse, AppError> {
-    let broadcaster = SseBroadcaster::new();
-    
-    // Spawn task to send periodic system status updates
-    let status_broadcaster = broadcaster.clone();
-    let app_data = data.clone();
-    
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
-        
-        loop {
-            interval.tick().await;
-            
-            // Collect system status
-            let db_health = app_data.db.health_check().await.unwrap_or_else(|_| {
-                crate::services::database::DatabaseHealth {
-                    healthy: false,
-                    response_time_ms: 0,
-                    pool_stats: crate::services::database::PoolStats {
-                        size: 0,
-                        idle: 0,
-                        connections: 0,
-                    },
-                }
-            });
+/// `GET /api/events/metrics` - application metrics every 5 seconds.
+pub async fn metrics_sse(state: web::Data<AppState>) -> HttpResponse {
+    let ticks = IntervalStream::new(tokio::time::interval(Duration::from_secs(5)));
+    let stream = ticks.map(move |_| {
+        let payload = serde_json::to_string(&state.metrics.summary()).unwrap_or_default();
+        Ok(Bytes::from(SseEvent::new("metrics", payload).encode()))
+    });
+    sse_response(stream)
+}
 
-            let cache_health = app_data.cache.health_check().await.unwrap_or_else(|_| {
-                crate::services::cache::CacheHealth {
-                    healthy: false,
-                    response_time_ms: 0,
-                    memory_info: "N/A".to_string(),
-                }
-            });
-
-            let system_status = serde_json::json!({
+/// `GET /api/events/system` - dependency health every 10 seconds.
+pub async fn system_status_sse(state: web::Data<AppState>) -> HttpResponse {
+    let ticks = IntervalStream::new(tokio::time::interval(Duration::from_secs(10)));
+    let stream = ticks.then(move |_| {
+        let state = state.clone();
+        async move {
+            let (db, cache) = tokio::join!(state.db.health_check(), state.cache.health_check());
+            let payload = serde_json::json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
-                "database": db_health,
-                "cache": cache_health,
-                "uptime": std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
+                "uptime_seconds": state.started_at.elapsed().as_secs(),
+                "database": db,
+                "cache": cache,
             });
-
-            let event = SseEvent::new(system_status.to_string())
-                .with_event("system_status".to_string())
-                .with_id(chrono::Utc::now().timestamp().to_string());
-
-            if status_broadcaster.send(event).is_err() {
-                break; // No more subscribers
-            }
+            Ok(Bytes::from(
+                SseEvent::new("system_status", payload.to_string()).encode(),
+            ))
         }
     });
+    sse_response(stream)
+}
 
-    let stream = SseStream::new(broadcaster);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    Ok(HttpResponse::Ok()
-        .insert_header((CONTENT_TYPE, "text/event-stream"))
-        .insert_header((CACHE_CONTROL, "no-cache"))
-        .insert_header(("Connection", "keep-alive"))
-        .insert_header(("Access-Control-Allow-Origin", "*"))
-        .streaming(stream))
+    #[test]
+    fn encodes_multiline_data() {
+        let event = SseEvent {
+            id: Some("1".into()),
+            event: Some("note".into()),
+            data: "line one\nline two".into(),
+        };
+        assert_eq!(
+            event.encode(),
+            "id: 1\nevent: note\ndata: line one\ndata: line two\n\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn hub_delivers_to_subscribers_of_the_same_channel() {
+        let hub = SseHub::default();
+        let mut a = hub.subscribe("alpha");
+        let mut b = hub.subscribe("beta");
+
+        assert_eq!(hub.publish("alpha", SseEvent::new("message", "hi")), 1);
+        assert_eq!(a.recv().await.unwrap().data, "hi");
+        assert!(b.try_recv().is_err());
+    }
+
+    #[test]
+    fn publishing_to_empty_channel_cleans_up() {
+        let hub = SseHub::default();
+        assert_eq!(hub.publish("ghost", SseEvent::new("message", "x")), 0);
+        assert_eq!(hub.channel_count(), 0);
+    }
+
+    #[test]
+    fn channel_names_are_validated() {
+        assert!(validate_channel("orders-eu_1").is_ok());
+        assert!(validate_channel("").is_err());
+        assert!(validate_channel("../etc").is_err());
+    }
 }

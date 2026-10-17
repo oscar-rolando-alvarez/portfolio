@@ -1,15 +1,16 @@
 use crate::error::{BlockchainError, Result};
 use crate::utxo::UTXOSet;
-use crate::{Amount, Hash, Transaction};
+use crate::{Amount, Hash, OutPoint, Transaction};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MempoolConfig {
     pub max_size: usize,
     pub max_tx_size: usize,
-    pub min_fee_rate: u64, // satoshis per byte
+    /// Minimum fee rate in base units per byte.
+    pub min_fee_rate: u64,
     pub max_tx_age: Duration,
     pub max_ancestors: usize,
     pub max_descendants: usize,
@@ -18,10 +19,10 @@ pub struct MempoolConfig {
 impl Default for MempoolConfig {
     fn default() -> Self {
         Self {
-            max_size: 300_000_000, // 300MB
-            max_tx_size: 100_000,   // 100KB
-            min_fee_rate: 1,        // 1 satoshi per byte
-            max_tx_age: Duration::from_secs(24 * 60 * 60), // 24 hours
+            max_size: 300_000_000,
+            max_tx_size: 100_000,
+            min_fee_rate: 1,
+            max_tx_age: Duration::from_secs(24 * 60 * 60),
             max_ancestors: 25,
             max_descendants: 25,
         }
@@ -32,18 +33,27 @@ impl Default for MempoolConfig {
 pub struct MempoolEntry {
     pub transaction: Transaction,
     pub fee: Amount,
-    pub fee_rate: u64, // satoshis per byte
+    /// Fee rate in base units per byte.
+    pub fee_rate: u64,
     pub size: usize,
     pub time_added: SystemTime,
     pub ancestors: HashSet<Hash>,
     pub descendants: HashSet<Hash>,
-    pub height: u64, // Height when added
+    /// Chain height when the entry was added.
+    pub height: u64,
 }
 
 impl MempoolEntry {
+    /// Create an entry using the fee recorded on the transaction itself.
     pub fn new(transaction: Transaction, height: u64) -> Self {
-        let size = transaction.size();
         let fee = transaction.fee;
+        Self::with_fee(transaction, fee, height)
+    }
+
+    /// Create an entry with an explicitly computed fee.
+    pub fn with_fee(mut transaction: Transaction, fee: Amount, height: u64) -> Self {
+        transaction.fee = fee;
+        let size = transaction.size();
         let fee_rate = if size > 0 { fee / size as u64 } else { 0 };
 
         Self {
@@ -73,7 +83,10 @@ impl MempoolEntry {
 pub struct Mempool {
     config: MempoolConfig,
     transactions: HashMap<Hash, MempoolEntry>,
-    fee_rate_index: BTreeMap<u64, HashSet<Hash>>, // Fee rate -> transaction IDs
+    /// Fee rate -> transaction ids.
+    fee_rate_index: BTreeMap<u64, HashSet<Hash>>,
+    /// Outpoints spent by mempool transactions -> spending transaction id.
+    spent_outpoints: HashMap<OutPoint, Hash>,
     size_bytes: usize,
 }
 
@@ -83,47 +96,47 @@ impl Mempool {
             config,
             transactions: HashMap::new(),
             fee_rate_index: BTreeMap::new(),
+            spent_outpoints: HashMap::new(),
             size_bytes: 0,
         }
     }
 
+    pub fn config(&self) -> &MempoolConfig {
+        &self.config
+    }
+
+    /// Validate and insert a transaction. `current_height` is the chain tip.
     pub fn add_transaction(
         &mut self,
         transaction: Transaction,
         utxo_set: &UTXOSet,
         current_height: u64,
     ) -> Result<()> {
-        // Basic validation
-        self.validate_transaction(&transaction, utxo_set, current_height)?;
-
-        // Check if transaction already exists
         if self.transactions.contains_key(&transaction.id) {
             return Err(BlockchainError::ValidationError(
                 "Transaction already in mempool".to_string(),
             ));
         }
 
-        let entry = MempoolEntry::new(transaction.clone(), current_height);
+        self.validate_transaction(&transaction, utxo_set, current_height)?;
 
-        // Check size limits
+        let fee = transaction.calculate_fee(utxo_set.get_all_utxos())?;
+        let entry = MempoolEntry::with_fee(transaction, fee, current_height);
+
         if entry.size > self.config.max_tx_size {
             return Err(BlockchainError::ValidationError(
                 "Transaction too large".to_string(),
             ));
         }
 
-        // Check fee rate
         if entry.fee_rate < self.config.min_fee_rate {
             return Err(BlockchainError::ValidationError(
                 "Fee rate too low".to_string(),
             ));
         }
 
-        // Check if adding this transaction would exceed mempool size
         if self.size_bytes + entry.size > self.config.max_size {
-            self.evict_transactions()?;
-            
-            // Check again after eviction
+            self.evict_transactions();
             if self.size_bytes + entry.size > self.config.max_size {
                 return Err(BlockchainError::ValidationError(
                     "Mempool full and cannot evict enough transactions".to_string(),
@@ -131,33 +144,69 @@ impl Mempool {
             }
         }
 
-        // Add to indexes
+        let tx_id = entry.transaction.id.clone();
+        for outpoint in entry
+            .transaction
+            .inputs
+            .iter()
+            .filter_map(|i| i.previous_output.clone())
+        {
+            self.spent_outpoints.insert(outpoint, tx_id.clone());
+        }
         self.fee_rate_index
             .entry(entry.fee_rate)
-            .or_insert_with(HashSet::new)
-            .insert(transaction.id.clone());
-
+            .or_default()
+            .insert(tx_id.clone());
         self.size_bytes += entry.size;
-        self.transactions.insert(transaction.id.clone(), entry);
+        self.transactions.insert(tx_id, entry);
 
         Ok(())
     }
 
     pub fn remove_transaction(&mut self, tx_id: &Hash) -> Option<Transaction> {
-        if let Some(entry) = self.transactions.remove(tx_id) {
-            // Remove from fee rate index
-            if let Some(tx_set) = self.fee_rate_index.get_mut(&entry.fee_rate) {
-                tx_set.remove(tx_id);
-                if tx_set.is_empty() {
-                    self.fee_rate_index.remove(&entry.fee_rate);
-                }
-            }
+        let entry = self.transactions.remove(tx_id)?;
 
-            self.size_bytes -= entry.size;
-            Some(entry.transaction)
-        } else {
-            None
+        if let Some(tx_set) = self.fee_rate_index.get_mut(&entry.fee_rate) {
+            tx_set.remove(tx_id);
+            if tx_set.is_empty() {
+                self.fee_rate_index.remove(&entry.fee_rate);
+            }
         }
+        for outpoint in entry
+            .transaction
+            .inputs
+            .iter()
+            .filter_map(|i| i.previous_output.as_ref())
+        {
+            if self.spent_outpoints.get(outpoint) == Some(tx_id) {
+                self.spent_outpoints.remove(outpoint);
+            }
+        }
+
+        self.size_bytes -= entry.size;
+        Some(entry.transaction)
+    }
+
+    /// Drop transactions whose inputs are no longer unspent (e.g. after a block).
+    pub fn remove_invalid(&mut self, utxo_set: &UTXOSet) -> usize {
+        let invalid: Vec<Hash> = self
+            .transactions
+            .iter()
+            .filter(|(_, entry)| {
+                entry
+                    .transaction
+                    .inputs
+                    .iter()
+                    .filter_map(|i| i.previous_output.as_ref())
+                    .any(|outpoint| !utxo_set.contains(outpoint))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in &invalid {
+            self.remove_transaction(id);
+        }
+        invalid.len()
     }
 
     pub fn get_transaction(&self, tx_id: &Hash) -> Option<&Transaction> {
@@ -168,88 +217,80 @@ impl Mempool {
         self.transactions.contains_key(tx_id)
     }
 
-    pub fn get_transactions_by_fee_rate(&self, max_count: usize) -> Vec<&Transaction> {
-        let mut transactions = Vec::new();
-        let mut count = 0;
-
-        // Iterate from highest fee rate to lowest
-        for (_, tx_ids) in self.fee_rate_index.iter().rev() {
-            for tx_id in tx_ids {
-                if let Some(entry) = self.transactions.get(tx_id) {
-                    transactions.push(&entry.transaction);
-                    count += 1;
-                    if count >= max_count {
-                        return transactions;
-                    }
-                }
-            }
-        }
-
-        transactions
+    fn ids_by_fee_rate_desc(&self) -> impl Iterator<Item = &MempoolEntry> {
+        self.fee_rate_index.iter().rev().flat_map(move |(_, ids)| {
+            let mut ids: Vec<&Hash> = ids.iter().collect();
+            ids.sort();
+            ids.into_iter()
+                .filter_map(move |id| self.transactions.get(id))
+        })
     }
 
-    pub fn get_transactions_for_mining(&self, max_size: usize, max_count: usize) -> Vec<Transaction> {
-        let mut selected_transactions = Vec::new();
-        let mut total_size = 0;
-        let mut count = 0;
+    /// Transactions ordered from the highest to the lowest fee rate.
+    pub fn get_transactions_by_fee_rate(&self, max_count: usize) -> Vec<&Transaction> {
+        self.ids_by_fee_rate_desc()
+            .take(max_count)
+            .map(|entry| &entry.transaction)
+            .collect()
+    }
 
-        // Select transactions by highest fee rate first
-        for (_, tx_ids) in self.fee_rate_index.iter().rev() {
-            for tx_id in tx_ids {
-                if let Some(entry) = self.transactions.get(tx_id) {
-                    if total_size + entry.size <= max_size && count < max_count {
-                        selected_transactions.push(entry.transaction.clone());
-                        total_size += entry.size;
-                        count += 1;
-                    }
-                }
+    /// Highest fee-rate transactions that fit into `max_size` bytes.
+    pub fn get_transactions_for_mining(
+        &self,
+        max_size: usize,
+        max_count: usize,
+    ) -> Vec<Transaction> {
+        let mut selected = Vec::new();
+        let mut total_size = 0;
+
+        for entry in self.ids_by_fee_rate_desc() {
+            if selected.len() >= max_count {
+                break;
+            }
+            if total_size + entry.size <= max_size {
+                selected.push(entry.transaction.clone());
+                total_size += entry.size;
             }
         }
 
-        selected_transactions
+        selected
     }
 
     pub fn cleanup_expired(&mut self) {
-        let expired_txs: Vec<Hash> = self
+        let max_age = self.config.max_tx_age;
+        let expired: Vec<Hash> = self
             .transactions
             .iter()
-            .filter(|(_, entry)| entry.is_expired(self.config.max_tx_age))
+            .filter(|(_, entry)| entry.is_expired(max_age))
             .map(|(tx_id, _)| tx_id.clone())
             .collect();
 
-        for tx_id in expired_txs {
+        for tx_id in expired {
             self.remove_transaction(&tx_id);
         }
     }
 
-    pub fn evict_transactions(&mut self) -> Result<()> {
-        // Evict lowest fee rate transactions first
-        let target_size = self.config.max_size * 3 / 4; // Evict to 75% capacity
-        
-        let mut evicted_size = 0;
+    /// Evict lowest fee-rate transactions until the pool is at 75% capacity.
+    pub fn evict_transactions(&mut self) {
+        let target_size = self.config.max_size * 3 / 4;
+        let mut remaining = self.size_bytes;
         let mut to_evict = Vec::new();
 
-        for (_, tx_ids) in self.fee_rate_index.iter() {
-            for tx_id in tx_ids {
+        'outer: for ids in self.fee_rate_index.values() {
+            for tx_id in ids {
+                if remaining <= target_size {
+                    break 'outer;
+                }
                 if let Some(entry) = self.transactions.get(tx_id) {
                     to_evict.push(tx_id.clone());
-                    evicted_size += entry.size;
-                    
-                    if self.size_bytes - evicted_size <= target_size {
-                        break;
-                    }
+                    remaining = remaining.saturating_sub(entry.size);
                 }
-            }
-            if self.size_bytes - evicted_size <= target_size {
-                break;
             }
         }
 
         for tx_id in to_evict {
             self.remove_transaction(&tx_id);
         }
-
-        Ok(())
     }
 
     pub fn validate_transaction(
@@ -258,73 +299,60 @@ impl Mempool {
         utxo_set: &UTXOSet,
         current_height: u64,
     ) -> Result<()> {
-        // Basic transaction validation
-        transaction.validate(utxo_set.get_all_utxos(), current_height)?;
+        if transaction.is_coinbase() {
+            return Err(BlockchainError::ValidationError(
+                "Coinbase transactions are not accepted into the mempool".to_string(),
+            ));
+        }
 
-        // Check for conflicts with mempool transactions
-        for input in &transaction.inputs {
-            if let Some(outpoint) = &input.previous_output {
-                // Check if any mempool transaction already spends this output
-                for (_, entry) in &self.transactions {
-                    for tx_input in &entry.transaction.inputs {
-                        if let Some(tx_outpoint) = &tx_input.previous_output {
-                            if tx_outpoint == outpoint {
-                                return Err(BlockchainError::ValidationError(
-                                    "Input already spent by mempool transaction".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
+        transaction.validate(utxo_set.get_all_utxos(), current_height + 1)?;
+
+        let conflict = transaction
+            .inputs
+            .iter()
+            .filter_map(|i| i.previous_output.as_ref())
+            .any(|outpoint| self.spent_outpoints.contains_key(outpoint));
+        if conflict {
+            return Err(BlockchainError::ValidationError(
+                "Input already spent by mempool transaction".to_string(),
+            ));
         }
 
         Ok(())
     }
 
+    /// Fee rate needed to be included within roughly `target_blocks` blocks.
     pub fn estimate_fee(&self, target_blocks: u32) -> u64 {
         if self.transactions.is_empty() {
             return self.config.min_fee_rate;
         }
 
-        // Simple fee estimation based on mempool state
-        let total_txs = self.transactions.len();
-        let sample_size = (total_txs / target_blocks as usize).max(1);
-        
         let mut fee_rates: Vec<u64> = self
             .transactions
             .values()
             .map(|entry| entry.fee_rate)
             .collect();
-        
-        fee_rates.sort_unstable_by(|a, b| b.cmp(a)); // Sort descending
-        
-        let index = sample_size.min(fee_rates.len() - 1);
-        fee_rates.get(index).copied().unwrap_or(self.config.min_fee_rate)
+        fee_rates.sort_unstable_by(|a, b| b.cmp(a));
+
+        let index = (fee_rates.len() / target_blocks.max(1) as usize).min(fee_rates.len() - 1);
+        fee_rates[index].max(self.config.min_fee_rate)
     }
 
     pub fn get_stats(&self) -> MempoolStats {
-        let total_fees: Amount = self.transactions.values().map(|entry| entry.fee).sum();
-        let avg_fee_rate = if !self.transactions.is_empty() {
-            self.transactions.values().map(|entry| entry.fee_rate).sum::<u64>() 
-                / self.transactions.len() as u64
-        } else {
-            0
-        };
+        let fee_rates = || self.transactions.values().map(|entry| entry.fee_rate);
+        let count = self.transactions.len();
 
         MempoolStats {
-            transaction_count: self.transactions.len(),
+            transaction_count: count,
             size_bytes: self.size_bytes,
-            total_fees,
-            avg_fee_rate,
-            min_fee_rate: self.transactions.values()
-                .map(|entry| entry.fee_rate)
-                .min()
-                .unwrap_or(0),
-            max_fee_rate: self.transactions.values()
-                .map(|entry| entry.fee_rate)
-                .max()
-                .unwrap_or(0),
+            total_fees: self.transactions.values().map(|entry| entry.fee).sum(),
+            avg_fee_rate: if count > 0 {
+                fee_rates().sum::<u64>() / count as u64
+            } else {
+                0
+            },
+            min_fee_rate: fee_rates().min().unwrap_or(0),
+            max_fee_rate: fee_rates().max().unwrap_or(0),
         }
     }
 
@@ -343,6 +371,7 @@ impl Mempool {
     pub fn clear(&mut self) {
         self.transactions.clear();
         self.fee_rate_index.clear();
+        self.spent_outpoints.clear();
         self.size_bytes = 0;
     }
 
@@ -373,158 +402,253 @@ pub struct MempoolStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OutPoint, TxInput, TxOutput, TransactionBuilder, UTXO};
+    use crate::crypto::KeyPair;
+    use crate::transaction::test_support::{owned_utxo, spend};
+    use crate::{TransactionBuilder, UTXO};
 
-    fn create_test_utxo_set() -> UTXOSet {
-        let mut utxo_set = UTXOSet::new();
-        
-        let utxo = UTXO {
-            outpoint: OutPoint::new("prev_tx".to_string(), 0),
-            output: TxOutput::new(10000, "address1".to_string()),
-            height: 1,
-            is_coinbase: false,
-        };
-        utxo_set.add_utxo(utxo);
-        
-        utxo_set
+    struct Fixture {
+        utxo_set: UTXOSet,
+        owners: Vec<(KeyPair, UTXO)>,
     }
 
-    fn create_test_transaction() -> Transaction {
-        TransactionBuilder::new()
-            .add_input("prev_tx".to_string(), 0, vec![])
-            .add_output(9000, "address2".to_string())
-            .build()
+    fn fixture(count: usize) -> Fixture {
+        let mut utxo_set = UTXOSet::new();
+        let owners: Vec<(KeyPair, UTXO)> = (0..count)
+            .map(|i| owned_utxo(&format!("prev_tx_{i}"), 10_000, 1))
+            .collect();
+        for (_, utxo) in &owners {
+            utxo_set.add_utxo(utxo.clone());
+        }
+        Fixture { utxo_set, owners }
+    }
+
+    impl Fixture {
+        fn spend(&self, index: usize, amount: Amount) -> Transaction {
+            let (keypair, utxo) = &self.owners[index];
+            spend(keypair, utxo, amount, "address2")
+        }
     }
 
     #[test]
     fn test_mempool_add_transaction() {
         let mut mempool = Mempool::default();
-        let utxo_set = create_test_utxo_set();
-        let transaction = create_test_transaction();
+        let fx = fixture(1);
+        let transaction = fx.spend(0, 9000);
 
-        let result = mempool.add_transaction(transaction.clone(), &utxo_set, 100);
-        assert!(result.is_ok());
+        mempool
+            .add_transaction(transaction.clone(), &fx.utxo_set, 100)
+            .unwrap();
         assert_eq!(mempool.size(), 1);
         assert!(mempool.contains(&transaction.id));
+        assert_eq!(mempool.get_transaction(&transaction.id).unwrap().fee, 1000);
+    }
+
+    #[test]
+    fn test_mempool_rejects_invalid_transactions() {
+        let mut mempool = Mempool::default();
+        let fx = fixture(1);
+
+        let unsigned = TransactionBuilder::new()
+            .add_input("prev_tx_0".to_string(), 0, vec![])
+            .add_output(9000, "address2".to_string())
+            .build();
+        assert!(
+            mempool
+                .add_transaction(unsigned, &fx.utxo_set, 100)
+                .is_err()
+        );
+
+        let coinbase = Transaction::new_coinbase(50, "miner".to_string(), 1);
+        assert!(
+            mempool
+                .add_transaction(coinbase, &fx.utxo_set, 100)
+                .is_err()
+        );
+        assert!(mempool.is_empty());
     }
 
     #[test]
     fn test_mempool_remove_transaction() {
         let mut mempool = Mempool::default();
-        let utxo_set = create_test_utxo_set();
-        let transaction = create_test_transaction();
+        let fx = fixture(1);
+        let transaction = fx.spend(0, 9000);
 
-        mempool.add_transaction(transaction.clone(), &utxo_set, 100).unwrap();
-        assert_eq!(mempool.size(), 1);
-
+        mempool
+            .add_transaction(transaction.clone(), &fx.utxo_set, 100)
+            .unwrap();
         let removed = mempool.remove_transaction(&transaction.id);
         assert!(removed.is_some());
         assert_eq!(mempool.size(), 0);
+        assert_eq!(mempool.size_bytes(), 0);
         assert!(!mempool.contains(&transaction.id));
+
+        // The outpoint is free again once the spender is removed.
+        mempool
+            .add_transaction(transaction, &fx.utxo_set, 100)
+            .unwrap();
     }
 
     #[test]
     fn test_mempool_duplicate_transaction() {
         let mut mempool = Mempool::default();
-        let utxo_set = create_test_utxo_set();
-        let transaction = create_test_transaction();
+        let fx = fixture(1);
+        let transaction = fx.spend(0, 9000);
 
-        mempool.add_transaction(transaction.clone(), &utxo_set, 100).unwrap();
-        
-        let result = mempool.add_transaction(transaction, &utxo_set, 100);
-        assert!(result.is_err());
+        mempool
+            .add_transaction(transaction.clone(), &fx.utxo_set, 100)
+            .unwrap();
+        assert!(
+            mempool
+                .add_transaction(transaction, &fx.utxo_set, 100)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_mempool_double_spend_rejected() {
+        let mut mempool = Mempool::default();
+        let fx = fixture(1);
+
+        mempool
+            .add_transaction(fx.spend(0, 9000), &fx.utxo_set, 100)
+            .unwrap();
+        let conflicting = fx.spend(0, 8000);
+        assert!(
+            mempool
+                .add_transaction(conflicting, &fx.utxo_set, 100)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_mempool_fee_rate_ordering() {
         let mut mempool = Mempool::default();
-        let utxo_set = create_test_utxo_set();
+        let fx = fixture(3);
 
-        // Add multiple UTXOs for multiple transactions
-        let mut utxo_set = utxo_set;
-        for i in 1..4 {
-            let utxo = UTXO {
-                outpoint: OutPoint::new(format!("prev_tx_{}", i), 0),
-                output: TxOutput::new(10000, "address1".to_string()),
-                height: 1,
-                is_coinbase: false,
-            };
-            utxo_set.add_utxo(utxo);
-        }
+        let low = fx.spend(0, 9500);
+        let high = fx.spend(1, 9000);
+        let mid = fx.spend(2, 9250);
 
-        // Create transactions with different fee rates
-        let tx1 = TransactionBuilder::new()
-            .add_input("prev_tx_1".to_string(), 0, vec![])
-            .add_output(9500, "address2".to_string()) // Low fee
-            .build();
+        mempool
+            .add_transaction(low.clone(), &fx.utxo_set, 100)
+            .unwrap();
+        mempool
+            .add_transaction(high.clone(), &fx.utxo_set, 100)
+            .unwrap();
+        mempool
+            .add_transaction(mid.clone(), &fx.utxo_set, 100)
+            .unwrap();
 
-        let tx2 = TransactionBuilder::new()
-            .add_input("prev_tx_2".to_string(), 0, vec![])
-            .add_output(9000, "address2".to_string()) // High fee
-            .build();
+        let ordered: Vec<&str> = mempool
+            .get_transactions_by_fee_rate(10)
+            .iter()
+            .map(|tx| tx.id.as_str())
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![high.id.as_str(), mid.id.as_str(), low.id.as_str()]
+        );
 
-        mempool.add_transaction(tx1, &utxo_set, 100).unwrap();
-        mempool.add_transaction(tx2.clone(), &utxo_set, 100).unwrap();
-
-        let ordered_txs = mempool.get_transactions_by_fee_rate(10);
-        // tx2 should come first due to higher fee rate
-        assert_eq!(ordered_txs[0].id, tx2.id);
+        let for_mining = mempool.get_transactions_for_mining(1_000_000, 2);
+        assert_eq!(for_mining.len(), 2);
+        assert_eq!(for_mining[0].id, high.id);
     }
 
     #[test]
     fn test_mempool_size_limit() {
         let config = MempoolConfig {
-            max_size: 1000, // Very small limit
+            max_size: 10,
             ..Default::default()
         };
         let mut mempool = Mempool::new(config);
-        let utxo_set = create_test_utxo_set();
-        let transaction = create_test_transaction();
+        let fx = fixture(1);
 
-        // This should fail due to size limit
-        let result = mempool.add_transaction(transaction, &utxo_set, 100);
-        // Depending on transaction size, this might pass or fail
-        // In a real scenario, you'd create a transaction known to exceed the limit
+        let result = mempool.add_transaction(fx.spend(0, 9000), &fx.utxo_set, 100);
+        assert!(result.is_err());
+        assert!(mempool.is_empty());
+    }
+
+    #[test]
+    fn test_mempool_min_fee_rate() {
+        let config = MempoolConfig {
+            min_fee_rate: 1_000,
+            ..Default::default()
+        };
+        let mut mempool = Mempool::new(config);
+        let fx = fixture(1);
+
+        assert!(
+            mempool
+                .add_transaction(fx.spend(0, 9999), &fx.utxo_set, 100)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_mempool_cleanup_expired() {
         let config = MempoolConfig {
-            max_tx_age: Duration::from_secs(0), // Immediate expiration
+            max_tx_age: Duration::from_secs(0),
             ..Default::default()
         };
         let mut mempool = Mempool::new(config);
-        let utxo_set = create_test_utxo_set();
-        let transaction = create_test_transaction();
+        let fx = fixture(1);
 
-        mempool.add_transaction(transaction, &utxo_set, 100).unwrap();
+        mempool
+            .add_transaction(fx.spend(0, 9000), &fx.utxo_set, 100)
+            .unwrap();
         assert_eq!(mempool.size(), 1);
 
-        // Sleep briefly to ensure expiration
-        std::thread::sleep(Duration::from_millis(1));
-        
+        std::thread::sleep(Duration::from_millis(5));
+
         mempool.cleanup_expired();
         assert_eq!(mempool.size(), 0);
     }
 
     #[test]
-    fn test_mempool_fee_estimation() {
+    fn test_mempool_remove_invalid() {
         let mut mempool = Mempool::default();
-        let estimated_fee = mempool.estimate_fee(6);
-        assert!(estimated_fee > 0);
+        let mut fx = fixture(2);
+
+        mempool
+            .add_transaction(fx.spend(0, 9000), &fx.utxo_set, 100)
+            .unwrap();
+        mempool
+            .add_transaction(fx.spend(1, 9000), &fx.utxo_set, 100)
+            .unwrap();
+
+        let spent = fx.owners[0].1.outpoint.clone();
+        fx.utxo_set.remove_utxo(&spent);
+        assert_eq!(mempool.remove_invalid(&fx.utxo_set), 1);
+        assert_eq!(mempool.size(), 1);
+    }
+
+    #[test]
+    fn test_mempool_fee_estimation() {
+        let mempool = Mempool::default();
+        assert_eq!(mempool.estimate_fee(6), 1);
+
+        let mut mempool = Mempool::default();
+        let fx = fixture(1);
+        mempool
+            .add_transaction(fx.spend(0, 9000), &fx.utxo_set, 100)
+            .unwrap();
+        assert!(mempool.estimate_fee(6) >= 1);
+        assert!(mempool.estimate_fee(0) >= 1);
     }
 
     #[test]
     fn test_mempool_stats() {
         let mut mempool = Mempool::default();
-        let utxo_set = create_test_utxo_set();
-        let transaction = create_test_transaction();
+        let fx = fixture(1);
 
-        mempool.add_transaction(transaction, &utxo_set, 100).unwrap();
-        
+        mempool
+            .add_transaction(fx.spend(0, 9000), &fx.utxo_set, 100)
+            .unwrap();
+
         let stats = mempool.get_stats();
         assert_eq!(stats.transaction_count, 1);
         assert!(stats.size_bytes > 0);
-        assert!(stats.total_fees > 0);
+        assert_eq!(stats.total_fees, 1000);
+        assert!(stats.min_fee_rate <= stats.max_fee_rate);
     }
 }

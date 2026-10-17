@@ -1,0 +1,11 @@
+target/
+.git
+.github
+.env
+.env.*
+!.env.example
+uploads/
+logs/
+k8s/
+load-tests/
+*.md

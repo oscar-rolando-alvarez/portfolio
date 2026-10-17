@@ -1,0 +1,10 @@
+# Build output (Cargo.lock is committed: this crate ships binaries)
+/target/
+**/*.rs.bk
+
+# Local chain data
+/data/
+*.redb
+*.log
+.env
+.DS_Store

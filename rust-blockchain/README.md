@@ -1,614 +1,297 @@
 # Rust Blockchain
 
-A comprehensive, functional blockchain implementation in Rust demonstrating key concepts of distributed ledger technology, cryptocurrency, and smart contracts.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/rust-blockchain.yml/badge.svg)
 
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker](https://img.shields.io/badge/docker-supported-blue.svg)](https://www.docker.com/)
+A compact but complete proof-of-work blockchain written in Rust: UTXO ledger,
+secp256k1-signed transactions, Merkle trees, a multi-threaded miner, a fee-prioritised
+mempool, embedded persistence, BIP39 wallets, a WebAssembly smart-contract VM, libp2p
+peer-to-peer networking and a REST API, shipped as three binaries (node, miner, CLI).
 
-## 🌟 Features
+## Purpose
 
-### Core Blockchain Components
-- ✅ **Block Structure** - Headers with metadata and transaction lists
-- ✅ **Proof-of-Work** - Adjustable difficulty consensus mechanism
-- ✅ **Merkle Trees** - Efficient transaction verification
-- ✅ **UTXO Model** - Unspent Transaction Output tracking
-- ✅ **Digital Signatures** - secp256k1 cryptographic security
-- ✅ **SHA-256 Hashing** - Industry-standard cryptographic hashing
+Most blockchain material is either a toy hash chain or a production client too large to
+read. This project sits in between: every core mechanism of a Bitcoin-style chain is
+implemented end to end, with tests, in a code base small enough to study in an afternoon.
+It is an educational and portfolio project, not a production cryptocurrency.
 
-### P2P Networking
-- ✅ **libp2p Integration** - Modern peer-to-peer networking
-- ✅ **Peer Discovery** - Automatic network node discovery
-- ✅ **Message Propagation** - Efficient block and transaction broadcasting
-- ✅ **Network Synchronization** - Blockchain state synchronization
-- ✅ **NAT Traversal** - Connection through firewalls and NAT
+## Key features
 
-### Wallet Functionality
-- ✅ **Key Management** - Secure key pair generation and storage
-- ✅ **Address Generation** - Bitcoin-style address creation
-- ✅ **Transaction Signing** - Cryptographic transaction authorization
-- ✅ **Balance Calculation** - Real-time balance tracking
-- ✅ **BIP39 Mnemonic** - Standard wallet backup and recovery
+- **Consensus**: proof of work where difficulty is the number of leading zero bits of the
+  block header hash; retargeting from block timestamps; deterministic genesis block so
+  independent nodes agree; block reward with halvings and coinbase maturity.
+- **Ledger**: UTXO set, transaction ids independent of signatures, input signatures
+  verified against the spent address, double-spend detection inside blocks and in the
+  mempool, atomic block commits.
+- **Cryptography**: secp256k1 ECDSA, SHA-256 / double SHA-256, real RIPEMD-160 for
+  Bitcoin-style Base58Check addresses, Merkle proofs.
+- **Wallets**: key management and address generation, BIP39 mnemonics (12 to 24 words)
+  with passphrase support, JSON backup and restore.
+- **Smart contracts**: WebAssembly contracts executed by Wasmtime with fuel-based gas,
+  persistent key/value storage and log host functions, deterministic contract addresses.
+- **Networking**: libp2p with TCP + Noise + Yamux, gossipsub for block/transaction
+  propagation, request/response block sync, Kademlia, identify, ping, mDNS discovery
+  and DNS bootstrap addresses.
+- **Interfaces**: Actix Web REST API, a node binary, a standalone miner and a CLI with a
+  built-in health probe used by the container health check.
 
-### Smart Contracts
-- ✅ **WebAssembly VM** - Contract execution environment
-- ✅ **Gas Mechanism** - Computational cost management
-- ✅ **Contract Deployment** - On-chain code deployment
-- ✅ **State Management** - Persistent contract storage
+## Tech stack
 
-### Mining System
-- ✅ **Multi-threaded Mining** - Parallel proof-of-work computation
-- ✅ **Difficulty Adjustment** - Automatic network difficulty scaling
-- ✅ **Block Rewards** - Incentive system with halvings
-- ✅ **Mining Statistics** - Performance monitoring and reporting
+| Area | Technology | Version |
+|------|------------|---------|
+| Language | Rust (edition 2024) | 1.99.1 (pinned in `rust-toolchain.toml`), MSRV 1.96 |
+| Async runtime | Tokio | 1.53 |
+| P2P | libp2p (tcp, noise, yamux, gossipsub, kad, mdns, request-response, dns) | 0.57 |
+| HTTP API | actix-web, actix-cors | 4.17, 0.7 |
+| Cryptography | secp256k1, sha2, ripemd, bs58 | 0.33, 0.11, 0.2, 0.5 |
+| Wallets | bip39 | 3.0 |
+| Smart contracts | wasmtime (cranelift), wat | 49, 1.262 |
+| Storage | redb (pure-Rust embedded database) | 4.4 |
+| Serialization | serde, serde_json, postcard | 1.0, 1.0, 1.1 |
+| CLI | clap, colored | 4.6, 3 |
+| Testing | built-in test harness, tempfile, criterion | 3.27, 0.8 |
+| Supply chain | cargo-deny | `deny.toml` |
+| Container | Debian trixie slim, non-root | `rust:1.99.1-slim-trixie` builder |
 
-### REST API
-- ✅ **Block Explorer** - Web interface for blockchain browsing
-- ✅ **Transaction Submission** - HTTP transaction broadcasting
-- ✅ **Wallet Operations** - RESTful wallet management
-- ✅ **Network Information** - Node status and statistics
-- ✅ **Mining Control** - Remote mining management
+## Architecture
 
-## 🚀 Quick Start
+### Container view
 
-### Prerequisites
+```mermaid
+flowchart LR
+    user["User / wallet client"]
+    peers["Other nodes"]
 
-- Rust 1.75+ 
-- Docker (optional, for containerized deployment)
-- Git
+    subgraph node["blockchain-node process"]
+        api["REST API - Actix Web - /api/v1"]
+        chain["Blockchain core: validation, UTXO set, difficulty"]
+        mempool["Mempool: fee priority, double-spend checks"]
+        miner["Miner threads"]
+        vm["Wasm smart-contract VM - Wasmtime"]
+        p2p["P2P layer - libp2p gossipsub, sync, kad, mdns"]
+        store[("redb database")]
+    end
 
-### Installation
+    cli["blockchain-cli"]
+    standalone["blockchain-miner"]
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-username/rust-blockchain.git
-   cd rust-blockchain
-   ```
-
-2. **Build the project**
-   ```bash
-   cargo build --release
-   ```
-
-3. **Run tests**
-   ```bash
-   cargo test
-   ```
-
-### Basic Usage
-
-#### 1. Initialize a Blockchain
-
-```bash
-# Initialize a new blockchain
-./target/release/blockchain-cli blockchain init --data-dir ./data --network testnet
-
-# Check blockchain info
-./target/release/blockchain-cli blockchain info --data-dir ./data
+    user -->|"HTTP JSON"| api
+    cli -->|"HTTP JSON"| api
+    api --> chain
+    api --> mempool
+    api --> miner
+    api --> vm
+    miner --> chain
+    mempool --> chain
+    chain --> store
+    p2p <-->|"blocks and transactions"| peers
+    p2p --> chain
+    standalone -->|"own data dir"| store
 ```
 
-#### 2. Create a Wallet
+### Block propagation and sync
 
-```bash
-# Create a new BIP39 wallet
-./target/release/blockchain-cli wallet create --name my-wallet --words 12
+```mermaid
+sequenceDiagram
+    autonumber
+    participant M as Miner on node A
+    participant A as Node A chain
+    participant G as Gossipsub
+    participant B as Node B
+    participant BC as Node B chain
 
-# Restore from mnemonic
-./target/release/blockchain-cli wallet restore --name restored-wallet --mnemonic "word1 word2 ... word12"
-
-# Check balance
-./target/release/blockchain-cli wallet balance --wallet my-wallet.wallet --data-dir ./data
+    M->>A: Found nonce, hash has N leading zero bits
+    A->>A: Validate block, apply to UTXO set, persist atomically
+    A->>G: Publish block on blocks topic
+    G-->>B: Block message
+    B->>BC: add_block
+    alt Block extends tip
+        BC-->>B: Accepted
+    else Block is ahead of local tip
+        BC-->>B: Rejected, missing parents
+        B->>A: GetBlocksRequest from local height + 1
+        A-->>B: Batch of blocks
+        B->>BC: Apply blocks in order
+    end
 ```
 
-#### 3. Start a Node
+### Core data model
 
-```bash
-# Start a blockchain node with API and P2P
-./target/release/blockchain-node \
-  --data-dir ./data \
-  --api-port 8080 \
-  --p2p-port 8333 \
-  --network testnet
+```mermaid
+erDiagram
+    BLOCK ||--|| BLOCK_HEADER : has
+    BLOCK ||--|{ TRANSACTION : contains
+    TRANSACTION ||--|{ TX_INPUT : spends
+    TRANSACTION ||--|{ TX_OUTPUT : creates
+    TX_INPUT }o--|| OUT_POINT : references
+    TX_OUTPUT ||--o| UTXO : "unspent as"
+    BLOCK_HEADER {
+        u32 version
+        string previous_hash
+        string merkle_root
+        datetime timestamp
+        u32 difficulty
+        u64 nonce
+        u64 height
+    }
+    TRANSACTION {
+        string id
+        u64 lock_time
+        u64 fee
+    }
+    TX_OUTPUT {
+        u64 value
+        string address
+    }
+    OUT_POINT {
+        string txid
+        u32 vout
+    }
 ```
 
-#### 4. Mine Blocks
+## REST API (prefix `/api/v1`)
 
-```bash
-# Start mining
-./target/release/blockchain-miner \
-  --data-dir ./data \
-  --address your_mining_address \
-  --threads 4
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Node status and chain height |
+| GET | `/chain/info` | Height, difficulty, best hash, totals |
+| GET | `/blocks/latest?limit&offset` | Recent blocks |
+| GET | `/block/height/{height}`, `/block/hash/{hash}` | Block lookup |
+| POST | `/transaction` | Submit a signed transaction |
+| GET | `/transaction/{txid}` | Transaction lookup |
+| GET | `/mempool` | Mempool statistics |
+| GET | `/address/{address}/balance` | Balance of an address |
+| POST | `/wallet`, `/wallet/restore` | Create or restore (BIP39) a wallet |
+| GET | `/wallets`, `/wallet/{name}/balance` | Wallets and balances |
+| POST | `/wallet/{name}/address`, `/send` | New address, build and send a payment |
+| POST | `/mining/start`, `/mining/stop` | Control background mining |
+| GET | `/mining/stats` | Hash rate and blocks found |
+| POST | `/contract/deploy`, `/contract/call` | Deploy and call Wasm contracts |
+| GET | `/contract/{address}` | Contract metadata |
+| GET | `/fee/estimate?target_blocks` | Fee estimate |
 
-#### 5. Send Transactions
+Further detail lives in [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-```bash
-# Send coins
-./target/release/blockchain-cli wallet send \
-  --wallet my-wallet.wallet \
-  --to recipient_address \
-  --amount 1000000000 \
-  --fee 1000 \
-  --data-dir ./data
-```
-
-## 🐳 Docker Deployment
-
-### Quick Start with Docker
-
-```bash
-# Basic node
-./scripts/docker-setup.sh
-
-# Development environment
-./scripts/docker-setup.sh dev
-
-# Production with monitoring
-./scripts/docker-setup.sh monitoring
-
-# Multi-node network
-./scripts/docker-setup.sh multi-node
-
-# With mining enabled
-./scripts/docker-setup.sh mining
-```
-
-### Docker Compose Profiles
-
-- **Default**: Single blockchain node
-- **Development**: Hot-reload development environment
-- **Production**: Load-balanced production setup
-- **Mining**: Node with dedicated miner
-- **Multi-node**: 3-node network for testing
-- **Monitoring**: Prometheus + Grafana monitoring
-
-## 📚 API Documentation
-
-### REST API Endpoints
-
-The blockchain node exposes a comprehensive REST API:
-
-#### Blockchain Information
-```http
-GET /api/v1/chain/info
-GET /api/v1/blocks/latest?limit=10
-GET /api/v1/block/height/{height}
-GET /api/v1/block/hash/{hash}
-```
-
-#### Transactions
-```http
-POST /api/v1/transaction
-GET /api/v1/mempool
-```
-
-#### Wallet Operations
-```http
-POST /api/v1/wallet
-POST /api/v1/wallet/restore
-GET /api/v1/wallets
-GET /api/v1/wallet/{name}/balance
-POST /api/v1/wallet/{name}/address
-POST /api/v1/send
-```
-
-#### Mining
-```http
-POST /api/v1/mining/start
-POST /api/v1/mining/stop
-GET /api/v1/mining/stats
-```
-
-#### Smart Contracts
-```http
-POST /api/v1/contract/deploy
-POST /api/v1/contract/call
-GET /api/v1/contract/{address}
-```
-
-### Example API Usage
-
-```bash
-# Get blockchain info
-curl http://localhost:8080/api/v1/chain/info
-
-# Create a wallet
-curl -X POST http://localhost:8080/api/v1/wallet \
-  -H "Content-Type: application/json" \
-  -d '{"name": "test-wallet", "mnemonic_type": "words12"}'
-
-# Get latest blocks
-curl http://localhost:8080/api/v1/blocks/latest?limit=5
-
-# Submit a transaction
-curl -X POST http://localhost:8080/api/v1/transaction \
-  -H "Content-Type: application/json" \
-  -d @transaction.json
-```
-
-## 🏗️ Architecture
-
-### System Overview
+## Project structure
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CLI Tools     │    │   REST API      │    │   P2P Network   │
-├─────────────────┤    ├─────────────────┤    ├─────────────────┤
-│ • blockchain-cli│    │ • Block Explorer│    │ • libp2p        │
-│ • Wallet Mgmt   │    │ • Transactions  │    │ • Peer Discovery│
-│ • Mining        │    │ • Wallet Ops    │    │ • Gossip        │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │  Core Blockchain │
-                    ├─────────────────┤
-                    │ • Blocks/Txs    │
-                    │ • UTXO Set      │
-                    │ • Mempool       │
-                    │ • Consensus     │
-                    └─────────────────┘
-                                 │
-         ┌───────────────────────┼───────────────────────┐
-         │                       │                       │
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Smart Contracts │    │   Persistence   │    │     Mining      │
-├─────────────────┤    ├─────────────────┤    ├─────────────────┤
-│ • WASM VM       │    │ • RocksDB       │    │ • Proof of Work │
-│ • Gas Metering  │    │ • State Storage │    │ • Difficulty    │
-│ • Contract State│    │ • UTXO Index    │    │ • Block Assembly│
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+rust-blockchain/
+├── src/
+│   ├── lib.rs             # Core types (Block, Transaction, UTXO) and constants
+│   ├── blockchain.rs      # Chain state, validation, difficulty retargeting
+│   ├── transaction.rs     # Transaction building, signing, validation
+│   ├── utxo.rs            # UTXO set
+│   ├── mempool.rs         # Fee-prioritised pending transactions
+│   ├── mining.rs          # Multi-threaded proof of work
+│   ├── merkle_tree.rs     # Merkle root and proofs
+│   ├── crypto.rs          # Keys, hashing, signatures
+│   ├── wallet.rs          # Wallets and Base58Check addresses
+│   ├── bip39_wallet.rs    # Mnemonic wallets
+│   ├── smart_contracts.rs # Wasmtime VM with gas, storage and logs
+│   ├── persistence.rs     # redb storage
+│   ├── codec.rs           # postcard binary encoding helpers
+│   ├── network.rs         # libp2p behaviour, gossip and block sync
+│   ├── node.rs            # Full node runtime: chain + P2P + API
+│   ├── api.rs             # REST API
+│   ├── error.rs           # Error types
+│   └── bin/               # blockchain-node, blockchain-miner, blockchain-cli
+├── tests/                 # Integration tests (including a two-node localhost sync test)
+├── benches/               # criterion benchmarks
+├── docs/                  # Architecture and API reference
+├── Dockerfile             # Multi-stage, non-root runtime image
+└── docker-compose.yml     # Single node, optional peers and miner
 ```
 
-### Core Components
+## Running locally
 
-#### Blockchain (`src/blockchain.rs`)
-- Chain state management
-- Block validation and storage
-- UTXO set maintenance
-- Difficulty adjustment
+### With Docker
 
-#### Cryptography (`src/crypto.rs`)
-- secp256k1 key pairs
-- Digital signatures
-- SHA-256 hashing
-- Address generation
-
-#### Transactions (`src/transaction.rs`)
-- UTXO-based transactions
-- Input/output validation
-- Fee calculation
-- Signature verification
-
-#### Mining (`src/mining.rs`)
-- Multi-threaded proof-of-work
-- Block assembly
-- Difficulty targeting
-- Reward calculation
-
-#### P2P Network (`src/network.rs`)
-- libp2p integration
-- Peer discovery (mDNS, Kademlia)
-- Message propagation (Gossipsub)
-- Network synchronization
-
-#### Smart Contracts (`src/smart_contracts.rs`)
-- WebAssembly runtime
-- Gas metering
-- Contract deployment
-- State persistence
-
-### Data Structures
-
-#### Block Structure
-```rust
-pub struct Block {
-    pub header: BlockHeader,
-    pub transactions: Vec<Transaction>,
-}
-
-pub struct BlockHeader {
-    pub version: u32,
-    pub previous_hash: Hash,
-    pub merkle_root: Hash,
-    pub timestamp: DateTime<Utc>,
-    pub difficulty: u32,
-    pub nonce: u64,
-    pub height: u64,
-}
+```sh
+docker compose up --build                       # one node on :8080 (API) and :8333 (P2P)
+docker compose --profile multi-node up --build  # plus two peers on :8081 and :8082
+curl http://localhost:8080/api/v1/health
 ```
 
-#### Transaction Structure
-```rust
-pub struct Transaction {
-    pub id: Hash,
-    pub inputs: Vec<TxInput>,
-    pub outputs: Vec<TxOutput>,
-    pub lock_time: u64,
-    pub timestamp: DateTime<Utc>,
-    pub fee: Amount,
-    pub signature: Option<Signature>,
-}
+### Without Docker
+
+Requirements: Rust via `rustup` (the pinned toolchain is installed automatically). No
+system libraries are needed.
+
+```sh
+cargo run --release --bin blockchain-node -- --data-dir ./data --api-port 8080 --p2p-port 8333
+
+# Second node on the same machine, bootstrapping from the first
+cargo run --release --bin blockchain-node -- --data-dir ./data2 --api-port 8081 \
+  --p2p-port 8334 --bootstrap /ip4/127.0.0.1/tcp/8333
+
+# CLI
+cargo run --release --bin blockchain-cli -- --help
+cargo run --release --bin blockchain-cli -- health --addr 127.0.0.1:8080
+
+# Standalone miner
+cargo run --release --bin blockchain-miner -- --data-dir ./miner --address <ADDRESS> --threads 4
 ```
 
-## 🔧 Configuration
+## Testing
 
-### Environment Variables
-
-```bash
-# Logging
-export RUST_LOG=info                    # Log level
-export RUST_BACKTRACE=1                # Enable backtraces
-
-# Network
-export BLOCKCHAIN_NETWORK=testnet      # Network type
-export P2P_PORT=8333                   # P2P port
-export API_PORT=8080                   # API port
-
-# Mining
-export MINING_THREADS=4                # Mining threads
-export MINING_DIFFICULTY=1             # Initial difficulty
-
-# Persistence
-export DATA_DIR=./data                  # Data directory
-export DB_CACHE_SIZE=100MB              # Database cache
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features     # 144 unit, 15 integration and 1 doc test
+cargo bench                   # criterion benchmarks
+cargo deny check              # advisories, licenses, sources
 ```
 
-### Configuration Files
-
-#### Blockchain Config (`blockchain.toml`)
-```toml
-[network]
-name = "testnet"
-magic_bytes = [0x0b, 0x11, 0x09, 0x07]
-default_port = 8333
-
-[consensus]
-target_block_time = 600  # 10 minutes
-difficulty_adjustment_interval = 2016
-max_block_size = 1048576  # 1MB
-
-[mining]
-block_reward = 5000000000  # 50 BTC
-halving_interval = 210000
-coinbase_maturity = 100
-```
-
-## 🧪 Testing
-
-### Unit Tests
-```bash
-# Run all tests
-cargo test
-
-# Run specific module tests
-cargo test blockchain
-cargo test crypto
-cargo test mining
-
-# Run with output
-cargo test -- --nocapture
-```
-
-### Integration Tests
-```bash
-# Run integration tests
-cargo test --test integration_tests
-
-# Run specific integration test
-cargo test --test integration_tests test_end_to_end_transaction_flow
-```
-
-### Benchmark Tests
-```bash
-# Run benchmarks
-cargo bench
-
-# Run specific benchmark
-cargo bench crypto_benchmarks
-
-# Generate HTML report
-cargo bench -- --output-format html
-```
-
-### Docker Tests
-```bash
-# Run tests in Docker
-./scripts/docker-setup.sh test
-
-# Run with specific profile
-docker-compose -f docker-compose.test.yml up
-```
-
-## 📊 Performance
-
-### Benchmarks
-
-| Operation | Throughput | Latency |
-|-----------|------------|---------|
-| SHA-256 (1KB) | 150 MB/s | 6.7 μs |
-| Key Generation | 1,200 ops/s | 833 μs |
-| Signature | 800 ops/s | 1.25 ms |
-| Verification | 1,100 ops/s | 909 μs |
-| Merkle Tree (1000 tx) | 50 trees/s | 20 ms |
-| Transaction Validation | 2,000 tx/s | 500 μs |
-| Block Validation | 100 blocks/s | 10 ms |
-
-### Optimization Tips
-
-1. **Database Tuning**
-   - Increase RocksDB cache size
-   - Enable bloom filters
-   - Tune compaction settings
-
-2. **Mining Performance**
-   - Use all available CPU cores
-   - Optimize nonce search patterns
-   - Consider GPU mining (future)
-
-3. **Network Optimization**
-   - Configure connection limits
-   - Tune gossip parameters
-   - Use compression
-
-4. **Memory Management**
-   - Monitor UTXO set size
-   - Implement UTXO pruning
-   - Cache frequently accessed data
-
-## 🛠️ Development
-
-### Building from Source
-
-```bash
-# Clone repository
-git clone https://github.com/your-username/rust-blockchain.git
-cd rust-blockchain
-
-# Install dependencies
-cargo fetch
-
-# Build debug version
-cargo build
-
-# Build optimized release
-cargo build --release
-
-# Install CLI tools globally
-cargo install --path .
-```
-
-### Development Environment
-
-```bash
-# Start development environment
-./scripts/docker-setup.sh dev
-
-# Run with hot reload
-cargo watch -x "run --bin blockchain-node"
-
-# Format code
-cargo fmt
-
-# Lint code
-cargo clippy
-
-# Check for outdated dependencies
-cargo outdated
-```
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Run the test suite
-6. Submit a pull request
-
-#### Code Style
-- Follow Rust standard formatting (`cargo fmt`)
-- Run Clippy lints (`cargo clippy`)
-- Add documentation for public APIs
-- Include unit tests for new functionality
-
-## 🔒 Security
-
-### Cryptographic Security
-- Uses industry-standard secp256k1 curves
-- SHA-256 for all hashing operations
-- Proper key derivation (BIP32/BIP44)
-- Secure random number generation
-
-### Network Security
-- Encrypted P2P communications
-- Peer authentication
-- DoS protection mechanisms
-- Rate limiting
-
-### Best Practices
-- Never expose private keys
-- Use hardware security modules for production
-- Regular security audits
-- Keep dependencies updated
-
-## 🚨 Known Limitations
-
-This is an educational/demonstration blockchain with several limitations:
-
-1. **Consensus**: Basic Proof-of-Work (no advanced consensus)
-2. **Scalability**: Limited transaction throughput
-3. **Smart Contracts**: Basic WASM VM (not Ethereum-compatible)
-4. **Production**: Not audited for production use
-5. **Networking**: Basic P2P (no advanced routing)
-
-## 📝 Roadmap
-
-### Phase 1: Core Features ✅
-- [x] Basic blockchain implementation
-- [x] UTXO model
-- [x] P2P networking
-- [x] Wallet functionality
-- [x] Mining system
-- [x] REST API
-
-### Phase 2: Advanced Features 🚧
-- [ ] Light client support
-- [ ] Multi-signature transactions
-- [ ] Advanced scripting
-- [ ] Layer 2 solutions
-- [ ] Cross-chain bridges
-
-### Phase 3: Optimization 📋
-- [ ] Database optimizations
-- [ ] Network improvements
-- [ ] Smart contract enhancements
-- [ ] Performance tuning
-- [ ] Security hardening
-
-## 📖 Learning Resources
-
-### Blockchain Fundamentals
-- [Bitcoin Whitepaper](https://bitcoin.org/bitcoin.pdf)
-- [Mastering Bitcoin](https://github.com/bitcoinbook/bitcoinbook)
-- [Blockchain Basics](https://www.oreilly.com/library/view/blockchain-basics/9781484226038/)
-
-### Rust Development
-- [The Rust Book](https://doc.rust-lang.org/book/)
-- [Rust by Example](https://doc.rust-lang.org/rust-by-example/)
-- [Rustlings](https://github.com/rust-lang/rustlings)
-
-### Cryptography
-- [Practical Cryptography](https://cryptopals.com/)
-- [Cryptography Engineering](https://www.schneier.com/books/cryptography_engineering/)
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 🤝 Support
-
-- 📚 [Documentation](./docs/)
-- 🐛 [Issue Tracker](https://github.com/your-username/rust-blockchain/issues)
-- 💬 [Discussions](https://github.com/your-username/rust-blockchain/discussions)
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Bitcoin Core](https://github.com/bitcoin/bitcoin) - Inspiration and reference
-- [libp2p](https://libp2p.io/) - P2P networking library
-- [RocksDB](https://rocksdb.org/) - Storage engine
-- [secp256k1](https://github.com/rust-bitcoin/rust-secp256k1) - Cryptographic library
-- [actix-web](https://actix.rs/) - Web framework
-
----
-
-**⚠️ Disclaimer**: This blockchain implementation is for educational purposes only. Do not use in production environments without proper security audits and testing.
+All tests run in the default suite; none are ignored. The networking integration test
+starts two nodes on loopback TCP and needs no external network. CI
+(`.github/workflows/rust-blockchain.yml`) runs formatting, clippy, the tests, benchmark
+compilation, cargo-deny, and builds the Docker image and probes the node's health
+endpoint.
+
+## Configuration
+
+The binaries are configured with command-line flags (`--help` lists them all).
+
+| Flag (blockchain-node) | Default | Description |
+|------------------------|---------|-------------|
+| `-d, --data-dir` | `./data` | Database directory |
+| `-a, --api-port` / `--api-host` | `8080` / `127.0.0.1` | REST API listen address |
+| `-p, --p2p-port` / `--p2p-host` | `8333` / `0.0.0.0` | libp2p listen address |
+| `-n, --network` | `testnet` | Network name |
+| `--difficulty` | chain default | Genesis difficulty in leading zero bits (must match across peers) |
+| `-b, --bootstrap` | none | Peer multiaddress, repeatable (`/ip4/...` or `/dns4/...`) |
+| `--no-mdns` | off | Disable local mDNS discovery |
+
+| Environment variable | Default | Description |
+|----------------------|---------|-------------|
+| `RUST_LOG` | `info` in the image | Log filter (`env_logger`) |
+| `MINER_ADDRESS` | placeholder | Reward address for the compose `mining` profile |
+
+## Design decisions
+
+- **Difficulty as leading zero bits** keeps the proof-of-work check exact and easy to
+  reason about, while still allowing retargeting.
+- **Deterministic genesis** (fixed timestamp, pre-mined nonce) so nodes started
+  independently share the same chain root and can sync.
+- **Signature-independent transaction ids** avoid malleability: signing never changes the
+  id that outputs reference.
+- **redb instead of RocksDB/sled**: a maintained, pure-Rust, ACID embedded store; no C++
+  toolchain in builds or images, and atomic multi-table commits per block.
+- **postcard instead of bincode**: bincode is no longer maintained; postcard is a compact,
+  maintained serde format.
+- **Fuel-metered Wasmtime** gives deterministic gas accounting and protects the node from
+  runaway contracts.
+- **HTTP/1.1 API without HTTP/2**: TLS and HTTP/2 belong to a reverse proxy, and turning
+  the feature off removes the `h2` 0.3 line flagged by RustSec.
+- **Std-only health probe in the CLI**, so the runtime image stays minimal (no curl).
+
+## Known limitations
+
+- Single-key, address-based signatures instead of a script language.
+- Blocks are accepted only when they extend the current tip; there is no fork choice or chain reorganisation.
+- The REST API is unauthenticated and intended for local or trusted networks; wallet
+  operations hold keys on the node.
+
+## License
+
+MIT

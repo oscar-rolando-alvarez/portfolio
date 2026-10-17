@@ -1,181 +1,64 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use reqwest::Client;
-use serde_json::json;
-use std::time::Duration;
-use tokio::runtime::Runtime;
+//! Micro-benchmarks for hot paths that do not need external services.
+//! End-to-end load tests live in `load-tests/` (k6 and wrk).
 
-// Note: These benchmarks require a running server instance
-// Run the server first: cargo run
-// Then run benchmarks: cargo bench
+use std::{hint::black_box, net::IpAddr};
 
-async fn setup_client() -> Client {
-    Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("Failed to create HTTP client")
-}
+use criterion::{Criterion, criterion_group, criterion_main};
+use rust_web_server::{
+    config::{Config, RateLimitConfig},
+    handlers::sse::SseEvent,
+    middleware::rate_limit::IpRateLimiter,
+    services::security::{ACCESS_AUDIENCE, decode_token, hash_token, issue_token},
+};
+use uuid::Uuid;
 
-async fn benchmark_health_check(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
-    let response = client
-        .get("http://localhost:8080/api/health")
-        .send()
-        .await?;
-    
-    let _ = response.text().await?;
-    Ok(())
-}
+fn jwt(c: &mut Criterion) {
+    let config = Config::defaults().expect("default config");
+    let roles = vec!["user".to_string()];
+    let token = issue_token(
+        &config,
+        Uuid::new_v4(),
+        "bench@example.com",
+        &roles,
+        ACCESS_AUDIENCE,
+    )
+    .unwrap();
 
-async fn benchmark_register_user(client: &Client, user_id: usize) -> Result<(), Box<dyn std::error::Error>> {
-    let user_data = json!({
-        "email": format!("user{}@example.com", user_id),
-        "password": "password123",
-        "first_name": "Test",
-        "last_name": "User"
-    });
-
-    let response = client
-        .post("http://localhost:8080/api/auth/register")
-        .json(&user_data)
-        .send()
-        .await?;
-    
-    let _ = response.text().await?;
-    Ok(())
-}
-
-async fn benchmark_login_user(client: &Client) -> Result<String, Box<dyn std::error::Error>> {
-    let login_data = json!({
-        "email": "user1@example.com",
-        "password": "password123"
-    });
-
-    let response = client
-        .post("http://localhost:8080/api/auth/login")
-        .json(&login_data)
-        .send()
-        .await?;
-    
-    let body: serde_json::Value = response.json().await?;
-    Ok(body["access_token"].as_str().unwrap_or("").to_string())
-}
-
-async fn benchmark_protected_endpoint(client: &Client, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let response = client
-        .get("http://localhost:8080/api/v1/user/profile")
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await?;
-    
-    let _ = response.text().await?;
-    Ok(())
-}
-
-async fn benchmark_metrics_endpoint(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
-    let response = client
-        .get("http://localhost:8080/api/metrics")
-        .send()
-        .await?;
-    
-    let _ = response.text().await?;
-    Ok(())
-}
-
-fn health_check_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(setup_client());
-
-    c.bench_function("health_check", |b| {
-        b.to_async(&rt).iter(|| {
-            black_box(benchmark_health_check(&client))
+    c.bench_function("jwt_issue", |b| {
+        b.iter(|| {
+            issue_token(
+                &config,
+                black_box(Uuid::nil()),
+                "bench@example.com",
+                &roles,
+                ACCESS_AUDIENCE,
+            )
         })
     });
-}
-
-fn auth_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(setup_client());
-
-    // Setup: Register a user for login tests
-    let _ = rt.block_on(benchmark_register_user(&client, 1));
-
-    let mut group = c.benchmark_group("auth");
-    
-    group.bench_function("register", |b| {
-        let mut counter = 2;
-        b.to_async(&rt).iter(|| {
-            counter += 1;
-            black_box(benchmark_register_user(&client, counter))
-        })
+    c.bench_function("jwt_decode", |b| {
+        b.iter(|| decode_token(&config, black_box(&token), ACCESS_AUDIENCE))
     });
-
-    group.bench_function("login", |b| {
-        b.to_async(&rt).iter(|| {
-            black_box(benchmark_login_user(&client))
-        })
-    });
-
-    group.finish();
-}
-
-fn protected_endpoints_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(setup_client());
-
-    // Setup: Register and login to get a token
-    let _ = rt.block_on(benchmark_register_user(&client, 1));
-    let token = rt.block_on(benchmark_login_user(&client)).unwrap_or_default();
-
-    c.bench_function("protected_profile", |b| {
-        b.to_async(&rt).iter(|| {
-            black_box(benchmark_protected_endpoint(&client, &token))
-        })
+    c.bench_function("refresh_token_hash", |b| {
+        b.iter(|| hash_token(black_box(&token)))
     });
 }
 
-fn metrics_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(setup_client());
+fn sse(c: &mut Criterion) {
+    let event = SseEvent::new("metrics", "{\"http_requests_total\":42}\nsecond line");
+    c.bench_function("sse_encode", |b| b.iter(|| black_box(&event).encode()));
+}
 
-    c.bench_function("metrics", |b| {
-        b.to_async(&rt).iter(|| {
-            black_box(benchmark_metrics_endpoint(&client))
-        })
+fn rate_limit(c: &mut Criterion) {
+    let limiter = IpRateLimiter::new(&RateLimitConfig {
+        enabled: true,
+        requests_per_minute: u32::MAX,
+        burst_size: u32::MAX,
+    });
+    let ip: IpAddr = "203.0.113.7".parse().unwrap();
+    c.bench_function("rate_limit_check", |b| {
+        b.iter(|| limiter.check(black_box(ip)))
     });
 }
 
-fn concurrent_requests_benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let client = rt.block_on(setup_client());
-
-    let mut group = c.benchmark_group("concurrent_requests");
-    
-    for concurrent_count in [1, 5, 10, 20, 50].iter() {
-        group.bench_with_input(
-            BenchmarkId::new("health_check", concurrent_count),
-            concurrent_count,
-            |b, &concurrent_count| {
-                b.to_async(&rt).iter(|| async {
-                    let futures: Vec<_> = (0..concurrent_count)
-                        .map(|_| benchmark_health_check(&client))
-                        .collect();
-                    
-                    let results = futures::future::join_all(futures).await;
-                    black_box(results)
-                });
-            },
-        );
-    }
-    
-    group.finish();
-}
-
-criterion_group!(
-    benches,
-    health_check_benchmark,
-    auth_benchmark,
-    protected_endpoints_benchmark,
-    metrics_benchmark,
-    concurrent_requests_benchmark
-);
-
+criterion_group!(benches, jwt, sse, rate_limit);
 criterion_main!(benches);

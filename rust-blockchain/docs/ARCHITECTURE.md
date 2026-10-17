@@ -222,7 +222,7 @@ Manages pending transactions awaiting confirmation.
 
 ### 10. Persistence Layer (`src/persistence.rs`)
 
-RocksDB-based storage for blockchain data.
+redb-based (pure Rust, ACID) storage for blockchain data.
 
 **Storage Organization:**
 - Column families for different data types
@@ -359,7 +359,7 @@ stateDiagram-v2
 ### Optimization Strategies
 
 1. **Database Optimization**
-   - RocksDB tuning parameters
+   - redb cache sizing
    - Efficient key encoding
    - Read/write optimization
 
