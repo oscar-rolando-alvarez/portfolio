@@ -58,7 +58,8 @@ func Run(ctx context.Context, cfg Config, sink Sink, st *Stats) error {
 		kgo.FetchMaxBytes(16<<20),
 		kgo.FetchMaxPartitionBytes(4<<20),
 		kgo.FetchMaxWait(500*time.Millisecond),
-		kgo.MetadataMaxAge(10*time.Second), // pick up the topic once the simulator creates it
+		kgo.MetadataMinAge(time.Second),
+		kgo.MetadataMaxAge(3*time.Second), // pick up the topic quickly once the simulator creates it
 		kgo.ClientID("fleetintel-live-gateway"),
 	)
 	if err != nil {
