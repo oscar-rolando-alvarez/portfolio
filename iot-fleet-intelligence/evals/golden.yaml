@@ -18,6 +18,8 @@ thresholds:            # CI gate (fake LLM). Real-model runs report the same met
   diagnosis_accuracy: 0.95
   baseline_false_positives_max: 0
   guardrail_pass_rate_min: 0.90
+  locales: en,es                  # every diagnosis must be served in each dashboard locale
+  localization_coverage_min: 1.0
 scenarios:
   - name: baseline
     file: ../scenarios/baseline.json

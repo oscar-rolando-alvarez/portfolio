@@ -14,11 +14,13 @@ from typing import Any
 
 import httpx
 
+from fleetintel.diagnosis import i18n
 from fleetintel.ports import ChatResult
 from fleetintel.resilience import RetryPolicy
 
 EVIDENCE_RE = re.compile(r"<evidence>\s*(\{.*?\})\s*</evidence>", re.DOTALL)
 RUNBOOKS_RE = re.compile(r"\[(RB-[A-Z]+-\d{3})#")
+LOCALES_RE = re.compile(r"<output_locales>([a-z,\s-]*)</output_locales>")
 
 
 class LLMError(RuntimeError):
@@ -217,7 +219,9 @@ class FakeDiagnosisModel:
         m = EVIDENCE_RE.search(user)
         ev: dict[str, Any] = json.loads(m.group(1)) if m else {}
         runbooks = list(dict.fromkeys(RUNBOOKS_RE.findall(user)))
-        out = self._reason(ev, runbooks)
+        lm = LOCALES_RE.search(user)
+        locales = [x.strip() for x in lm.group(1).split(",") if x.strip()] if lm else []
+        out = self._reason(ev, runbooks, locales)
         if self.chaos == "hallucinate_device":
             out["referenced_device_ids"] = [*out["referenced_device_ids"], "dev-99999999"]
             out["evidence"].append("Device dev-99999999 shows the same pattern")
@@ -234,7 +238,9 @@ class FakeDiagnosisModel:
         )
 
     @staticmethod
-    def _reason(ev: dict[str, Any], runbooks: list[str]) -> dict[str, Any]:
+    def _reason(
+        ev: dict[str, Any], runbooks: list[str], locales: list[str] | None = None
+    ) -> dict[str, Any]:
         inc = ev.get("incident", {})
         signals = {s["metric"]: s for s in inc.get("signals", []) if s.get("zscore", 0) != 0}
         causes: dict[str, int] = inc.get("top_causes", {})
@@ -270,21 +276,32 @@ class FakeDiagnosisModel:
             f"{name} = {s['value']} vs baseline {s['baseline']} (z = {s['zscore']})"
             for name, s in sorted(signals.items())
         ][:5]
+        es_evidence = [
+            i18n.es_signal(name, s["value"], s["baseline"], s["zscore"])
+            for name, s in sorted(signals.items())
+        ][:5]
         if top_cause:
             evidence.append(f"dominant reject cause {top_cause} ({causes[top_cause]} events)")
+            es_evidence.append(i18n.es_cause(top_cause, causes[top_cause]))
         evidence.append(
             f"{affected} of {inc.get('total_devices', 0)} devices in {scope_type} {inc.get('scope')} affected"
         )
+        es_evidence.append(
+            i18n.es_affected(
+                affected, inc.get("total_devices", 0), str(scope_type), inc.get("scope")
+            )
+        )
         for item in ev.get("enrichment", []):
-            if item.get("source") == "weather" and item.get("data", {}).get("severe"):
+            source, data = item.get("source"), item.get("data", {})
+            if source == "weather" and data.get("severe"):
                 evidence.append("severe weather reported at the site location")
-            if (
-                item.get("source") == "carrier"
-                and item.get("data", {}).get("roaming_agreement") is True
-            ):
+            elif source == "carrier" and data.get("roaming_agreement") is True:
                 evidence.append("roaming agreement exists, so the reject is a provisioning issue")
-            if item.get("source") == "status_feed" and item.get("data", {}).get("relevant"):
+            elif source == "status_feed" and data.get("relevant"):
                 evidence.append("operator status feed reports a related active incident")
+            else:
+                continue
+            es_evidence.append(i18n.ES_ENRICHMENT[source])
         steps = [
             {"order": n, "action": a, "owner": o, "automated": auto}
             for n, (a, o, auto) in enumerate(_REMEDIATION.get(root, []), start=1)
@@ -299,6 +316,14 @@ class FakeDiagnosisModel:
                 }
             ]
         sample = list(inc.get("sample_device_ids", []))[:3]
+        translations: dict[str, Any] = {}
+        if "es" in (locales or []):
+            translations["es"] = {
+                "summary": i18n.es_summary(root, str(scope_type), inc.get("scope"), affected),
+                "evidence": es_evidence[:8],
+                "remediation_actions": i18n.ES_REMEDIATION[root][: len(steps)],
+                "customer_message": i18n.ES_CUSTOMER[root],
+            }
         return {
             "root_cause": root,
             "confidence": round(confidence, 3),
@@ -309,4 +334,5 @@ class FakeDiagnosisModel:
             "customer_message": _CUSTOMER[root],
             "referenced_device_ids": sample,
             "runbook_ids": runbooks[:3],
+            "translations": translations,
         }

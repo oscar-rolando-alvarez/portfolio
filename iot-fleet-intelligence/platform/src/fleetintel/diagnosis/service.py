@@ -12,13 +12,15 @@ from aws_lambda_powertools import Logger
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from fleetintel.diagnosis import guardrails
+from fleetintel.diagnosis import guardrails, i18n
 from fleetintel.diagnosis.rag import Retrieved, RunbookIndex
 from fleetintel.domain import (
+    SUPPORTED_LOCALES,
     Diagnosis,
     DiagnosisRecord,
     EnrichmentContext,
     Incident,
+    LocalizedDiagnosis,
     RemediationStep,
     RootCause,
 )
@@ -27,7 +29,7 @@ from fleetintel.ports import ChatResult, LLMClient
 logger = Logger(service="fleetintel", child=True)
 tracer = trace.get_tracer("fleetintel.diagnosis")
 
-PROMPT_VERSION = "diag-v1"
+PROMPT_VERSION = "diag-v2"  # v2: native-language translations for <output_locales>
 
 SYSTEM_PROMPT = """You are a senior IoT connectivity engineer in a network operations centre.
 Diagnose the incident using ONLY the evidence and runbook excerpts provided.
@@ -43,6 +45,9 @@ Rules:
   the evidence and only runbook ids shown in <runbooks>.
 - Recommend a truck roll only when physical intervention is unavoidable; remote fixes come first.
 - customer_message: plain language, no internal identifiers, say whether customer action is needed.
+- Write the primary text fields in English. For every locale listed in <output_locales>, add
+  translations[locale] with summary, evidence, remediation_actions (one per remediation step, same
+  order) and customer_message written natively in that language, not word-for-word.
 Respond with a single JSON object matching the provided schema."""
 
 
@@ -56,7 +61,10 @@ def _query(incident: Incident) -> str:
 
 
 def build_prompt(
-    incident: Incident, enrichment: EnrichmentContext | None, docs: list[Retrieved]
+    incident: Incident,
+    enrichment: EnrichmentContext | None,
+    docs: list[Retrieved],
+    output_locales: tuple[str, ...] = (),
 ) -> str:
     evidence = {
         "incident": incident.model_dump(
@@ -87,8 +95,11 @@ def build_prompt(
         f"[{d.chunk.chunk_id}] {d.chunk.title} - {d.chunk.section}\n{d.chunk.text}" for d in docs
     )
     schema = json.dumps(Diagnosis.model_json_schema(), separators=(",", ":"))
+    locales = (
+        f"<output_locales>{','.join(output_locales)}</output_locales>\n\n" if output_locales else ""
+    )
     return (
-        f"<evidence>\n{json.dumps(evidence, separators=(',', ':'), default=str)}\n</evidence>\n\n"
+        f"{locales}<evidence>\n{json.dumps(evidence, separators=(',', ':'), default=str)}\n</evidence>\n\n"
         f"<runbooks>\n{runbooks}\n</runbooks>\n\n"
         f"JSON schema for your answer:\n{schema}"
     )
@@ -111,6 +122,7 @@ class DiagnosisService:
         temperature: float = 0.0,
         max_output_tokens: int = 800,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        output_locales: tuple[str, ...] = (),
     ) -> None:
         self.llm = llm
         self.index = index
@@ -119,6 +131,10 @@ class DiagnosisService:
         self.temperature = temperature
         self.max_output_tokens = max_output_tokens
         self.clock = clock
+        unsupported = set(output_locales) - set(SUPPORTED_LOCALES)
+        if unsupported:
+            raise ValueError(f"unsupported diagnosis locales: {sorted(unsupported)}")
+        self.output_locales = tuple(loc for loc in output_locales if loc != "en")
 
     def _complete(self, user: str) -> ChatResult:
         """LLM call wrapped in an OpenTelemetry span with GenAI semantic conventions."""
@@ -143,7 +159,9 @@ class DiagnosisService:
             span.set_attribute("gen_ai.response.finish_reasons", [res.finish_reason])
             return res
 
-    def _refusal(self, incident: Incident, reason: str) -> DiagnosisRecord:
+    def _refusal(
+        self, incident: Incident, reason: str, es_reason: str = i18n.ES_PRECHECK
+    ) -> DiagnosisRecord:
         d = Diagnosis(
             root_cause=RootCause.INSUFFICIENT_EVIDENCE,
             confidence=0.0,
@@ -159,6 +177,16 @@ class DiagnosisService:
             ],
             truck_roll_required=False,
             customer_message="We are investigating a possible connectivity issue and will update you shortly.",
+            translations={
+                "es": LocalizedDiagnosis(
+                    summary=f"No hay evidencia suficiente para diagnosticar el incidente {incident.incident_id}: {es_reason}.",
+                    evidence=[es_reason],
+                    remediation_actions=list(i18n.ES_REMEDIATION["insufficient_evidence"]),
+                    customer_message=i18n.ES_CUSTOMER["insufficient_evidence"],
+                )
+            }
+            if "es" in self.output_locales
+            else {},
         )
         return DiagnosisRecord(
             incident_id=incident.incident_id,
@@ -181,7 +209,7 @@ class DiagnosisService:
         docs = self.index.search(
             _query(incident), k=self.top_k, fault_hint=incident.suspected_fault.value
         )
-        user = build_prompt(incident, enrichment, docs)
+        user = build_prompt(incident, enrichment, docs, self.output_locales)
         notes = [
             f"possible prompt injection in evidence: {s!r}"
             for s in guardrails.find_injection(_untrusted_strings(incident, enrichment))
@@ -201,7 +229,11 @@ class DiagnosisService:
             parsed, error = guardrails.parse(res.content)
         latency = round((time.perf_counter() - t0) * 1000, 1)
         if parsed is None:
-            rec = self._refusal(incident, "model output failed schema validation twice")
+            rec = self._refusal(
+                incident,
+                "model output failed schema validation twice",
+                "la salida del modelo no cumplió el esquema dos veces",
+            )
             return rec.model_copy(
                 update={
                     "model": res.model,
@@ -218,6 +250,9 @@ class DiagnosisService:
         result = guardrails.enforce(parsed, allowed_ids, allowed_runbooks, self.min_confidence)
         if result.diagnosis is None:  # pragma: no cover - enforce always returns a diagnosis
             raise RuntimeError("guardrails returned no diagnosis")
+        missing = [loc for loc in self.output_locales if loc not in result.diagnosis.translations]
+        if missing:
+            result.notes.append(f"translation missing for {', '.join(missing)}; served in English")
         record = DiagnosisRecord(
             incident_id=incident.incident_id,
             diagnosis=result.diagnosis,

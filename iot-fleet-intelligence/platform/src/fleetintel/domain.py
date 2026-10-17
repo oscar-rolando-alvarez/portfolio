@@ -179,6 +179,28 @@ class RemediationStep(BaseModel):
     automated: bool = False
 
 
+Locale = Literal["en", "es"]
+SUPPORTED_LOCALES: tuple[str, ...] = ("en", "es")
+
+
+class LocalizedDiagnosis(BaseModel):
+    """Free-text fields of a diagnosis rendered natively in another language.
+
+    Classification fields (root cause, confidence, owners, truck roll) are
+    language-neutral and live only on :class:`Diagnosis`; translations carry the
+    human-readable text so one LLM call serves every dashboard locale.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=10, max_length=600)
+    evidence: list[str] = Field(min_length=1, max_length=8)
+    remediation_actions: list[str] = Field(
+        default_factory=list, max_length=8, description="same order as remediation_steps"
+    )
+    customer_message: str = Field(min_length=10, max_length=600)
+
+
 class Diagnosis(BaseModel):
     """Structured LLM output. This JSON schema is sent as ``response_format``."""
 
@@ -193,6 +215,30 @@ class Diagnosis(BaseModel):
     customer_message: str = Field(min_length=10, max_length=600)
     referenced_device_ids: list[str] = Field(default_factory=list, max_length=20)
     runbook_ids: list[str] = Field(default_factory=list, max_length=5)
+    translations: dict[Locale, LocalizedDiagnosis] = Field(
+        default_factory=dict,
+        description="Additional output locales requested in <output_locales>; primary text is English.",
+    )
+
+    def localized(self, locale: str) -> Diagnosis:
+        """Return a copy whose free text is in ``locale`` (falls back to English)."""
+        tr = self.translations.get(locale)  # type: ignore[call-overload]
+        if tr is None:
+            return self
+        steps = [
+            s.model_copy(update={"action": tr.remediation_actions[n]})
+            if n < len(tr.remediation_actions)
+            else s
+            for n, s in enumerate(self.remediation_steps)
+        ]
+        return self.model_copy(
+            update={
+                "summary": tr.summary,
+                "evidence": list(tr.evidence),
+                "remediation_steps": steps,
+                "customer_message": tr.customer_message,
+            }
+        )
 
 
 class DiagnosisRecord(BaseModel):

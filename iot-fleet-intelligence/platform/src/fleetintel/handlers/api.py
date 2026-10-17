@@ -28,7 +28,7 @@ from fleetintel import __version__
 from fleetintel.bootstrap import get_container
 from fleetintel.cost.model import CENT, FleetProfile, estimate
 from fleetintel.cost.report import SCENARIOS
-from fleetintel.domain import IncidentStatus
+from fleetintel.domain import SUPPORTED_LOCALES, IncidentStatus
 
 logger = Logger(service="fleetintel-api")
 tracer = Tracer(service="fleetintel-api")
@@ -96,12 +96,34 @@ def get_incident(incident_id: str) -> dict[str, Any]:
     if incident is None or incident.tenant != tenant:
         raise NotFoundError("incident not found")
     latest = max(diagnoses, key=lambda d: d.created_at) if diagnoses else None
+    locale = _locale()
+    diagnosis: dict[str, Any] | None = None
+    if latest:
+        served = latest.diagnosis.localized(locale)
+        diagnosis = latest.model_copy(update={"diagnosis": served}).model_dump(
+            mode="json", exclude={"diagnosis": {"translations"}}
+        )
+        diagnosis["locale"] = locale if served is not latest.diagnosis else "en"
+        diagnosis["available_locales"] = ["en", *sorted(latest.diagnosis.translations)]
     return {
         "incident": incident.model_dump(mode="json"),
         "enrichment": enrichment.model_dump(mode="json") if enrichment else None,
-        "diagnosis": latest.model_dump(mode="json") if latest else None,
+        "diagnosis": diagnosis,
         "diagnosis_history": len(diagnoses),
     }
+
+
+def _locale() -> str:
+    """``?locale=es`` wins, then the first supported ``Accept-Language`` tag, else English."""
+    q = app.current_event.query_string_parameters or {}
+    candidates = [q.get("locale", "")]
+    header = app.current_event.headers.get("accept-language", "")
+    candidates += [part.split(";")[0].strip() for part in header.split(",")]
+    for c in candidates:
+        lang = c.lower().split("-")[0]
+        if lang in SUPPORTED_LOCALES:
+            return lang
+    return "en"
 
 
 @app.post("/v1/cost/estimate")
