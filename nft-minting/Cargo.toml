@@ -13,7 +13,7 @@ repository = "https://github.com/oscar-rolando-alvarez/portfolio"
 anchor-lang = { version = "1.2.1", default-features = false, features = ["derive", "solana-v3"] }
 anchor-spl = { version = "1.2.1", default-features = false, features = ["token", "token_2022", "token_2022_extensions", "associated_token", "solana-v3"] }
 litesvm = "0.18.0"
-solana-keypair = "3"
+solana-keypair = "4"
 solana-signer = "3"
 solana-transaction = "4"
 solana-account = "4"
