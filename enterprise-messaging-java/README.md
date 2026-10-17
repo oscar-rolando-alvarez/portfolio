@@ -217,7 +217,7 @@ published, consumed and counted in Micrometer. CI runs the same `verify` on ever
 | `DATABASE_USERNAME` / `DATABASE_PASSWORD` | `messaging_user` / `messaging_pass` | Database credentials (local dev only) |
 | `DATABASE_POOL_SIZE` | `20` | Hikari max pool size |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka brokers |
-| `KAFKA_CONSUMER_GROUP` | `messaging-service` | Consumer group id |
+| `KAFKA_CONSUMER_GROUP` | `messaging-service` | Consumer group prefix (each listener uses `<prefix>.<topic>`) |
 | `JWT_SECRET` | dev-only value | HS256 key, Base64 or raw, at least 256 bits. **Set in every real environment.** |
 | `JWT_EXPIRATION` | `86400000` | Token lifetime in ms |
 | `ENCRYPTION_ENABLED` | `false` | Encrypt message content at rest |
@@ -227,6 +227,7 @@ published, consumed and counted in Micrometer. CI runs the same `verify` on ever
 | `LOGGING_STRUCTURED_FORMAT_CONSOLE` | unset (ECS in the image) | `ecs`, `logstash` or `gelf` JSON logs |
 | `TRACING_SAMPLING_PROBABILITY` | `0.1` | Trace sampling ratio |
 | `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` | unset | e.g. `http://collector:4318/v1/traces`; enables OTLP export |
+| `OTLP_METRICS_EXPORT_ENABLED` | `false` | Push metrics via OTLP in addition to the Prometheus endpoint |
 | `SERVER_PORT` | `8080` | HTTP port |
 
 ## Design decisions
@@ -237,6 +238,8 @@ published, consumed and counted in Micrometer. CI runs the same `verify` on ever
 - **Boot auto-configuration for Kafka.** Producer, consumer and listener settings live in
   `application.yml` rather than hand-built factories. The same configuration then serves local
   runs, Docker and Testcontainers service connections, and observation stays on everywhere.
+- **One consumer group per listener, cooperative rebalancing.** A rebalance on one topic never
+  pauses the others, and joining members do not revoke everyone's partitions.
 - **Type headers plus `ErrorHandlingDeserializer`.** One consumer factory handles several event
   types safely, and a malformed record cannot put a listener into a poison-pill loop.
 - **AES-GCM instead of AES/ECB.** ECB leaks plaintext patterns and gives no integrity. GCM with a

@@ -12,6 +12,10 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 
+/**
+ * Kafka consumers for domain events. Each listener has its own consumer group
+ * ({@code <group-id>.<topic>}) so a rebalance on one topic never pauses consumption of another.
+ */
 @Service
 public class EventConsumer {
 
@@ -27,7 +31,7 @@ public class EventConsumer {
         this.analyticsService = analyticsService;
     }
 
-    @KafkaListener(topics = "message-events", groupId = "messaging-service")
+    @KafkaListener(id = "messageEventsListener", topics = "message-events", groupId = "${spring.kafka.consumer.group-id}.message-events")
     public void handleMessageEvent(@Payload MessageEvent event,
                                  @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
                                  @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
@@ -67,7 +71,7 @@ public class EventConsumer {
         }
     }
 
-    @KafkaListener(topics = "user-events", groupId = "messaging-service")
+    @KafkaListener(id = "userEventsListener", topics = "user-events", groupId = "${spring.kafka.consumer.group-id}.user-events")
     public void handleUserEvent(@Payload UserEvent event,
                               @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
                               @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
@@ -101,7 +105,7 @@ public class EventConsumer {
         }
     }
 
-    @KafkaListener(topics = "notification-events", groupId = "messaging-service")
+    @KafkaListener(id = "notificationEventsListener", topics = "notification-events", groupId = "${spring.kafka.consumer.group-id}.notification-events")
     public void handleNotificationEvent(@Payload Object event,
                                       @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
                                       Acknowledgment acknowledgment) {
@@ -118,7 +122,7 @@ public class EventConsumer {
         }
     }
 
-    @KafkaListener(topics = "audit-events", groupId = "messaging-service")
+    @KafkaListener(id = "auditEventsListener", topics = "audit-events", groupId = "${spring.kafka.consumer.group-id}.audit-events")
     public void handleAuditEvent(@Payload Object event,
                                @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
                                Acknowledgment acknowledgment) {
