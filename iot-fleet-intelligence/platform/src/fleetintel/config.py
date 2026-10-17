@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     llm_provider: LLMProvider = LLMProvider.FAKE
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: SecretStr = SecretStr("")
+    llm_api_key_secret_arn: str = ""  # AWS: key fetched from Secrets Manager (cached)
     llm_model: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
     llm_timeout_seconds: float = Field(default=30.0, gt=0)

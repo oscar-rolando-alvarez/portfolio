@@ -71,6 +71,29 @@ def _boto(service: str, settings: Settings) -> Any:
     return boto3.client(service, endpoint_url=settings.aws_endpoint_url)  # type: ignore[call-overload]
 
 
+def _llm(settings: Settings) -> tuple[LLMClient, EmbeddingProvider]:
+    if settings.llm_provider is not LLMProvider.OPENAI_COMPATIBLE:
+        return FakeDiagnosisModel(), HashingEmbeddings()
+    llm_http = httpx.Client(timeout=httpx.Timeout(settings.llm_timeout_seconds))
+    key = settings.llm_api_key.get_secret_value()
+    if settings.llm_api_key_secret_arn:
+        from aws_lambda_powertools.utilities import parameters
+
+        key = str(parameters.get_secret(settings.llm_api_key_secret_arn, max_age=300))
+    llm = OpenAICompatibleChat(
+        llm_http,
+        settings.llm_base_url,
+        key,
+        settings.llm_model,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_output_tokens,
+    )
+    embedder = OpenAICompatibleEmbeddings(
+        llm_http, settings.llm_base_url, key, settings.llm_embedding_model
+    )
+    return llm, embedder
+
+
 def build_container(settings: Settings) -> Container:
     http = httpx.Client(
         timeout=httpx.Timeout(settings.http_timeout_seconds), follow_redirects=False
@@ -151,25 +174,7 @@ def build_container(settings: Settings) -> Container:
         callers={n: caller(n) for n in ("celltower", "weather", "carrier", "status_feed")},
     )
 
-    llm: LLMClient
-    embedder: EmbeddingProvider
-    if settings.llm_provider is LLMProvider.OPENAI_COMPATIBLE:
-        llm_http = httpx.Client(timeout=httpx.Timeout(settings.llm_timeout_seconds))
-        key = settings.llm_api_key.get_secret_value()
-        llm = OpenAICompatibleChat(
-            llm_http,
-            settings.llm_base_url,
-            key,
-            settings.llm_model,
-            temperature=settings.llm_temperature,
-            max_tokens=settings.llm_max_output_tokens,
-        )
-        embedder = OpenAICompatibleEmbeddings(
-            llm_http, settings.llm_base_url, key, settings.llm_embedding_model
-        )
-    else:
-        llm, embedder = FakeDiagnosisModel(), HashingEmbeddings()
-
+    llm, embedder = _llm(settings)
     diagnosis = DiagnosisService(
         llm=llm,
         index=RunbookIndex(embedder),
