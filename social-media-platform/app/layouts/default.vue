@@ -1,99 +1,108 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <!-- Mobile header -->
-    <HeaderMobile 
-      v-if="isMobile" 
-      @toggle-sidebar="sidebarOpen = !sidebarOpen"
-    />
-    
-    <!-- Desktop layout -->
-    <div class="flex h-screen">
-      <!-- Sidebar -->
-      <Transition
-        enter-active-class="transition-transform duration-300"
-        enter-from-class="-translate-x-full"
-        enter-to-class="translate-x-0"
-        leave-active-class="transition-transform duration-300"
-        leave-from-class="translate-x-0"
-        leave-to-class="-translate-x-full"
-      >
-        <Sidebar 
-          v-if="!isMobile || sidebarOpen"
-          class="fixed inset-y-0 left-0 z-50 md:relative md:z-auto"
-          :class="{ 'md:translate-x-0': !isMobile }"
-          @close="sidebarOpen = false"
-        />
-      </Transition>
+  <div class="min-h-screen bg-muted/40">
+    <header class="sticky top-0 z-20 border-b border-default bg-default/90 backdrop-blur">
+      <div class="mx-auto flex h-14 max-w-5xl items-center justify-between gap-4 px-4">
+        <NuxtLink
+          to="/"
+          class="flex items-center gap-2 font-semibold"
+        >
+          <img
+            src="/icon.svg"
+            alt=""
+            class="size-7"
+          >
+          <span class="hidden sm:inline">SocialConnect</span>
+        </NuxtLink>
 
-      <!-- Mobile sidebar overlay -->
-      <div
-        v-if="isMobile && sidebarOpen"
-        class="fixed inset-0 z-40 bg-black bg-opacity-50"
-        @click="sidebarOpen = false"
-      />
-
-      <!-- Main content area -->
-      <div class="flex-1 flex flex-col overflow-hidden">
-        <!-- Desktop header -->
-        <HeaderDesktop v-if="!isMobile" />
-        
-        <!-- Page content -->
-        <main class="flex-1 overflow-y-auto">
-          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
-            <slot />
-          </div>
-        </main>
+        <nav
+          v-if="user"
+          class="flex items-center gap-1"
+          aria-label="Primary"
+        >
+          <UButton
+            to="/"
+            icon="i-lucide-house"
+            color="neutral"
+            variant="ghost"
+            aria-label="Home"
+          />
+          <UChip
+            :show="unreadConversations > 0"
+            :text="unreadConversations"
+            size="xl"
+          >
+            <UButton
+              to="/messages"
+              icon="i-lucide-message-circle"
+              color="neutral"
+              variant="ghost"
+              aria-label="Messages"
+            />
+          </UChip>
+          <UChip
+            :show="unreadNotifications > 0"
+            :text="unreadNotifications"
+            size="xl"
+          >
+            <UButton
+              to="/notifications"
+              icon="i-lucide-bell"
+              color="neutral"
+              variant="ghost"
+              aria-label="Notifications"
+            />
+          </UChip>
+          <UColorModeButton />
+          <UDropdownMenu :items="menu">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              :aria-label="`Account menu for ${user.displayName}`"
+            >
+              <UAvatar
+                :src="user.avatar ?? undefined"
+                :alt="user.displayName"
+                size="sm"
+              />
+            </UButton>
+          </UDropdownMenu>
+        </nav>
       </div>
+    </header>
 
-      <!-- Right sidebar (desktop only) -->
-      <RightSidebar v-if="!isMobile && $route.name === 'index'" />
-    </div>
-
-    <!-- Mobile bottom navigation -->
-    <BottomNavigation v-if="isMobile" />
-
-    <!-- Global components -->
-    <NotificationToast />
-    <StoryViewer />
-    <PostModal />
+    <main class="mx-auto max-w-5xl px-4 py-6">
+      <slot />
+    </main>
   </div>
 </template>
 
-<script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+<script setup lang="ts">
+import type { DropdownMenuItem } from '@nuxt/ui'
 
-const sidebarOpen = ref(false)
-const isMobile = ref(false)
+const auth = useAuthStore()
+const inbox = useInboxStore()
+const { user } = storeToRefs(auth)
+const { unreadConversations, unreadNotifications } = storeToRefs(inbox)
 
-const checkScreenSize = () => {
-  isMobile.value = window.innerWidth < 768
-  if (!isMobile.value) {
-    sidebarOpen.value = false
-  }
-}
+const menu = computed<DropdownMenuItem[][]>(() => [
+  [{ label: `@${user.value?.username ?? ''}`, type: 'label' }],
+  [{ label: 'Profile', icon: 'i-lucide-user', to: `/u/${user.value?.username}` }],
+  [{
+    label: 'Sign out',
+    icon: 'i-lucide-log-out',
+    onSelect: async () => {
+      await auth.logout()
+      await navigateTo('/auth/login')
+    }
+  }]
+])
 
-onMounted(() => {
-  checkScreenSize()
-  window.addEventListener('resize', checkScreenSize)
-})
+const loadInbox = () => Promise.all([inbox.fetchConversations(), inbox.fetchNotifications()])
 
-onUnmounted(() => {
-  window.removeEventListener('resize', checkScreenSize)
-})
+if (user.value) await callOnce('inbox', loadInbox)
 
-// Initialize auth and messaging when layout mounts
-const authStore = useAuthStore()
-const messagingStore = useMessagingStore()
-
-onMounted(async () => {
-  await authStore.initializeAuth()
-  
-  if (authStore.isAuthenticated) {
-    await messagingStore.initializeWebSocket()
-  }
-})
-
-onUnmounted(() => {
-  messagingStore.disconnectWebSocket()
+// Reload when a different account signs in without a full page reload.
+watch(() => user.value?.id, (id, previous) => {
+  if (id && previous !== undefined && id !== previous) loadInbox()
 })
 </script>

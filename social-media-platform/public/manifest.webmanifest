@@ -1,0 +1,13 @@
+{
+  "name": "SocialConnect",
+  "short_name": "SocialConnect",
+  "description": "A modern social network for sharing moments and chatting with friends.",
+  "theme_color": "#3b82f6",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
