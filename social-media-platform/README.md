@@ -1,374 +1,220 @@
-# SocialConnect - Modern Social Media Platform
+# SocialConnect (social-media-platform)
 
-A comprehensive social media platform built with Vue 3, Nuxt 3, and modern web technologies. Features real-time messaging, story sharing, advanced privacy controls, and a progressive web app experience.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/social-media-platform.yml/badge.svg)
 
-## ✨ Features
+A full-stack social network built with **Nuxt 4**, **Prisma 7** and **PostgreSQL**: a ranked home feed, follows, likes, comments, real-time direct messages and notifications over WebSockets, and pluggable content moderation that can use any OpenAI-compatible LLM endpoint.
 
-### Core Features
-- **User Authentication** - JWT-based authentication with refresh tokens
-- **Posts & Media** - Create posts with text, images, and videos
-- **Real-time Messaging** - WebSocket-powered instant messaging
-- **Stories** - 24-hour disappearing stories with views tracking
-- **Social Features** - Follow/unfollow, likes, comments, bookmarks
-- **Advanced Feed** - Intelligent recommendation algorithm
-- **Infinite Scroll** - Smooth infinite scrolling with pagination
+## Problem it solves
 
-### Advanced Features
-- **Progressive Web App (PWA)** - Offline support and app-like experience
-- **Push Notifications** - Real-time notifications for engagement
-- **Content Moderation** - AI-powered content filtering
-- **Privacy Controls** - Granular privacy settings and data controls
-- **Analytics** - User interaction tracking and engagement metrics
-- **Search** - Full-text search for users, posts, and hashtags
-- **Media Compression** - Automatic image and video optimization
+Community products need the same core loop (post, react, follow, message) to be fast, safe and cheap to run. SocialConnect shows how far a single Nuxt deployment plus Postgres can go: server-rendered pages, a typed API, real-time delivery without a separate socket server, and moderation that works offline by default and can be upgraded to an LLM by configuration alone.
 
-### Technical Features
-- **Server-Side Rendering (SSR)** - SEO-optimized with Nuxt 3
-- **Real-time Updates** - WebSocket integration with Socket.IO
-- **Database** - PostgreSQL with Prisma ORM
-- **State Management** - Pinia stores with TypeScript
-- **Responsive Design** - Mobile-first design with Tailwind CSS
-- **Type Safety** - Full TypeScript implementation
+## Key features
 
-## 🛠 Tech Stack
+- **Ranked home feed**: recent visible posts are scored by engagement (comments weigh double), author affinity (people you follow, and yourself) and Hacker News style time decay, then paginated.
+- **Posts** with optional HTTPS image URLs and `PUBLIC` / `FOLLOWERS` visibility; likes, threaded comment list, reporting.
+- **Social graph**: follow/unfollow, profile pages with counters, "who to follow" suggestions.
+- **Direct messages** delivered live over a Nitro WebSocket (`/_ws`), with unread badges and duplicate-safe client state.
+- **Notifications** for likes, comments and follows, pushed in real time.
+- **Content moderation port**: `keyword` (default, offline), `llm` (any OpenAI-compatible chat completions API in JSON mode: a hosted provider, a LiteLLM proxy, vLLM or a local Ollama) or `none`. Flagged posts are hidden from everyone but the author. The LLM adapter fails open to the keyword check, so posting never depends on an external service.
+- **Secure auth**: bcrypt (cost 12) hashes, 15-minute access JWTs plus revocable 30-day refresh tokens stored only as SHA-256 hashes, all in httpOnly cookies; expired access tokens are renewed transparently, including during SSR.
+- **Operations**: `/api/health` with a database check, structured JSON request logs, versioned Prisma migrations, non-root Docker images and a one-shot migration container.
 
-### Frontend
-- **Vue 3** - Progressive JavaScript framework with Composition API
-- **Nuxt 3** - Full-stack framework with SSR/SSG
-- **TypeScript** - Type-safe development
-- **Tailwind CSS** - Utility-first CSS framework
-- **Pinia** - State management
-- **VueUse** - Collection of essential Vue utilities
-- **Headless UI** - Unstyled, accessible UI components
+## Tech stack
 
-### Backend
-- **Nuxt 3 API Routes** - Server-side API endpoints
-- **Prisma** - Modern database toolkit and ORM
-- **PostgreSQL** - Robust relational database
-- **Socket.IO** - Real-time bidirectional communication
-- **JWT** - JSON Web Tokens for authentication
-- **Bcrypt** - Password hashing
+| Layer | Technology | Version |
+| --- | --- | --- |
+| Runtime | Node.js (LTS) | 24 |
+| Framework | Nuxt (SSR, Nitro server, WebSocket support) | 4.6 |
+| UI | Vue, Nuxt UI, Tailwind CSS | 3.5 / 4.12 / 4.3 |
+| State | Pinia (setup stores) | 4.1 |
+| ORM | Prisma ORM with `prisma-client` generator and `@prisma/adapter-pg` | 7.10 |
+| Database | PostgreSQL | 18 |
+| Validation | Zod (shared by forms and API) | 4.6 |
+| Auth | jose (JWT), bcryptjs | 6.2 / 3.0 |
+| Language | TypeScript (strict, `vue-tsc`) | 6.0 |
+| Tests | Vitest, @nuxt/test-utils, Vue Test Utils, happy-dom | 5.0 / 4.3 / 2.5 / 21 |
+| Lint | ESLint flat config via @nuxt/eslint | 10 / 1.17 |
 
-### Infrastructure
-- **Docker** - Containerization for easy deployment
-- **Redis** - Caching and session storage
-- **Cloudinary** - Media storage and optimization
-- **Firebase** - Push notifications
-- **Nginx** - Reverse proxy and load balancing
+## Architecture
 
-## 🚀 Getting Started
+### Context and containers
 
-### Prerequisites
+```mermaid
+flowchart LR
+  user["User<br/>(browser / PWA)"]
+  llm["OpenAI-compatible LLM endpoint<br/>(optional)"]
+  subgraph nuxt["Nuxt 4 application (Node 24)"]
+    direction TB
+    web["Vue 3 SSR + SPA<br/>Pinia stores"]
+    api["Nitro REST API<br/>/api/*"]
+    ws["Nitro WebSocket<br/>/_ws"]
+    mod["Moderation port<br/>keyword / llm / none"]
+    realtime["Realtime hub<br/>peers by user id"]
+  end
+  db[("PostgreSQL 18<br/>Prisma 7 + pg adapter")]
 
-- Node.js 18+ 
-- npm or yarn
-- PostgreSQL 13+
-- Redis (optional, for caching)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd social-media-platform
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` file with your configuration values.
-
-4. **Set up the database**
-   ```bash
-   # Install PostgreSQL and create database
-   createdb socialconnect
-   
-   # Generate Prisma client and run migrations
-   npx prisma generate
-   npx prisma db push
-   
-   # Optional: Seed database with sample data
-   npx prisma db seed
-   ```
-
-5. **Start the development server**
-   ```bash
-   npm run dev
-   ```
-
-6. **Open your browser**
-   Navigate to [http://localhost:3000](http://localhost:3000)
-
-### Docker Setup
-
-1. **Using Docker Compose (Recommended)**
-   ```bash
-   # Copy environment file
-   cp .env.example .env
-   
-   # Start all services
-   docker-compose up -d
-   
-   # Run database migrations
-   docker-compose exec app npx prisma db push
-   ```
-
-2. **Access the application**
-   - App: [http://localhost:3000](http://localhost:3000)
-   - Database: localhost:5432
-   - Redis: localhost:6379
-
-## 📁 Project Structure
-
+  user -- "HTTPS + httpOnly cookies" --> web
+  user -- "WebSocket" --> ws
+  web -- "useRequestFetch / $fetch" --> api
+  api --> db
+  api --> mod
+  mod -. "JSON-mode chat completion" .-> llm
+  api -- "publish events" --> realtime
+  ws --- realtime
 ```
+
+### Key flow: sending a direct message
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor A as Alice (browser)
+  participant API as POST /api/conversations/:id/messages
+  participant DB as PostgreSQL
+  participant Hub as Realtime hub
+  actor B as Bob (browser, connected to /_ws)
+
+  A->>API: { content } + access cookie
+  API->>API: auth middleware verifies JWT (renews it from refresh cookie if expired)
+  API->>DB: check participant, then transaction: insert message, read participants, bump lastMessageAt
+  DB-->>API: message + participants
+  API->>Hub: publish { type: "message" } to participant user ids
+  Hub-->>B: WebSocket frame
+  B->>B: inbox store appends message, marks conversation unread
+  API-->>A: 201 MessageDTO
+```
+
+### Data model (core tables)
+
+```mermaid
+erDiagram
+  USER ||--o{ POST : writes
+  USER ||--o{ COMMENT : writes
+  USER ||--o{ LIKE : gives
+  POST ||--o{ COMMENT : has
+  POST ||--o{ LIKE : receives
+  POST ||--o{ REPORT : "reported in"
+  USER ||--o{ FOLLOW : "follower"
+  USER ||--o{ FOLLOW : "followed"
+  USER ||--o{ REFRESH_TOKEN : "sessions"
+  CONVERSATION ||--o{ CONVERSATION_PARTICIPANT : includes
+  USER ||--o{ CONVERSATION_PARTICIPANT : joins
+  CONVERSATION ||--o{ MESSAGE : contains
+  USER ||--o{ NOTIFICATION : receives
+  POST {
+    string id
+    string content
+    string visibility "PUBLIC | FOLLOWERS"
+    string moderation "APPROVED | FLAGGED"
+    datetime createdAt
+  }
+  REFRESH_TOKEN {
+    string tokenHash "SHA-256, unique"
+    datetime expiresAt
+    datetime revokedAt
+  }
+```
+
+The full schema is in `prisma/schema.prisma`; migrations are in `prisma/migrations/`.
+
+## Project structure
+
+```text
 social-media-platform/
-├── assets/                 # Static assets (CSS, images)
-├── components/            # Vue components
-│   ├── ui/               # Reusable UI components
-│   ├── forms/            # Form components
-│   ├── post/             # Post-related components
-│   ├── messaging/        # Chat components
-│   └── story/            # Story components
-├── composables/          # Vue composables
-├── layouts/              # Page layouts
-├── middleware/           # Route middleware
-├── pages/                # File-based routing
-│   ├── auth/            # Authentication pages
-│   ├── profile/         # User profile pages
-│   ├── messages/        # Messaging interface
-│   └── settings/        # App settings
-├── plugins/              # Nuxt plugins
-├── prisma/               # Database schema and migrations
-├── public/               # Static files
-├── server/               # Server-side code
-│   ├── api/             # API routes
-│   ├── middleware/      # Server middleware
-│   ├── plugins/         # Server plugins
-│   └── utils/           # Server utilities
-├── stores/               # Pinia stores
-├── types/                # TypeScript type definitions
-├── utils/                # Client utilities
-└── tests/                # Test files
+├── app/                     # Nuxt 4 app directory
+│   ├── components/          # post/PostCard, post/PostComposer, WhoToFollow
+│   ├── layouts/             # default (top nav with unread badges) and auth
+│   ├── middleware/          # auth / guest route guards
+│   ├── pages/               # feed, u/[username], messages, notifications, auth/*
+│   ├── plugins/             # realtime.client.ts (WebSocket with backoff)
+│   └── stores/              # Pinia: auth, posts, inbox
+├── server/
+│   ├── api/                 # REST handlers (auth, posts, users, conversations, notifications, health)
+│   ├── middleware/auth.ts   # resolves the caller from cookies / Bearer token
+│   ├── routes/_ws.ts        # WebSocket endpoint
+│   ├── plugins/             # structured request logging
+│   └── utils/               # prisma, session/tokens, ranking, moderation, realtime, mappers
+├── shared/                  # DTO types and Zod schemas used by app and server
+├── prisma/                  # schema, migrations, seed
+├── scripts/smoke-test.sh    # end-to-end API + SSR smoke test (used in CI)
+├── test/
+│   ├── unit/                # ranking, moderation adapters, tokens, validation
+│   └── nuxt/                # PostCard component, posts and inbox stores
+├── prisma.config.ts
+├── Dockerfile               # build / migrate / runtime targets
+└── docker-compose.yml       # postgres + migrate job + app
 ```
 
-## 🔧 Configuration
+## Running locally
 
-### Environment Variables
-
-Key environment variables to configure:
-
-```env
-# Database
-DATABASE_URL="postgresql://username:password@localhost:5432/database"
-
-# Authentication
-JWT_SECRET="your-secret-key"
-
-# File Storage
-CLOUDINARY_CLOUD_NAME="your-cloudinary-name"
-CLOUDINARY_API_KEY="your-api-key"
-CLOUDINARY_API_SECRET="your-api-secret"
-
-# Push Notifications
-FIREBASE_PROJECT_ID="your-firebase-project"
-VAPID_PUBLIC_KEY="your-vapid-public-key"
-VAPID_PRIVATE_KEY="your-vapid-private-key"
-```
-
-### Database Schema
-
-The application uses Prisma with PostgreSQL. Key models include:
-
-- **User** - User accounts and profiles
-- **Post** - User posts with media
-- **Story** - Temporary stories
-- **Message** - Real-time messaging
-- **Conversation** - Chat conversations
-- **Notification** - System notifications
-- **Analytics** - User interaction tracking
-
-## 🧪 Testing
-
-Run the test suite:
+Prerequisites: Node.js 24 LTS, npm 10+, and PostgreSQL 16+ (or Docker for the database).
 
 ```bash
-# Unit tests
-npm run test
+cd social-media-platform
+cp .env.example .env                 # adjust DATABASE_URL if needed
+docker compose up -d db              # or use your own Postgres
+npm install                          # also runs `prisma generate` and `nuxt prepare`
+npm run db:deploy                    # apply migrations
+npm run db:seed                      # demo users: alice, bob, carol, dave / Password123
+npm run dev                          # http://localhost:3000
+```
 
-# E2E tests
-npm run test:e2e
+### Full stack with Docker
 
-# Test coverage
+```bash
+cd social-media-platform
+export NUXT_JWT_SECRET="$(openssl rand -base64 48)"
+docker compose up --build            # db -> migrate (one-shot) -> app on http://localhost:3000
+```
+
+To load demo data into the containerised database, run `DATABASE_URL=postgresql://social:social@localhost:5432/socialconnect npm run db:seed` from the host.
+
+### Enabling LLM moderation
+
+```bash
+NUXT_MODERATION_PROVIDER=llm
+NUXT_MODERATION_BASE_URL=http://localhost:11434/v1   # any OpenAI-compatible endpoint
+NUXT_MODERATION_MODEL=llama3.1                       # model name understood by that endpoint
+NUXT_MODERATION_API_KEY=                             # if the endpoint requires one
+```
+
+## Testing and quality
+
+```bash
+npm run lint           # ESLint flat config (@nuxt/eslint)
+npm run typecheck      # vue-tsc across app, server and shared
+npm test               # Vitest: unit + Nuxt component/store projects (no database needed)
 npm run test:coverage
+npm run build && npm start   # then, with a migrated and seeded DB:
+./scripts/smoke-test.sh      # register, follow, feed, post, like, comment, moderation, DM, SSR, logout
 ```
 
-## 🚀 Deployment
+CI (`.github/workflows/social-media-platform.yml`) runs against a PostgreSQL 18 service container: lint, typecheck, unit/component tests with coverage, `prisma migrate deploy` plus a schema drift check, seeding, a production build and the end-to-end smoke test. A second job builds both Docker targets and brings up the Compose stack until the health check passes. `npm audit` runs as an advisory job because the remaining high-severity findings are in Nuxt/Nitro build-time tooling with no patched release yet.
 
-### Production Build
+## Configuration
 
-```bash
-# Build for production
-npm run build
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DATABASE_URL` | none | PostgreSQL connection string, used by the app and the Prisma CLI (`NUXT_DATABASE_URL` overrides it for the app). |
+| `NUXT_JWT_SECRET` | dev-only fallback | HS256 secret for access tokens. **Required** in production. |
+| `NUXT_ACCESS_TOKEN_TTL` | `900` | Access token lifetime (seconds). |
+| `NUXT_REFRESH_TOKEN_TTL` | `2592000` | Refresh token lifetime (seconds). |
+| `NUXT_COOKIE_SECURE` | `true` | Set to `false` only for plain HTTP on a non-localhost host. |
+| `NUXT_MODERATION_PROVIDER` | `keyword` | `none`, `keyword` or `llm`. |
+| `NUXT_MODERATION_BASE_URL` | empty | OpenAI-compatible base URL (for `llm`). |
+| `NUXT_MODERATION_MODEL` | empty | Model name (for `llm`). |
+| `NUXT_MODERATION_API_KEY` | empty | Optional bearer token (for `llm`). |
+| `HOST` / `PORT` | `0.0.0.0` / `3000` | Listener for the production server. |
 
-# Start production server
-npm start
-```
+## Design decisions
 
-### Docker Deployment
+- **One Nuxt deployable instead of separate SPA, API and socket servers.** Nitro serves SSR pages, REST endpoints and WebSockets from the same process, which keeps auth (one cookie) and deployment (one image) simple. The realtime hub is an in-process map behind three functions, so moving to Redis or Postgres `LISTEN/NOTIFY` for multiple replicas is a contained change.
+- **Prisma 7 with the `pg` driver adapter and a generated TypeScript client.** No native query-engine binary to ship, and the client is bundled by Nitro, so the runtime image only contains `.output/`. Migrations are SQL files reviewed in Git and applied by a dedicated container.
+- **Short-lived access JWT plus hashed, revocable refresh token.** Access checks are stateless; logout and compromise response are handled by revoking the refresh row. Renewal happens in server middleware, so both API calls and SSR keep working when the access token expires.
+- **Ranking in application code.** The scoring function is pure and unit-tested; candidates come from one indexed query over a 14-day window. This is the right trade-off at this scale and leaves room for a materialised score later.
+- **Moderation as a port with an offline default.** The LLM path is optional, vendor-neutral (OpenAI-compatible JSON mode) and fails open to the keyword filter, so tests and local development never need network access or credentials.
+- **Shared Zod schemas.** The same schemas validate forms in the browser and request bodies on the server, so error messages and limits cannot drift.
 
-```bash
-# Build production image
-docker build -t socialconnect .
+## License
 
-# Run with environment variables
-docker run -p 3000:3000 --env-file .env socialconnect
-```
-
-### Platform Deployment
-
-The application can be deployed to various platforms:
-
-- **Vercel** - Recommended for Nuxt 3
-- **Netlify** - Static site generation
-- **Railway** - Full-stack deployment
-- **Heroku** - Container deployment
-- **DigitalOcean** - VPS deployment
-
-## 📊 Features Overview
-
-### Authentication System
-- JWT-based authentication with refresh tokens
-- Social login (Google, GitHub)
-- Password reset and email verification
-- Session management
-
-### Content Management
-- Rich text posts with media upload
-- Image and video compression
-- Content moderation with AI
-- Hashtag and mention support
-
-### Real-time Features
-- WebSocket connections for live updates
-- Real-time messaging with typing indicators
-- Live notifications
-- Online status tracking
-
-### Privacy & Security
-- Granular privacy controls
-- Content visibility settings
-- Block and report functionality
-- Data export and deletion
-
-### Performance
-- Server-side rendering for SEO
-- Image optimization and lazy loading
-- Infinite scroll with virtual lists
-- Caching strategies with Redis
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow TypeScript best practices
-- Write tests for new features
-- Use conventional commit messages
-- Ensure accessibility compliance
-- Optimize for performance
-
-## 📝 API Documentation
-
-### Authentication Endpoints
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-- `POST /api/auth/logout` - User logout
-- `POST /api/auth/refresh` - Token refresh
-- `GET /api/auth/me` - Current user info
-
-### Posts Endpoints
-- `GET /api/posts` - Get posts feed
-- `POST /api/posts` - Create new post
-- `GET /api/posts/:id` - Get specific post
-- `DELETE /api/posts/:id` - Delete post
-- `POST /api/posts/:id/like` - Like/unlike post
-
-### Messaging Endpoints
-- `GET /api/messages/conversations` - Get conversations
-- `POST /api/messages/conversations` - Create conversation
-- `GET /api/messages/conversations/:id/messages` - Get messages
-- `POST /api/messages/conversations/:id/messages` - Send message
-
-## 🔒 Security
-
-- CSRF protection
-- Rate limiting
-- Input validation and sanitization
-- SQL injection prevention
-- XSS protection
-- Secure headers configuration
-
-## 📱 Progressive Web App
-
-- Offline functionality
-- App installation prompt
-- Background sync
-- Push notifications
-- Service worker caching
-
-## 🎯 Performance Optimization
-
-- Code splitting and lazy loading
-- Image optimization with Nuxt Image
-- Critical CSS inlining
-- Browser caching strategies
-- Database query optimization
-
-## 📈 Analytics & Monitoring
-
-- User interaction tracking
-- Performance monitoring
-- Error tracking and reporting
-- Custom analytics dashboard
-- A/B testing capabilities
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 🆘 Support
-
-For technical support and questions:
-
-- Create an issue on GitHub
-- Check the documentation
-- Review existing discussions
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Vue.js team for the amazing framework
-- Nuxt team for the full-stack solution
-- Prisma team for the excellent ORM
-- All contributors and community members
-
----
-
-Built with ❤️ using Vue 3, Nuxt 3, and modern web technologies.
+MIT
