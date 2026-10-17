@@ -1,0 +1,153 @@
+name: nft-marketplace
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "nft-marketplace/**"
+      - ".github/workflows/nft-marketplace.yml"
+  pull_request:
+    paths:
+      - "nft-marketplace/**"
+      - ".github/workflows/nft-marketplace.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: nft-marketplace
+
+env:
+  AGAVE_VERSION: "4.3.2"
+  ANCHOR_VERSION: "1.2.1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  programs:
+    name: Programs (fmt, clippy, anchor build, tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: nft-marketplace
+
+      - name: Cache Agave, Anchor and SBF platform tools
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.local/solana
+            ~/.cache/solana
+          key: solana-${{ runner.os }}-agave${{ env.AGAVE_VERSION }}-anchor${{ env.ANCHOR_VERSION }}
+
+      - name: Install Agave and Anchor CLIs
+        run: |
+          set -euo pipefail
+          tools="$HOME/.local/solana"
+          if [ ! -x "$tools/anchor" ]; then
+            mkdir -p "$tools"
+            curl -sSfL "https://github.com/anza-xyz/agave/releases/download/v${AGAVE_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" \
+              | tar -xj -C "$tools"
+            curl -sSfL -o "$tools/anchor" \
+              "https://github.com/solana-foundation/anchor/releases/download/v${ANCHOR_VERSION}/anchor-${ANCHOR_VERSION}-x86_64-unknown-linux-gnu"
+            chmod +x "$tools/anchor"
+          fi
+          echo "$tools" >> "$GITHUB_PATH"
+          echo "$tools/solana-release/bin" >> "$GITHUB_PATH"
+
+      - name: Tool versions
+        run: |
+          anchor --version
+          cargo-build-sbf --version
+          cargo --version
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build SBF programs and IDL
+        run: anchor build
+
+      - name: Unit and LiteSVM integration tests
+        run: cargo test --workspace
+
+      - name: Upload IDL and program binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: nft-marketplace-build
+          path: |
+            nft-marketplace/target/idl/*.json
+            nft-marketplace/target/types/*.ts
+            nft-marketplace/target/deploy/*.so
+          if-no-files-found: error
+
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Advisory only: the upstream Solana crate graph regularly carries
+    # advisories that cannot be fixed downstream. Findings are reported in the log.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit
+
+  app:
+    name: Frontend (lint, typecheck, test, build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: nft-marketplace/app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: nft-marketplace/app/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: npm audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  docker:
+    name: Frontend container image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: nft-marketplace/app
+          push: false
+          tags: nft-marketplace-app:ci
+          cache-from: type=gha,scope=nft-marketplace-app
+          cache-to: type=gha,mode=max,scope=nft-marketplace-app
