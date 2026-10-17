@@ -21,12 +21,16 @@ const (
 )
 
 // AllPIITypes lists every supported entity type in detection order.
-var AllPIITypes = []string{PIIEmail, PIIIBAN, PIICreditCard, PIISSN, PIIPhone, PIIIPAddress}
+// IP addresses run before phones so dotted quads are not read as numbers.
+var AllPIITypes = []string{PIIEmail, PIIIBAN, PIICreditCard, PIISSN, PIIIPAddress, PIIPhone}
 
 type detector struct {
 	typ      string
 	re       *regexp.Regexp
 	validate func(match string) bool
+	// context inspects the surrounding text (e.g. to reject the tail of an
+	// IBAN-shaped string being read as a card number).
+	context func(text string, start, end int) bool
 	// prefilter quickly rejects texts that cannot contain the entity.
 	prefilter func(s string) bool
 }
@@ -47,6 +51,7 @@ var detectors = map[string]detector{
 		typ:       PIICreditCard,
 		re:        regexp.MustCompile(`\b(?:[0-9][ \-]?){12,18}[0-9]\b`),
 		validate:  validCard,
+		context:   notIBANTail,
 		prefilter: hasDigit,
 	},
 	PIISSN: {
@@ -120,15 +125,33 @@ func (s *PIIScanner) Redact(text string, findings Findings) string {
 		if d.prefilter != nil && !d.prefilter(text) {
 			continue
 		}
-		text = d.re.ReplaceAllStringFunc(text, func(m string) string {
-			if d.validate != nil && !d.validate(m) {
-				return m
+		idx := d.re.FindAllStringIndex(text, -1)
+		if len(idx) == 0 {
+			continue
+		}
+		var b strings.Builder
+		last := 0
+		for _, m := range idx {
+			start, end := m[0], m[1]
+			if !standalone(text, start, end) ||
+				(d.validate != nil && !d.validate(text[start:end])) ||
+				(d.context != nil && !d.context(text, start, end)) {
+				continue
 			}
+			if b.Len() == 0 {
+				b.Grow(len(text))
+			}
+			b.WriteString(text[last:start])
+			b.WriteString(Placeholder(d.typ))
+			last = end
 			if findings != nil {
 				findings[d.typ]++
 			}
-			return Placeholder(d.typ)
-		})
+		}
+		if last > 0 {
+			b.WriteString(text[last:])
+			text = b.String()
+		}
 	}
 	return text
 }
@@ -138,6 +161,45 @@ func (s *PIIScanner) Detect(text string) Findings {
 	f := Findings{}
 	s.Redact(text, f)
 	return f
+}
+
+func isAlnum(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// standalone rejects matches glued to surrounding identifiers, such as the
+// numeric tail of "INV-2026-000123" or a prefix of "10.0.0.0.1".
+func standalone(text string, start, end int) bool {
+	if start > 0 {
+		p := text[start-1]
+		if isAlnum(p) || p == '_' || p == '/' {
+			return false
+		}
+		if (p == '-' || p == '.') && start > 1 && isAlnum(text[start-2]) {
+			return false
+		}
+	}
+	if end < len(text) {
+		n := text[end]
+		if isAlnum(n) || n == '_' {
+			return false
+		}
+		if (n == '.' || n == '-') && end+1 < len(text) && isDigit(text[end+1]) {
+			return false
+		}
+	}
+	return true
+}
+
+var ibanHead = regexp.MustCompile(`[A-Z]{2}[0-9]{2} ?$`)
+
+// notIBANTail rejects card candidates that directly follow an IBAN-style
+// "CCdd" prefix: an invalid IBAN must not be reported as a card number.
+func notIBANTail(text string, start, _ int) bool {
+	from := max(0, start-5)
+	return !ibanHead.MatchString(text[from:start])
 }
 
 func hasDigit(s string) bool {

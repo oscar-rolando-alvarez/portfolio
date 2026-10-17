@@ -100,6 +100,8 @@ func TestShippedConfigsAreValid(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(file), "..", "..")
 	matches, _ := filepath.Glob(filepath.Join(root, "configs", "*.yaml"))
+	evalCfgs, _ := filepath.Glob(filepath.Join(root, "evals", "config*.yaml"))
+	matches = append(matches, evalCfgs...)
 	if len(matches) == 0 {
 		t.Fatal("no configs found")
 	}
