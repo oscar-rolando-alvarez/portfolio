@@ -1,139 +1,100 @@
+//! Isolated-market lending protocol.
+//!
+//! Each market pairs one collateral asset with one borrowable asset. Suppliers
+//! deposit the borrowable asset and receive interest-bearing share tokens;
+//! borrowers lock collateral and borrow against it up to the market LTV, priced
+//! by Pyth pull oracles. Unhealthy positions can be liquidated, and idle
+//! liquidity is available for single-transaction flash loans.
+
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
-use pyth_sdk_solana::load_price_feed_from_account_info;
 
 pub mod constants;
 pub mod errors;
+pub mod events;
 pub mod instructions;
+pub mod math;
+pub mod oracle;
 pub mod state;
-pub mod utils;
+pub mod token;
 
-use constants::*;
-use errors::*;
 use instructions::*;
-use state::*;
+use state::MarketConfig;
 
-declare_id!("DLendpNGzTTDdRsQHBJyYgQV9qR8JwKyFfvKSzWE8hT");
+declare_id!("4sohRUrhAnm75sFwUbeE6tJHRQCNq5MMf4PEYEUi1WdD");
 
 #[program]
 pub mod defi_lending_protocol {
     use super::*;
 
-    /// Initialize the lending protocol
-    pub fn initialize_protocol(
-        ctx: Context<InitializeProtocol>,
-        admin: Pubkey,
-        fee_rate: u64,
+    /// Creates the singleton protocol config; the signer becomes admin.
+    pub fn initialize_protocol(ctx: Context<InitializeProtocol>) -> Result<()> {
+        handle_initialize_protocol(ctx)
+    }
+
+    /// Creates an isolated market with its vaults and share mint (admin only).
+    pub fn create_market(ctx: Context<CreateMarket>, params: CreateMarketParams) -> Result<()> {
+        handle_create_market(ctx, params)
+    }
+
+    /// Global circuit breaker (admin only).
+    pub fn set_protocol_paused(ctx: Context<SetProtocolPaused>, paused: bool) -> Result<()> {
+        handle_set_protocol_paused(ctx, paused)
+    }
+
+    /// Updates risk parameters and/or pauses a single market (admin only).
+    pub fn update_market(
+        ctx: Context<UpdateMarket>,
+        config: Option<MarketConfig>,
+        paused: Option<bool>,
     ) -> Result<()> {
-        instructions::initialize_protocol(ctx, admin, fee_rate)
+        handle_update_market(ctx, config, paused)
     }
 
-    /// Initialize a liquidity pool for a specific token
-    pub fn initialize_pool(
-        ctx: Context<InitializePool>,
-        asset_mint: Pubkey,
-        collateral_factor: u64,
-        reserve_factor: u64,
-        liquidation_threshold: u64,
-        liquidation_bonus: u64,
-    ) -> Result<()> {
-        instructions::initialize_pool(
-            ctx,
-            asset_mint,
-            collateral_factor,
-            reserve_factor,
-            liquidation_threshold,
-            liquidation_bonus,
-        )
+    /// Transfers accumulated protocol reserves out of a market (admin only).
+    pub fn collect_reserves(ctx: Context<CollectReserves>, amount: u64) -> Result<()> {
+        handle_collect_reserves(ctx, amount)
     }
 
-    /// Supply tokens to a liquidity pool
-    pub fn supply(ctx: Context<Supply>, amount: u64) -> Result<()> {
-        instructions::supply(ctx, amount)
+    /// Supplies the borrowable asset and mints share tokens.
+    pub fn supply(ctx: Context<SupplyLiquidity>, amount: u64) -> Result<()> {
+        handle_supply(ctx, amount)
     }
 
-    /// Withdraw tokens from a liquidity pool
-    pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
-        instructions::withdraw(ctx, amount)
+    /// Burns share tokens and returns the underlying plus accrued interest.
+    pub fn withdraw(ctx: Context<SupplyLiquidity>, shares: u64) -> Result<()> {
+        handle_withdraw(ctx, shares)
     }
 
-    /// Borrow tokens from a liquidity pool
+    /// Opens an empty borrowing position for the signer in a market.
+    pub fn open_position(ctx: Context<OpenPosition>) -> Result<()> {
+        handle_open_position(ctx)
+    }
+
+    pub fn deposit_collateral(ctx: Context<DepositCollateral>, amount: u64) -> Result<()> {
+        handle_deposit_collateral(ctx, amount)
+    }
+
+    pub fn withdraw_collateral(ctx: Context<WithdrawCollateral>, amount: u64) -> Result<()> {
+        handle_withdraw_collateral(ctx, amount)
+    }
+
     pub fn borrow(ctx: Context<Borrow>, amount: u64) -> Result<()> {
-        instructions::borrow(ctx, amount)
+        handle_borrow(ctx, amount)
     }
 
-    /// Repay borrowed tokens
     pub fn repay(ctx: Context<Repay>, amount: u64) -> Result<()> {
-        instructions::repay(ctx, amount)
+        handle_repay(ctx, amount)
     }
 
-    /// Liquidate an unhealthy position
-    pub fn liquidate(
-        ctx: Context<Liquidate>,
-        debt_to_cover: u64,
-        receive_a_token: bool,
-    ) -> Result<()> {
-        instructions::liquidate(ctx, debt_to_cover, receive_a_token)
+    pub fn liquidate(ctx: Context<Liquidate>, max_repay: u64) -> Result<()> {
+        handle_liquidate(ctx, max_repay)
     }
 
-    /// Execute a flash loan
-    pub fn flash_loan(
-        ctx: Context<FlashLoan>,
-        amount: u64,
-        params: Vec<u8>,
-    ) -> Result<()> {
-        instructions::flash_loan(ctx, amount, params)
+    pub fn flash_borrow(ctx: Context<FlashLoanAccounts>, amount: u64) -> Result<()> {
+        handle_flash_borrow(ctx, amount)
     }
 
-    /// Update interest rates for a pool
-    pub fn update_interest_rates(ctx: Context<UpdateInterestRates>) -> Result<()> {
-        instructions::update_interest_rates(ctx)
-    }
-
-    /// Claim rewards for liquidity providers
-    pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
-        instructions::claim_rewards(ctx)
-    }
-
-    /// Update oracle price feeds
-    pub fn update_oracle_price(ctx: Context<UpdateOraclePrice>) -> Result<()> {
-        instructions::update_oracle_price(ctx)
-    }
-
-    /// Initialize user obligation account
-    pub fn init_user_obligation(ctx: Context<InitUserObligation>) -> Result<()> {
-        instructions::init_user_obligation(ctx)
-    }
-
-    /// Deposit collateral
-    pub fn deposit_collateral(
-        ctx: Context<DepositCollateral>,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::deposit_collateral(ctx, amount)
-    }
-
-    /// Withdraw collateral
-    pub fn withdraw_collateral(
-        ctx: Context<WithdrawCollateral>,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::withdraw_collateral(ctx, amount)
-    }
-
-    /// Stake governance tokens for voting power
-    pub fn stake_governance_tokens(
-        ctx: Context<StakeGovernanceTokens>,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::stake_governance_tokens(ctx, amount)
-    }
-
-    /// Unstake governance tokens
-    pub fn unstake_governance_tokens(
-        ctx: Context<UnstakeGovernanceTokens>,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::unstake_governance_tokens(ctx, amount)
+    pub fn flash_repay(ctx: Context<FlashLoanAccounts>, amount: u64) -> Result<()> {
+        handle_flash_repay(ctx, amount)
     }
 }

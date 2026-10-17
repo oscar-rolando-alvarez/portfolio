@@ -1,359 +1,143 @@
-use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, Token, TokenAccount, Transfer, Burn};
 use crate::constants::*;
 use crate::errors::LendingError;
-use crate::state::{Protocol, Pool, UserObligation, InterestRateMode};
-use crate::utils::{TokenUtils, OracleUtils, calculate_liquidation_amounts, calculate_health_factor};
+use crate::events::Liquidated;
+use crate::instructions::borrow::reduce_debt;
+use crate::instructions::risk::{RiskSnapshot, load_prices};
+use crate::math;
+use crate::state::{Market, Position, Protocol};
+use crate::token::{self, TransferArgs};
+use anchor_lang::prelude::*;
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
 #[derive(Accounts)]
 pub struct Liquidate<'info> {
-    #[account(
-        seeds = [PROTOCOL_SEED],
-        bump = protocol.bump,
-        constraint = !protocol.is_paused() @ LendingError::PoolPaused
-    )]
-    pub protocol: Account<'info, Protocol>,
-    
-    /// Collateral pool (where we seize collateral)
-    #[account(
-        mut,
-        seeds = [POOL_SEED, collateral_pool.asset_mint.as_ref()],
-        bump = collateral_pool.bump,
-        constraint = collateral_pool.is_active() @ LendingError::PoolPaused
-    )]
-    pub collateral_pool: Account<'info, Pool>,
-    
-    /// Debt pool (where we repay debt)
-    #[account(
-        mut,
-        seeds = [POOL_SEED, debt_pool.asset_mint.as_ref()],
-        bump = debt_pool.bump,
-        constraint = debt_pool.is_active() @ LendingError::PoolPaused
-    )]
-    pub debt_pool: Account<'info, Pool>,
-    
-    #[account(
-        mut,
-        seeds = [USER_OBLIGATION_SEED, borrower.key().as_ref(), protocol.key().as_ref()],
-        bump = user_obligation.bump,
-        constraint = user_obligation.is_liquidatable() @ LendingError::HealthyPosition
-    )]
-    pub user_obligation: Account<'info, UserObligation>,
-    
-    /// Liquidator pays with this account (debt token)
-    #[account(
-        mut,
-        token::mint = debt_pool.asset_mint,
-        token::authority = liquidator
-    )]
-    pub liquidator_debt_account: Account<'info, TokenAccount>,
-    
-    /// Liquidator receives collateral in this account
-    #[account(
-        mut,
-        token::mint = collateral_pool.asset_mint,
-        token::authority = liquidator
-    )]
-    pub liquidator_collateral_account: Account<'info, TokenAccount>,
-    
-    /// Borrower's aToken account (collateral to be seized)
-    #[account(
-        mut,
-        token::mint = collateral_pool.a_token_mint,
-        token::authority = borrower
-    )]
-    pub borrower_a_token_account: Account<'info, TokenAccount>,
-    
-    /// Borrower's debt token account
-    #[account(
-        mut,
-        token::mint = debt_pool.variable_debt_token_mint,
-        token::authority = borrower
-    )]
-    pub borrower_debt_token_account: Account<'info, TokenAccount>,
-    
-    /// Debt pool's asset account
-    #[account(
-        mut,
-        address = debt_pool.asset_token_account
-    )]
-    pub debt_pool_asset_account: Account<'info, TokenAccount>,
-    
-    /// Collateral pool's asset account
-    #[account(
-        mut,
-        address = collateral_pool.asset_token_account
-    )]
-    pub collateral_pool_asset_account: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        address = collateral_pool.a_token_mint
-    )]
-    pub a_token_mint: Account<'info, Mint>,
-    
-    #[account(
-        mut,
-        address = debt_pool.variable_debt_token_mint
-    )]
-    pub debt_token_mint: Account<'info, Mint>,
-    
-    /// CHECK: Pool authority for collateral pool
-    #[account(
-        seeds = [POOL_SEED, collateral_pool.asset_mint.as_ref(), b"authority"],
-        bump
-    )]
-    pub collateral_pool_authority: UncheckedAccount<'info>,
-    
-    /// CHECK: Pool authority for debt pool
-    #[account(
-        seeds = [POOL_SEED, debt_pool.asset_mint.as_ref(), b"authority"],
-        bump
-    )]
-    pub debt_pool_authority: UncheckedAccount<'info>,
-    
-    /// Collateral price oracle
-    /// CHECK: Validated during price fetch
-    #[account(address = collateral_pool.oracle_price_feed)]
-    pub collateral_oracle: UncheckedAccount<'info>,
-    
-    /// Debt price oracle
-    /// CHECK: Validated during price fetch
-    #[account(address = debt_pool.oracle_price_feed)]
-    pub debt_oracle: UncheckedAccount<'info>,
-    
-    /// The borrower being liquidated
-    /// CHECK: Must match user obligation
-    pub borrower: UncheckedAccount<'info>,
-    
-    #[account(mut)]
     pub liquidator: Signer<'info>,
-    
-    pub token_program: Program<'info, Token>,
+    #[account(seeds = [PROTOCOL_SEED], bump = protocol.bump)]
+    pub protocol: Account<'info, Protocol>,
+    #[account(
+        mut,
+        has_one = protocol,
+        has_one = collateral_mint,
+        has_one = loan_mint,
+        has_one = collateral_vault,
+        has_one = loan_vault,
+        has_one = token_program
+    )]
+    pub market: Box<Account<'info, Market>>,
+    #[account(mut, has_one = market)]
+    pub position: Account<'info, Position>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub loan_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut)]
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut)]
+    pub loan_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = loan_mint, token::authority = liquidator)]
+    pub liquidator_loan_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = collateral_mint)]
+    pub liquidator_collateral_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub collateral_price: Box<Account<'info, PriceUpdateV2>>,
+    pub loan_price: Box<Account<'info, PriceUpdateV2>>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
-pub fn liquidate(
-    ctx: Context<Liquidate>,
-    debt_to_cover: u64,
-    receive_a_token: bool,
-) -> Result<()> {
-    if debt_to_cover == 0 {
-        return Err(LendingError::InvalidAmount.into());
-    }
+/// Repays up to `max_repay` of an unhealthy position's debt (bounded by the
+/// close factor) and seizes collateral worth the repaid value plus the bonus.
+pub fn handle_liquidate(ctx: Context<Liquidate>, max_repay: u64) -> Result<()> {
+    require!(max_repay > 0, LendingError::ZeroAmount);
+    let clock = Clock::get()?;
+    let market = &mut ctx.accounts.market;
+    // Liquidations stay enabled while paused to protect solvency.
+    require!(!market.flash_loan_active, LendingError::FlashLoanInProgress);
+    market.accrue_interest(clock.unix_timestamp)?;
 
-    let collateral_pool = &mut ctx.accounts.collateral_pool;
-    let debt_pool = &mut ctx.accounts.debt_pool;
-    let user_obligation = &mut ctx.accounts.user_obligation;
-    
-    // Update both pools
-    collateral_pool.update_indexes()?;
-    debt_pool.update_indexes()?;
-    
-    // Get oracle prices
-    let collateral_price = OracleUtils::get_pyth_price(
-        &ctx.accounts.collateral_oracle.to_account_info(),
-        MAX_PRICE_AGE,
-        ORACLE_CONFIDENCE_THRESHOLD,
+    let position = &mut ctx.accounts.position;
+    let prices = load_prices(
+        market,
+        &ctx.accounts.collateral_price,
+        &ctx.accounts.loan_price,
+        &clock,
     )?;
-    
-    let debt_price = OracleUtils::get_pyth_price(
-        &ctx.accounts.debt_oracle.to_account_info(),
-        MAX_PRICE_AGE,
-        ORACLE_CONFIDENCE_THRESHOLD,
+    let risk = RiskSnapshot::new(market, position, &prices)?;
+    require!(risk.is_liquidatable(market)?, LendingError::PositionHealthy);
+
+    let close_limit =
+        math::mul_div_ceil(risk.debt as u128, CLOSE_FACTOR_BPS as u128, BPS as u128)? as u64;
+    let mut repay = max_repay.min(close_limit).min(risk.debt);
+
+    let bonus = BPS + market.config.liquidation_bonus_bps as u64;
+    let repay_value = math::usd_value_wad(
+        repay,
+        market.loan_decimals,
+        prices.loan.price,
+        prices.loan.expo,
     )?;
-    
-    // Calculate current health factor
-    let health_factor = calculate_health_factor(
-        user_obligation.total_collateral_value,
-        user_obligation.total_debt_value,
-        collateral_pool.reserve_config.liquidation_threshold,
+    let seize_value = math::mul_div_floor(repay_value, bonus as u128, BPS as u128)?;
+    let mut seize = math::amount_for_usd_value(
+        seize_value,
+        market.collateral_decimals,
+        prices.collateral.price,
+        prices.collateral.expo,
     )?;
-    
-    if health_factor >= BASIS_POINTS {
-        return Err(LendingError::HealthyPosition.into());
+
+    // Bad-debt edge case: not enough collateral left, so scale the repayment down.
+    if seize > position.collateral_amount {
+        seize = position.collateral_amount;
+        let available_value = math::usd_value_wad(
+            seize,
+            market.collateral_decimals,
+            prices.collateral.price,
+            prices.collateral.expo,
+        )?;
+        let repay_value = math::mul_div_floor(available_value, BPS as u128, bonus as u128)?;
+        repay = math::amount_for_usd_value(
+            repay_value,
+            market.loan_decimals,
+            prices.loan.price,
+            prices.loan.expo,
+        )?
+        .min(repay);
     }
-    
-    // Calculate maximum debt that can be liquidated (typically 50% of total debt)
-    let max_liquidation_amount = user_obligation.total_debt_value / 2;
-    let debt_to_cover_usd = TokenUtils::calculate_usd_value(
-        debt_to_cover,
-        debt_price.price,
-        ctx.accounts.debt_pool_asset_account.mint.as_ref().decimals,
-    )?;
-    
-    if debt_to_cover_usd > max_liquidation_amount {
-        return Err(LendingError::InvalidLiquidationAmount.into());
-    }
-    
-    // Calculate collateral to seize
-    let (collateral_amount, liquidation_bonus) = calculate_liquidation_amounts(
-        debt_to_cover,
-        debt_price.price,
-        collateral_price.price,
-        collateral_pool.reserve_config.liquidation_bonus,
-    )?;
-    
-    // Calculate debt tokens to burn
-    let debt_tokens_to_burn = TokenUtils::calculate_debt_token_amount(
-        debt_to_cover,
-        debt_pool.variable_borrow_index,
-    )?;
-    
-    // Check liquidator has enough debt tokens
-    TokenUtils::check_sufficient_balance(
-        &ctx.accounts.liquidator_debt_account,
-        debt_to_cover,
-    )?;
-    
-    // Check borrower has enough collateral
-    let a_tokens_to_burn = if receive_a_token {
-        TokenUtils::calculate_a_token_amount(collateral_amount, collateral_pool.liquidity_index)?
-    } else {
-        0
-    };
-    
-    let collateral_to_transfer = if receive_a_token {
-        0
-    } else {
-        collateral_amount
-    };
-    
-    // Step 1: Transfer debt tokens from liquidator to pool
-    TokenUtils::transfer_tokens(
-        &ctx.accounts.token_program,
-        &ctx.accounts.liquidator_debt_account,
-        &ctx.accounts.debt_pool_asset_account,
-        &ctx.accounts.liquidator.to_account_info(),
-        debt_to_cover,
+    require!(repay > 0 && seize > 0, LendingError::ZeroAmount);
+
+    let token_program = ctx.accounts.token_program.to_account_info();
+    token::transfer(
+        TransferArgs {
+            token_program: &token_program,
+            from: &ctx.accounts.liquidator_loan_account.to_account_info(),
+            to: &ctx.accounts.loan_vault.to_account_info(),
+            mint: &ctx.accounts.loan_mint.to_account_info(),
+            authority: &ctx.accounts.liquidator.to_account_info(),
+            decimals: market.loan_decimals,
+        },
+        repay,
         &[],
     )?;
-    
-    // Step 2: Burn borrower's debt tokens
-    let debt_pool_seeds = &[
-        POOL_SEED,
-        debt_pool.asset_mint.as_ref(),
-        b"authority",
-        &[ctx.bumps.debt_pool_authority],
-    ];
-    let debt_signer_seeds = &[&debt_pool_seeds[..]];
-    
-    TokenUtils::burn_tokens(
-        &ctx.accounts.token_program,
-        &ctx.accounts.debt_token_mint,
-        &ctx.accounts.borrower_debt_token_account,
-        &ctx.accounts.debt_pool_authority.to_account_info(),
-        debt_tokens_to_burn,
-        debt_signer_seeds,
-    )?;
-    
-    // Step 3: Handle collateral transfer
-    let collateral_pool_seeds = &[
-        POOL_SEED,
-        collateral_pool.asset_mint.as_ref(),
-        b"authority",
-        &[ctx.bumps.collateral_pool_authority],
-    ];
-    let collateral_signer_seeds = &[&collateral_pool_seeds[..]];
-    
-    if receive_a_token {
-        // Transfer aTokens from borrower to liquidator
-        TokenUtils::transfer_tokens(
-            &ctx.accounts.token_program,
-            &ctx.accounts.borrower_a_token_account,
-            &ctx.accounts.liquidator_collateral_account,
-            &ctx.accounts.collateral_pool_authority.to_account_info(),
-            a_tokens_to_burn,
-            collateral_signer_seeds,
-        )?;
-    } else {
-        // Burn borrower's aTokens and transfer underlying to liquidator
-        TokenUtils::burn_tokens(
-            &ctx.accounts.token_program,
-            &ctx.accounts.a_token_mint,
-            &ctx.accounts.borrower_a_token_account,
-            &ctx.accounts.collateral_pool_authority.to_account_info(),
-            a_tokens_to_burn,
-            collateral_signer_seeds,
-        )?;
-        
-        TokenUtils::transfer_tokens(
-            &ctx.accounts.token_program,
-            &ctx.accounts.collateral_pool_asset_account,
-            &ctx.accounts.liquidator_collateral_account,
-            &ctx.accounts.collateral_pool_authority.to_account_info(),
-            collateral_to_transfer,
-            collateral_signer_seeds,
-        )?;
-    }
-    
-    // Update pool states
-    debt_pool.total_variable_borrows = debt_pool.total_variable_borrows
-        .checked_sub(debt_tokens_to_burn)
-        .ok_or(LendingError::MathOverflow)?;
-    
-    debt_pool.available_liquidity = debt_pool.available_liquidity
-        .checked_add(debt_to_cover)
-        .ok_or(LendingError::MathOverflow)?;
-    
-    if !receive_a_token {
-        collateral_pool.total_supply = collateral_pool.total_supply
-            .checked_sub(a_tokens_to_burn)
-            .ok_or(LendingError::MathOverflow)?;
-        
-        collateral_pool.available_liquidity = collateral_pool.available_liquidity
-            .checked_sub(collateral_to_transfer)
-            .ok_or(LendingError::MathOverflow)?;
-    }
-    
-    // Update user obligation
-    user_obligation.remove_borrow(
-        debt_pool.key(),
-        debt_to_cover,
-        InterestRateMode::Variable,
-    )?;
-    
-    if !receive_a_token {
-        user_obligation.remove_deposit(collateral_pool.key(), a_tokens_to_burn)?;
-    }
-    
-    // Recalculate user's total debt and collateral values
-    let new_debt_value = user_obligation.total_debt_value
-        .checked_sub(debt_to_cover_usd)
-        .unwrap_or(0);
-    
-    let collateral_value_seized = TokenUtils::calculate_usd_value(
-        collateral_amount,
-        collateral_price.price,
-        ctx.accounts.collateral_pool_asset_account.mint.as_ref().decimals,
-    )?;
-    
-    let new_collateral_value = user_obligation.total_collateral_value
-        .checked_sub(collateral_value_seized)
-        .unwrap_or(0);
-    
-    user_obligation.update_totals(new_collateral_value, new_debt_value);
-    
-    // Recalculate health factor
-    let new_health_factor = calculate_health_factor(
-        new_collateral_value,
-        new_debt_value,
-        collateral_pool.reserve_config.liquidation_threshold,
-    )?;
-    
-    user_obligation.health_factor = new_health_factor;
-    
-    // Update interest rates
-    debt_pool.calculate_interest_rates()?;
-    collateral_pool.calculate_interest_rates()?;
-    
-    msg!(
-        "Liquidation completed: liquidator={}, borrower={}, debt_covered={}, collateral_seized={}, bonus={}",
-        ctx.accounts.liquidator.key(),
-        ctx.accounts.borrower.key(),
-        debt_to_cover,
-        collateral_amount,
-        liquidation_bonus
-    );
 
+    reduce_debt(market, position, repay, risk.debt)?;
+    position.collateral_amount -= seize;
+
+    let seeds = market.signer_seeds();
+    token::transfer(
+        TransferArgs {
+            token_program: &token_program,
+            from: &ctx.accounts.collateral_vault.to_account_info(),
+            to: &ctx.accounts.liquidator_collateral_account.to_account_info(),
+            mint: &ctx.accounts.collateral_mint.to_account_info(),
+            authority: &market.to_account_info(),
+            decimals: market.collateral_decimals,
+        },
+        seize,
+        &[&seeds],
+    )?;
+
+    emit!(Liquidated {
+        market: market.key(),
+        owner: position.owner,
+        liquidator: ctx.accounts.liquidator.key(),
+        repaid: repay,
+        collateral_seized: seize,
+    });
     Ok(())
 }
