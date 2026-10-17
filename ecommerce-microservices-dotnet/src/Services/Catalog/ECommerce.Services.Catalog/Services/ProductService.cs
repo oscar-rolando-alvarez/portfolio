@@ -1,125 +1,130 @@
-using AutoMapper;
 using ECommerce.Services.Catalog.Models;
 using ECommerce.Services.Catalog.Repositories;
-using ECommerce.Shared.Common.Models;
+using ECommerce.Shared.Contracts;
 using ECommerce.Shared.Contracts.Catalog;
 
 namespace ECommerce.Services.Catalog.Services;
 
-public class ProductService : IProductService
+public interface IProductService
 {
-    private readonly IProductRepository _productRepository;
-    private readonly IMapper _mapper;
-    private readonly ILogger<ProductService> _logger;
+    Task<PagedResult<ProductDto>> GetProductsAsync(int pageNumber, int pageSize, string? category, string? searchTerm, CancellationToken cancellationToken = default);
 
-    public ProductService(IProductRepository productRepository, IMapper mapper, ILogger<ProductService> logger)
+    Task<ProductDto?> GetProductAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<ProductDto?> GetProductBySkuAsync(string sku, CancellationToken cancellationToken = default);
+
+    Task<ProductDto> CreateProductAsync(CreateProductRequest request, CancellationToken cancellationToken = default);
+
+    Task<ProductDto?> UpdateProductAsync(Guid id, UpdateProductRequest request, CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteProductAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateStockAsync(Guid id, int newStock, CancellationToken cancellationToken = default);
+}
+
+public sealed class DuplicateSkuException(string sku)
+    : InvalidOperationException($"A product with SKU '{sku}' already exists.");
+
+public sealed partial class ProductService(IProductRepository repository, ILogger<ProductService> logger) : IProductService
+{
+    public const int MaxPageSize = 100;
+
+    public async Task<PagedResult<ProductDto>> GetProductsAsync(
+        int pageNumber, int pageSize, string? category, string? searchTerm, CancellationToken cancellationToken = default)
     {
-        _productRepository = productRepository;
-        _mapper = mapper;
-        _logger = logger;
+        pageNumber = Math.Max(1, pageNumber);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+
+        var (items, total) = await repository.GetPageAsync(pageNumber, pageSize, category, searchTerm, cancellationToken);
+        return new PagedResult<ProductDto>([.. items.Select(p => p.ToDto())], total, pageNumber, pageSize);
     }
 
-    public async Task<PagedResult<ProductDto>> GetProductsAsync(int pageNumber, int pageSize, string? category = null, string? searchTerm = null)
+    public async Task<ProductDto?> GetProductAsync(Guid id, CancellationToken cancellationToken = default) =>
+        (await repository.GetAsync(id, cancellationToken))?.ToDto();
+
+    public async Task<ProductDto?> GetProductBySkuAsync(string sku, CancellationToken cancellationToken = default)
     {
-        var result = await _productRepository.GetProductsPagedAsync(pageNumber, pageSize, category, searchTerm);
-        var productDtos = _mapper.Map<List<ProductDto>>(result.Items);
-        return new PagedResult<ProductDto>(productDtos, result.TotalCount, result.PageNumber, result.PageSize);
+        var product = await repository.GetBySkuAsync(sku, cancellationToken);
+        return product is { IsActive: true } ? product.ToDto() : null;
     }
 
-    public async Task<ProductDto?> GetProductByIdAsync(Guid id)
+    public async Task<ProductDto> CreateProductAsync(CreateProductRequest request, CancellationToken cancellationToken = default)
     {
-        var product = await _productRepository.GetProductAsync(id);
-        return product != null ? _mapper.Map<ProductDto>(product) : null;
-    }
-
-    public async Task<ProductDto?> GetProductBySkuAsync(string sku)
-    {
-        var product = await _productRepository.GetProductBySkuAsync(sku);
-        return product != null ? _mapper.Map<ProductDto>(product) : null;
-    }
-
-    public async Task<IEnumerable<ProductDto>> GetProductsByCategoryAsync(string category)
-    {
-        var products = await _productRepository.GetProductsByCategoryAsync(category);
-        return _mapper.Map<IEnumerable<ProductDto>>(products);
-    }
-
-    public async Task<IEnumerable<ProductDto>> SearchProductsAsync(string searchTerm)
-    {
-        var products = await _productRepository.SearchProductsAsync(searchTerm);
-        return _mapper.Map<IEnumerable<ProductDto>>(products);
-    }
-
-    public async Task<ProductDto> CreateProductAsync(CreateProductRequest request)
-    {
-        // Check if SKU already exists
-        var existingProduct = await _productRepository.GetProductBySkuAsync(request.Sku);
-        if (existingProduct != null)
+        if (await repository.GetBySkuAsync(request.Sku, cancellationToken) is not null)
         {
-            throw new InvalidOperationException($"Product with SKU '{request.Sku}' already exists");
+            throw new DuplicateSkuException(request.Sku);
         }
 
-        var product = _mapper.Map<Product>(request);
-        var createdProduct = await _productRepository.CreateProductAsync(product);
-        
-        _logger.LogInformation("Product created: {ProductId} - {ProductName}", createdProduct.Id, createdProduct.Name);
-        
-        return _mapper.Map<ProductDto>(createdProduct);
+        var product = new Product
+        {
+            Name = request.Name.Trim(),
+            Description = request.Description.Trim(),
+            Price = request.Price,
+            Category = request.Category.Trim(),
+            ImageUrl = request.ImageUrl,
+            Sku = request.Sku.Trim().ToUpperInvariant(),
+            StockQuantity = request.StockQuantity,
+            Tags = NormalizeTags(request.Tags),
+        };
+
+        await repository.CreateAsync(product, cancellationToken);
+        LogProductCreated(logger, product.Id, product.Sku);
+        return product.ToDto();
     }
 
-    public async Task<ProductDto?> UpdateProductAsync(Guid id, UpdateProductRequest request)
+    public async Task<ProductDto?> UpdateProductAsync(Guid id, UpdateProductRequest request, CancellationToken cancellationToken = default)
     {
-        var existingProduct = await _productRepository.GetProductAsync(id);
-        if (existingProduct == null)
+        var product = await repository.GetAsync(id, cancellationToken);
+        if (product is null)
         {
             return null;
         }
 
-        _mapper.Map(request, existingProduct);
-        var success = await _productRepository.UpdateProductAsync(existingProduct);
-        
-        if (success)
+        product.Name = request.Name.Trim();
+        product.Description = request.Description.Trim();
+        product.Price = request.Price;
+        product.Category = request.Category.Trim();
+        product.ImageUrl = request.ImageUrl;
+        product.StockQuantity = request.StockQuantity;
+        if (request.Tags is not null)
         {
-            _logger.LogInformation("Product updated: {ProductId} - {ProductName}", existingProduct.Id, existingProduct.Name);
-            return _mapper.Map<ProductDto>(existingProduct);
+            product.Tags = NormalizeTags(request.Tags);
         }
 
-        return null;
+        return await repository.ReplaceAsync(product, cancellationToken) ? product.ToDto() : null;
     }
 
-    public async Task<bool> DeleteProductAsync(Guid id)
+    public Task<bool> DeleteProductAsync(Guid id, CancellationToken cancellationToken = default) =>
+        repository.DeactivateAsync(id, cancellationToken);
+
+    public Task<bool> UpdateStockAsync(Guid id, int newStock, CancellationToken cancellationToken = default)
     {
-        var product = await _productRepository.GetProductAsync(id);
-        if (product == null)
-        {
-            return false;
-        }
-
-        var success = await _productRepository.DeleteProductAsync(id);
-        
-        if (success)
-        {
-            _logger.LogInformation("Product deleted: {ProductId} - {ProductName}", id, product.Name);
-        }
-
-        return success;
+        ArgumentOutOfRangeException.ThrowIfNegative(newStock);
+        return repository.UpdateStockAsync(id, newStock, cancellationToken);
     }
 
-    public async Task<bool> UpdateStockAsync(Guid productId, int newStock)
-    {
-        var product = await _productRepository.GetProductAsync(productId);
-        if (product == null)
-        {
-            return false;
-        }
+    private static List<string> NormalizeTags(IReadOnlyList<string>? tags) =>
+        tags is null
+            ? []
+            : [.. tags.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim().ToLowerInvariant()).Distinct()];
 
-        var success = await _productRepository.UpdateStockAsync(productId, newStock);
-        
-        if (success)
-        {
-            _logger.LogInformation("Stock updated for product: {ProductId} - New stock: {NewStock}", productId, newStock);
-        }
+    [LoggerMessage(Level = LogLevel.Information, Message = "Product {ProductId} created with SKU {Sku}")]
+    private static partial void LogProductCreated(ILogger logger, Guid productId, string sku);
+}
 
-        return success;
-    }
+public static class ProductMappings
+{
+    public static ProductDto ToDto(this Product product) => new(
+        product.Id,
+        product.Name,
+        product.Description,
+        product.Price,
+        product.Category,
+        product.ImageUrl,
+        product.Sku,
+        product.StockQuantity,
+        product.IsActive,
+        product.Tags,
+        product.CreatedAt,
+        product.UpdatedAt);
 }

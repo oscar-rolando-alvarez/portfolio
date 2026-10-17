@@ -1,39 +1,21 @@
 namespace ECommerce.Shared.Contracts.Basket;
 
-public class BasketDto
-{
-    public Guid CustomerId { get; set; }
-    public List<BasketItemDto> Items { get; set; } = new();
-    public decimal TotalPrice { get; set; }
-    public DateTime LastUpdated { get; set; }
-}
+public sealed record BasketDto(
+    Guid CustomerId,
+    IReadOnlyList<BasketItemDto> Items,
+    decimal TotalPrice,
+    DateTime LastUpdated);
 
-public class BasketItemDto
-{
-    public Guid ProductId { get; set; }
-    public string ProductName { get; set; } = string.Empty;
-    public int Quantity { get; set; }
-    public decimal Price { get; set; }
-    public decimal TotalPrice { get; set; }
-    public string ImageUrl { get; set; } = string.Empty;
-}
+public sealed record BasketItemDto(
+    Guid ProductId,
+    string ProductName,
+    int Quantity,
+    decimal Price,
+    decimal TotalPrice,
+    string ImageUrl);
 
-public class AddToBasketRequest
-{
-    public Guid CustomerId { get; set; }
-    public Guid ProductId { get; set; }
-    public int Quantity { get; set; }
-}
+/// <summary>Adds a product to the caller's basket. The customer is taken from the access token.</summary>
+public sealed record AddToBasketRequest(Guid ProductId, int Quantity);
 
-public class UpdateBasketItemRequest
-{
-    public Guid CustomerId { get; set; }
-    public Guid ProductId { get; set; }
-    public int Quantity { get; set; }
-}
-
-public class RemoveFromBasketRequest
-{
-    public Guid CustomerId { get; set; }
-    public Guid ProductId { get; set; }
-}
+/// <summary>Sets the quantity of a basket line; zero or less removes the line.</summary>
+public sealed record UpdateBasketItemRequest(int Quantity);

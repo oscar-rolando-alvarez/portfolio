@@ -3,11 +3,11 @@ using MongoDB.Bson.Serialization.Attributes;
 
 namespace ECommerce.Services.Catalog.Models;
 
-public class Product
+public sealed class Product
 {
     [BsonId]
     [BsonRepresentation(BsonType.String)]
-    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid Id { get; set; } = Guid.CreateVersion7();
 
     [BsonElement("name")]
     public string Name { get; set; } = string.Empty;
@@ -16,6 +16,7 @@ public class Product
     public string Description { get; set; } = string.Empty;
 
     [BsonElement("price")]
+    [BsonRepresentation(BsonType.Decimal128)]
     public decimal Price { get; set; }
 
     [BsonElement("category")]
@@ -40,8 +41,8 @@ public class Product
     public DateTime? UpdatedAt { get; set; }
 
     [BsonElement("tags")]
-    public List<string> Tags { get; set; } = new();
+    public List<string> Tags { get; set; } = [];
 
     [BsonElement("specifications")]
-    public Dictionary<string, string> Specifications { get; set; } = new();
+    public Dictionary<string, string> Specifications { get; set; } = [];
 }

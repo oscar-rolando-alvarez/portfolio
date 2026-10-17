@@ -1,71 +1,43 @@
+using System.Text.Json;
 using ECommerce.Services.Basket.Models;
-using Newtonsoft.Json;
 using StackExchange.Redis;
 
 namespace ECommerce.Services.Basket.Repositories;
 
-public class BasketRepository : IBasketRepository
+public interface IBasketRepository
 {
-    private readonly IDatabase _database;
-    private readonly ILogger<BasketRepository> _logger;
+    Task<CustomerBasket?> GetAsync(Guid customerId);
 
-    public BasketRepository(IConnectionMultiplexer redis, ILogger<BasketRepository> logger)
+    Task SaveAsync(CustomerBasket basket);
+
+    Task<bool> DeleteAsync(Guid customerId);
+}
+
+/// <summary>Stores each basket as a JSON string with a sliding 30 day expiry.</summary>
+public sealed class RedisBasketRepository(IConnectionMultiplexer redis) : IBasketRepository
+{
+    private static readonly TimeSpan Expiry = TimeSpan.FromDays(30);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly IDatabase _database = redis.GetDatabase();
+
+    public async Task<CustomerBasket?> GetAsync(Guid customerId)
     {
-        _database = redis.GetDatabase();
-        _logger = logger;
+        var data = await _database.StringGetAsync(Key(customerId));
+        return data.IsNullOrEmpty ? null : JsonSerializer.Deserialize<CustomerBasket>(data.ToString(), JsonOptions);
     }
 
-    public async Task<CustomerBasket?> GetBasketAsync(Guid customerId)
+    public async Task SaveAsync(CustomerBasket basket)
     {
-        var basketKey = GetBasketKey(customerId);
-        var data = await _database.StringGetAsync(basketKey);
-
-        if (data.IsNull)
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonConvert.DeserializeObject<CustomerBasket>(data!);
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Error deserializing basket for customer {CustomerId}", customerId);
-            return null;
-        }
-    }
-
-    public async Task<CustomerBasket> UpdateBasketAsync(CustomerBasket basket)
-    {
-        var basketKey = GetBasketKey(basket.CustomerId);
         basket.LastUpdated = DateTime.UtcNow;
-
-        var json = JsonConvert.SerializeObject(basket);
-        var created = await _database.StringSetAsync(basketKey, json, TimeSpan.FromDays(30));
-
-        if (!created)
+        var json = JsonSerializer.Serialize(basket, JsonOptions);
+        if (!await _database.StringSetAsync(Key(basket.CustomerId), json, Expiry))
         {
-            _logger.LogError("Problem occurred persisting the basket for customer {CustomerId}", basket.CustomerId);
-            throw new InvalidOperationException("Problem occurred persisting the basket");
+            throw new InvalidOperationException("The basket could not be persisted.");
         }
-
-        _logger.LogInformation("Basket updated for customer {CustomerId}", basket.CustomerId);
-        return await GetBasketAsync(basket.CustomerId) ?? basket;
     }
 
-    public async Task<bool> DeleteBasketAsync(Guid customerId)
-    {
-        var basketKey = GetBasketKey(customerId);
-        var result = await _database.KeyDeleteAsync(basketKey);
-        
-        if (result)
-        {
-            _logger.LogInformation("Basket deleted for customer {CustomerId}", customerId);
-        }
+    public Task<bool> DeleteAsync(Guid customerId) => _database.KeyDeleteAsync(Key(customerId));
 
-        return result;
-    }
-
-    private static string GetBasketKey(Guid customerId) => $"basket:{customerId}";
+    private static RedisKey Key(Guid customerId) => $"basket:{customerId}";
 }

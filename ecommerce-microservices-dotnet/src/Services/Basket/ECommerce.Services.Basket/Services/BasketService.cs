@@ -1,145 +1,102 @@
-using AutoMapper;
 using ECommerce.Services.Basket.Models;
 using ECommerce.Services.Basket.Repositories;
+using ECommerce.Shared.Common.Clients;
 using ECommerce.Shared.Contracts.Basket;
-using ECommerce.Shared.Contracts.Catalog;
-using Newtonsoft.Json;
 
 namespace ECommerce.Services.Basket.Services;
 
-public class BasketService : IBasketService
+public interface IBasketService
 {
-    private readonly IBasketRepository _basketRepository;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IMapper _mapper;
-    private readonly ILogger<BasketService> _logger;
+    Task<BasketDto> GetBasketAsync(Guid customerId);
 
-    public BasketService(
-        IBasketRepository basketRepository,
-        IHttpClientFactory httpClientFactory,
-        IMapper mapper,
-        ILogger<BasketService> logger)
+    Task<BasketDto> AddItemAsync(Guid customerId, AddToBasketRequest request, CancellationToken cancellationToken = default);
+
+    Task<BasketDto?> UpdateItemAsync(Guid customerId, Guid productId, int quantity);
+
+    Task<BasketDto?> RemoveItemAsync(Guid customerId, Guid productId);
+
+    Task<bool> ClearAsync(Guid customerId);
+}
+
+public sealed class ProductNotFoundException(Guid productId)
+    : KeyNotFoundException($"Product {productId} does not exist or is not available.");
+
+public sealed class BasketService(IBasketRepository repository, ICatalogClient catalog) : IBasketService
+{
+    public async Task<BasketDto> GetBasketAsync(Guid customerId) =>
+        (await repository.GetAsync(customerId) ?? new CustomerBasket { CustomerId = customerId }).ToDto();
+
+    public async Task<BasketDto> AddItemAsync(Guid customerId, AddToBasketRequest request, CancellationToken cancellationToken = default)
     {
-        _basketRepository = basketRepository;
-        _httpClientFactory = httpClientFactory;
-        _mapper = mapper;
-        _logger = logger;
-    }
+        // Price and name always come from the catalog, never from the client.
+        var product = await catalog.GetProductAsync(request.ProductId, cancellationToken)
+            ?? throw new ProductNotFoundException(request.ProductId);
 
-    public async Task<BasketDto?> GetBasketAsync(Guid customerId)
-    {
-        var basket = await _basketRepository.GetBasketAsync(customerId);
-        return basket != null ? _mapper.Map<BasketDto>(basket) : null;
-    }
-
-    public async Task<BasketDto> AddToBasketAsync(AddToBasketRequest request)
-    {
-        // Get product details from catalog service
-        var product = await GetProductFromCatalogAsync(request.ProductId);
-        if (product == null)
-        {
-            throw new ArgumentException($"Product with ID {request.ProductId} not found");
-        }
-
-        var basket = await _basketRepository.GetBasketAsync(request.CustomerId) ?? 
-                     new CustomerBasket { CustomerId = request.CustomerId };
-
-        var existingItem = basket.Items.FirstOrDefault(x => x.ProductId == request.ProductId);
-        if (existingItem != null)
-        {
-            existingItem.Quantity += request.Quantity;
-        }
-        else
+        var basket = await repository.GetAsync(customerId) ?? new CustomerBasket { CustomerId = customerId };
+        var line = basket.Items.FirstOrDefault(i => i.ProductId == request.ProductId);
+        if (line is null)
         {
             basket.Items.Add(new BasketItem
             {
-                ProductId = request.ProductId,
+                ProductId = product.Id,
                 ProductName = product.Name,
                 Quantity = request.Quantity,
                 Price = product.Price,
-                ImageUrl = product.ImageUrl
+                ImageUrl = product.ImageUrl,
             });
-        }
-
-        var updatedBasket = await _basketRepository.UpdateBasketAsync(basket);
-        return _mapper.Map<BasketDto>(updatedBasket);
-    }
-
-    public async Task<BasketDto> UpdateBasketItemAsync(UpdateBasketItemRequest request)
-    {
-        var basket = await _basketRepository.GetBasketAsync(request.CustomerId);
-        if (basket == null)
-        {
-            throw new ArgumentException($"Basket not found for customer {request.CustomerId}");
-        }
-
-        var existingItem = basket.Items.FirstOrDefault(x => x.ProductId == request.ProductId);
-        if (existingItem == null)
-        {
-            throw new ArgumentException($"Product {request.ProductId} not found in basket");
-        }
-
-        if (request.Quantity <= 0)
-        {
-            basket.Items.Remove(existingItem);
         }
         else
         {
-            existingItem.Quantity = request.Quantity;
+            line.Quantity += request.Quantity;
+            line.Price = product.Price;
         }
 
-        var updatedBasket = await _basketRepository.UpdateBasketAsync(basket);
-        return _mapper.Map<BasketDto>(updatedBasket);
+        await repository.SaveAsync(basket);
+        return basket.ToDto();
     }
 
-    public async Task<bool> RemoveFromBasketAsync(RemoveFromBasketRequest request)
+    public async Task<BasketDto?> UpdateItemAsync(Guid customerId, Guid productId, int quantity)
     {
-        var basket = await _basketRepository.GetBasketAsync(request.CustomerId);
-        if (basket == null)
+        var basket = await repository.GetAsync(customerId);
+        var line = basket?.Items.FirstOrDefault(i => i.ProductId == productId);
+        if (basket is null || line is null)
         {
-            return false;
-        }
-
-        var item = basket.Items.FirstOrDefault(x => x.ProductId == request.ProductId);
-        if (item != null)
-        {
-            basket.Items.Remove(item);
-            await _basketRepository.UpdateBasketAsync(basket);
-        }
-
-        return true;
-    }
-
-    public async Task<bool> ClearBasketAsync(Guid customerId)
-    {
-        return await _basketRepository.DeleteBasketAsync(customerId);
-    }
-
-    private async Task<ProductDto?> GetProductFromCatalogAsync(Guid productId)
-    {
-        try
-        {
-            var httpClient = _httpClientFactory.CreateClient("CatalogService");
-            var response = await httpClient.GetAsync($"api/products/{productId}");
-
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsStringAsync();
-                var apiResponse = JsonConvert.DeserializeObject<ApiResponseWrapper<ProductDto>>(content);
-                return apiResponse?.Data;
-            }
-
             return null;
         }
-        catch (Exception ex)
+
+        if (quantity <= 0)
         {
-            _logger.LogError(ex, "Error getting product {ProductId} from catalog service", productId);
-            return null;
+            basket.Items.Remove(line);
         }
+        else
+        {
+            line.Quantity = quantity;
+        }
+
+        await repository.SaveAsync(basket);
+        return basket.ToDto();
     }
 
-    private class ApiResponseWrapper<T>
+    public async Task<BasketDto?> RemoveItemAsync(Guid customerId, Guid productId)
     {
-        public T? Data { get; set; }
+        var basket = await repository.GetAsync(customerId);
+        if (basket is null || basket.Items.RemoveAll(i => i.ProductId == productId) == 0)
+        {
+            return null;
+        }
+
+        await repository.SaveAsync(basket);
+        return basket.ToDto();
     }
+
+    public Task<bool> ClearAsync(Guid customerId) => repository.DeleteAsync(customerId);
+}
+
+public static class BasketMappings
+{
+    public static BasketDto ToDto(this CustomerBasket basket) => new(
+        basket.CustomerId,
+        [.. basket.Items.Select(i => new BasketItemDto(i.ProductId, i.ProductName, i.Quantity, i.Price, i.TotalPrice, i.ImageUrl))],
+        basket.TotalPrice,
+        basket.LastUpdated);
 }

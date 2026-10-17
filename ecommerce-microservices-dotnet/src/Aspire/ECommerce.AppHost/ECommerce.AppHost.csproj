@@ -1,0 +1,26 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.1">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>ecommerce-apphost</UserSecretsId>
+    <!-- DCP and the dashboard are restored from NuGet instead of the Aspire CLI bundle. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.MongoDB" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" />
+    <PackageReference Include="Aspire.Hosting.Redis" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ApiGateway\ECommerce.ApiGateway\ECommerce.ApiGateway.csproj" />
+    <ProjectReference Include="..\..\Services\Basket\ECommerce.Services.Basket\ECommerce.Services.Basket.csproj" />
+    <ProjectReference Include="..\..\Services\Catalog\ECommerce.Services.Catalog\ECommerce.Services.Catalog.csproj" />
+    <ProjectReference Include="..\..\Services\Identity\ECommerce.Services.Identity\ECommerce.Services.Identity.csproj" />
+    <ProjectReference Include="..\..\Services\Ordering\ECommerce.Services.Ordering\ECommerce.Services.Ordering.csproj" />
+    <ProjectReference Include="..\..\Services\Payment\ECommerce.Services.Payment\ECommerce.Services.Payment.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,37 +1,36 @@
 namespace ECommerce.Shared.Contracts.Catalog;
 
-public class ProductDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
-    public string Category { get; set; } = string.Empty;
-    public string ImageUrl { get; set; } = string.Empty;
-    public string Sku { get; set; } = string.Empty;
-    public int StockQuantity { get; set; }
-    public bool IsActive { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime? UpdatedAt { get; set; }
-}
+public sealed record ProductDto(
+    Guid Id,
+    string Name,
+    string Description,
+    decimal Price,
+    string Category,
+    string ImageUrl,
+    string Sku,
+    int StockQuantity,
+    bool IsActive,
+    IReadOnlyList<string> Tags,
+    DateTime CreatedAt,
+    DateTime? UpdatedAt);
 
-public class CreateProductRequest
-{
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
-    public string Category { get; set; } = string.Empty;
-    public string ImageUrl { get; set; } = string.Empty;
-    public string Sku { get; set; } = string.Empty;
-    public int StockQuantity { get; set; }
-}
+public sealed record CreateProductRequest(
+    string Name,
+    string Description,
+    decimal Price,
+    string Category,
+    string ImageUrl,
+    string Sku,
+    int StockQuantity,
+    IReadOnlyList<string>? Tags = null);
 
-public class UpdateProductRequest
-{
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
-    public string Category { get; set; } = string.Empty;
-    public string ImageUrl { get; set; } = string.Empty;
-    public int StockQuantity { get; set; }
-}
+public sealed record UpdateProductRequest(
+    string Name,
+    string Description,
+    decimal Price,
+    string Category,
+    string ImageUrl,
+    int StockQuantity,
+    IReadOnlyList<string>? Tags = null);
+
+public sealed record UpdateStockRequest(int NewStock);

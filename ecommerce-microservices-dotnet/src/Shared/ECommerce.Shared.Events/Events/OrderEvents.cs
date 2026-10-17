@@ -2,52 +2,36 @@ using ECommerce.Shared.Events.Base;
 
 namespace ECommerce.Shared.Events.Events;
 
-public class OrderCreated : IntegrationEvent
+/// <summary>Published by Ordering when an order has been accepted and is awaiting payment.</summary>
+public sealed record OrderCreated : IntegrationEvent
 {
-    public Guid OrderId { get; set; }
-    public Guid CustomerId { get; set; }
-    public decimal TotalAmount { get; set; }
-    public List<OrderItem> Items { get; set; } = new();
-    public Address ShippingAddress { get; set; } = new();
-    public string PaymentMethod { get; set; } = string.Empty;
+    public required Guid OrderId { get; init; }
+
+    public required Guid CustomerId { get; init; }
+
+    public required decimal TotalAmount { get; init; }
+
+    public string Currency { get; init; } = "USD";
+
+    public required string PaymentMethod { get; init; }
+
+    public IReadOnlyList<OrderLine> Items { get; init; } = [];
 }
 
-public class OrderPaid : IntegrationEvent
+/// <summary>Published by Ordering once the order is paid.</summary>
+public sealed record OrderPaid : IntegrationEvent
 {
-    public Guid OrderId { get; set; }
-    public Guid PaymentId { get; set; }
-    public decimal Amount { get; set; }
-    public string PaymentMethod { get; set; } = string.Empty;
+    public required Guid OrderId { get; init; }
+
+    public required Guid PaymentId { get; init; }
 }
 
-public class OrderShipped : IntegrationEvent
+/// <summary>Published by Ordering when an order is cancelled (for example after a declined payment).</summary>
+public sealed record OrderCancelled : IntegrationEvent
 {
-    public Guid OrderId { get; set; }
-    public string TrackingNumber { get; set; } = string.Empty;
-    public string Carrier { get; set; } = string.Empty;
-    public DateTime ShippedAt { get; set; }
+    public required Guid OrderId { get; init; }
+
+    public required string Reason { get; init; }
 }
 
-public class OrderCancelled : IntegrationEvent
-{
-    public Guid OrderId { get; set; }
-    public string Reason { get; set; } = string.Empty;
-    public DateTime CancelledAt { get; set; }
-}
-
-public class OrderItem
-{
-    public Guid ProductId { get; set; }
-    public string ProductName { get; set; } = string.Empty;
-    public int Quantity { get; set; }
-    public decimal Price { get; set; }
-}
-
-public class Address
-{
-    public string Street { get; set; } = string.Empty;
-    public string City { get; set; } = string.Empty;
-    public string State { get; set; } = string.Empty;
-    public string Country { get; set; } = string.Empty;
-    public string PostalCode { get; set; } = string.Empty;
-}
+public sealed record OrderLine(Guid ProductId, string ProductName, int Quantity, decimal UnitPrice);

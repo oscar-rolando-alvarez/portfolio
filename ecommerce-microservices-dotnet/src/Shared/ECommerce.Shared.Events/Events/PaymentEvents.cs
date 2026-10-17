@@ -2,50 +2,30 @@ using ECommerce.Shared.Events.Base;
 
 namespace ECommerce.Shared.Events.Events;
 
-public class PaymentRequested : IntegrationEvent
+// Payment events intentionally carry no card data: card details never leave the payment provider.
+
+/// <summary>Published by Payment when the charge for an order was captured.</summary>
+public sealed record PaymentSucceeded : IntegrationEvent
 {
-    public Guid PaymentId { get; set; }
-    public Guid OrderId { get; set; }
-    public Guid CustomerId { get; set; }
-    public decimal Amount { get; set; }
-    public string Currency { get; set; } = "USD";
-    public string PaymentMethod { get; set; } = string.Empty;
-    public PaymentDetails PaymentDetails { get; set; } = new();
+    public required Guid PaymentId { get; init; }
+
+    public required Guid OrderId { get; init; }
+
+    public required decimal Amount { get; init; }
+
+    public required string TransactionId { get; init; }
 }
 
-public class PaymentSucceeded : IntegrationEvent
+/// <summary>Published by Payment when the charge for an order was declined or errored.</summary>
+public sealed record PaymentFailed : IntegrationEvent
 {
-    public Guid PaymentId { get; set; }
-    public Guid OrderId { get; set; }
-    public decimal Amount { get; set; }
-    public string TransactionId { get; set; } = string.Empty;
-    public DateTime ProcessedAt { get; set; }
-}
+    public required Guid PaymentId { get; init; }
 
-public class PaymentFailed : IntegrationEvent
-{
-    public Guid PaymentId { get; set; }
-    public Guid OrderId { get; set; }
-    public decimal Amount { get; set; }
-    public string Reason { get; set; } = string.Empty;
-    public string ErrorCode { get; set; } = string.Empty;
-    public DateTime FailedAt { get; set; }
-}
+    public required Guid OrderId { get; init; }
 
-public class PaymentRefunded : IntegrationEvent
-{
-    public Guid PaymentId { get; set; }
-    public Guid OrderId { get; set; }
-    public decimal RefundAmount { get; set; }
-    public string Reason { get; set; } = string.Empty;
-    public DateTime RefundedAt { get; set; }
-}
+    public required decimal Amount { get; init; }
 
-public class PaymentDetails
-{
-    public string CardNumber { get; set; } = string.Empty;
-    public string CardHolderName { get; set; } = string.Empty;
-    public string ExpiryDate { get; set; } = string.Empty;
-    public string Cvv { get; set; } = string.Empty;
-    public Address BillingAddress { get; set; } = new();
+    public required string Reason { get; init; }
+
+    public required string ErrorCode { get; init; }
 }

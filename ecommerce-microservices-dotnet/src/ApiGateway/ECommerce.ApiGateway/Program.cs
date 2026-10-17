@@ -1,39 +1,39 @@
-using Ocelot.DependencyInjection;
-using Ocelot.Middleware;
-using Serilog;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-builder.Host.UseSerilog((context, configuration) =>
+builder.AddServiceDefaults();
+
+// YARP reverse proxy; cluster destinations are logical service names resolved by service discovery
+// (Aspire injects them; docker-compose/Kubernetes set services__<name>__http__0).
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
+    .AddServiceDiscoveryDestinationResolver();
+
+builder.Services.AddRateLimiter(options =>
 {
-    configuration
-        .ReadFrom.Configuration(context.Configuration)
-        .Enrich.FromLogContext()
-        .WriteTo.Console()
-        .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day);
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("per-client", context => RateLimitPartition.GetTokenBucketLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = 100,
+            TokensPerPeriod = 50,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(10),
+            QueueLimit = 0,
+        }));
 });
 
-// Add Ocelot
-builder.Services.AddOcelot();
-
-// Add CORS
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(builder =>
-    {
-        builder.AllowAnyOrigin()
-               .AllowAnyMethod()
-               .AllowAnyHeader();
-    });
-});
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+    policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
 
-app.UseSerilogRequestLogging();
 app.UseCors();
+app.UseRateLimiter();
 
-// Use Ocelot
-await app.UseOcelot();
+app.MapDefaultEndpoints();
+app.MapReverseProxy();
 
-app.Run();
+await app.RunAsync();

@@ -1,75 +1,62 @@
-using ECommerce.Services.Ordering.Application.Extensions;
-using ECommerce.Services.Ordering.Infrastructure.Extensions;
-using ECommerce.Services.Ordering.Infrastructure.Data;
-using ECommerce.Shared.Common.Extensions;
-using ECommerce.Shared.Common.Middleware;
+using ECommerce.Services.Ordering.Application;
+using ECommerce.Services.Ordering.Endpoints;
+using ECommerce.Services.Ordering.Infrastructure;
+using ECommerce.Shared.Common.Auth;
+using ECommerce.Shared.Common.Clients;
+using ECommerce.Shared.Common.Http;
+using FluentValidation;
 using MassTransit;
-using Microsoft.EntityFrameworkCore;
-using Serilog;
-using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-builder.Host.ConfigureSerilog();
+builder.AddServiceDefaults();
+builder.AddApiDefaults();
+builder.AddJwtAuthentication();
 
-// Add services to the container
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// PostgreSQL via the Aspire client integration (pooling, retries, health check, tracing).
+builder.AddNpgsqlDbContext<OrderingContext>("orderingdb");
 
-// Database
-builder.Services.AddDbContext<OrderingContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddCatalogClient(builder.Configuration);
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddValidatorsFromAssemblyContaining<CreateOrderRequestValidator>();
 
-// Application Services
-builder.Services.AddApplicationServices();
-
-// Infrastructure Services
-builder.Services.AddInfrastructureServices(builder.Configuration);
-
-// MassTransit
-builder.Services.AddMassTransit(x =>
+builder.Services.AddMassTransit(bus =>
 {
-    x.AddConsumers(Assembly.GetExecutingAssembly());
-    
-    x.UsingRabbitMq((context, cfg) =>
+    bus.SetKebabCaseEndpointNameFormatter();
+    bus.AddConsumer<PaymentSucceededConsumer>();
+    bus.AddConsumer<PaymentFailedConsumer>();
+
+    // RabbitMQ when a broker is configured, otherwise in-memory (single-process dev/test).
+    var rabbit = builder.Configuration.GetConnectionString("messaging");
+    if (string.IsNullOrWhiteSpace(rabbit))
     {
-        cfg.Host(builder.Configuration.GetConnectionString("RabbitMQ"));
-        cfg.ConfigureEndpoints(context);
-    });
+        bus.UsingInMemory((context, cfg) => cfg.ConfigureEndpoints(context));
+    }
+    else
+    {
+        bus.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host(new Uri(rabbit));
+            cfg.UseMessageRetry(retry => retry.Exponential(5, TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200)));
+            cfg.ConfigureEndpoints(context);
+        });
+    }
 });
-
-// Common services
-builder.Services.AddCommonServices(Assembly.GetExecutingAssembly());
-
-// Health checks
-builder.Services.AddHealthChecks()
-    .AddDbContext<OrderingContext>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseSerilogRequestLogging();
-
-app.UseHttpsRedirection();
+app.UseApiDefaults();
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();
+app.MapOrderEndpoints();
 
-// Initialize database
-using (var scope = app.Services.CreateScope())
+await using (var scope = app.Services.CreateAsyncScope())
 {
-    var context = scope.ServiceProvider.GetRequiredService<OrderingContext>();
-    await context.Database.MigrateAsync();
+    // Schema bootstrap for the demo environment; production deployments would run EF migrations as a job.
+    await scope.ServiceProvider.GetRequiredService<OrderingContext>().Database.EnsureCreatedAsync();
 }
 
-app.Run();
+await app.RunAsync();
