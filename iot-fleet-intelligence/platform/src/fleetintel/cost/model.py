@@ -167,7 +167,7 @@ def estimate(
         )
 
     p = profile
-    readings = D(p.devices) * D(86_400) / D(p.report_interval_seconds) * days
+    readings = D(p.devices) * D(86_400) * hours / (D(p.report_interval_seconds) * 24)
     kept_readings = readings * (1 - p.edge_filter_ratio)
     messages = kept_readings / D(p.readings_per_message)
     msg_bytes = D(p.payload_bytes) * D(p.readings_per_message) * p.compression_ratio
@@ -266,7 +266,7 @@ def estimate(
     readings_per_inv = kept_readings / stream_inv if stream_inv else D(0)
     stream_s = (p.stream_base_ms + p.stream_ms_per_reading * readings_per_inv) / 1000
     stream_gbs = stream_inv * stream_s * D(p.stream_memory_mb) / 1024
-    incidents = D(p.devices) / 1000 * p.incidents_per_1k_devices_per_day * days
+    incidents = D(p.devices) * p.incidents_per_1k_devices_per_day * hours / 24_000
     llm_calls = incidents * p.llm_share * (1 - p.llm_cache_hit_rate)
     worker_gb = D(p.worker_memory_mb) / 1024
     enrich_gbs = incidents * p.enrich_ms / 1000 * worker_gb

@@ -21,6 +21,7 @@ from aws_lambda_powertools.utilities.batch import (
 from aws_lambda_powertools.utilities.data_classes.sqs_event import SQSRecord
 from aws_lambda_powertools.utilities.idempotency import IdempotencyConfig, idempotent_function
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict
 
 from fleetintel.bootstrap import Container, get_container
@@ -29,6 +30,7 @@ from fleetintel.domain import IncidentStatus
 logger = Logger(service="fleetintel-workers")
 tracer = Tracer(service="fleetintel-workers")
 metrics = Metrics(namespace="FleetIntel", service="workers")
+otel = trace.get_tracer("fleetintel.workers")
 
 
 class IncidentJob(BaseModel):
@@ -41,7 +43,9 @@ class IncidentNotFoundError(Exception):
     """Raised so the message is retried (e.g. replication lag) and lands in the DLQ if persistent."""
 
 
+@otel.start_as_current_span("incident.enrich")
 def enrich_incident(c: Container, job: IncidentJob) -> dict[str, Any]:
+    trace.get_current_span().set_attribute("fleetintel.incident_id", job.incident_id)
     inc, _, _ = c.repo.get_bundle(job.incident_id)
     if inc is None:
         raise IncidentNotFoundError(job.incident_id)
@@ -57,7 +61,9 @@ def enrich_incident(c: Container, job: IncidentJob) -> dict[str, Any]:
     return {"incident_id": inc.incident_id, "sources": len(ctx.items), "degraded": degraded}
 
 
+@otel.start_as_current_span("incident.diagnose")
 def diagnose_incident(c: Container, job: IncidentJob) -> dict[str, Any]:
+    trace.get_current_span().set_attribute("fleetintel.incident_id", job.incident_id)
     inc, enrichment, _ = c.repo.get_bundle(job.incident_id)
     if inc is None:
         raise IncidentNotFoundError(job.incident_id)

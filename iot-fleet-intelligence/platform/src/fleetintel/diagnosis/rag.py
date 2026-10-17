@@ -86,7 +86,16 @@ class RunbookIndex:
     def __init__(self, embedder: EmbeddingProvider, chunks: list[Chunk] | None = None) -> None:
         self.embedder = embedder
         self.chunks = chunks if chunks is not None else load_runbooks()
-        self.vectors = embedder.embed([f"{c.title}. {c.section}. {c.text}" for c in self.chunks])
+        self._vectors: list[list[float]] | None = None
+
+    @property
+    def vectors(self) -> list[list[float]]:
+        # Embedded lazily on first use: no network call at cold start / container build.
+        if self._vectors is None:
+            self._vectors = self.embedder.embed(
+                [f"{c.title}. {c.section}. {c.text}" for c in self.chunks]
+            )
+        return self._vectors
 
     def search(self, query: str, k: int = 3, fault_hint: str | None = None) -> list[Retrieved]:
         q = self.embedder.embed([query])[0]

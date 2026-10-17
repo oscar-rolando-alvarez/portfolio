@@ -7,12 +7,14 @@ retry -> timeout). Failures never fail the incident: they degrade to an
 
 from __future__ import annotations
 
+import contextvars
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from aws_lambda_powertools import Logger
+from opentelemetry import trace
 
 from fleetintel.domain import (
     EnrichmentContext,
@@ -31,6 +33,7 @@ from fleetintel.ports import (
 from fleetintel.resilience import CircuitOpenError, ResilientCaller
 
 logger = Logger(service="fleetintel", child=True)
+otel = trace.get_tracer("fleetintel.enrichment")
 
 HOME_PLMN = "310260"
 
@@ -52,7 +55,9 @@ class EnrichmentService:
         self.callers = callers
         self.home_plmn = home_plmn
 
+    @otel.start_as_current_span("enrichment.provider_call")
     def _call(self, source: str, key: str, fn: Callable[[], dict[str, Any]]) -> EnrichmentItem:
+        trace.get_current_span().set_attribute("fleetintel.enrichment.source", source)
         t0 = time.perf_counter()
         try:
             data, cached = self.callers[source].call(f"{source}#{key}", fn)
@@ -138,7 +143,8 @@ class EnrichmentService:
                 ]
             )
         with ThreadPoolExecutor(max_workers=len(tasks), thread_name_prefix="enrich") as pool:
-            futures = [pool.submit(t) for t in tasks]
+            # copy the context so provider spans stay children of the current trace
+            futures = [pool.submit(contextvars.copy_context().run, t) for t in tasks]
             items = [item for f in futures for item in f.result()]
         items.sort(key=lambda i: i.source)
         return EnrichmentContext(incident_id=incident.incident_id, items=items)

@@ -22,6 +22,7 @@ from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.data_classes import KafkaEvent
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from opentelemetry import trace
 from pydantic import ValidationError
 
 from fleetintel.bootstrap import Container, get_container
@@ -31,6 +32,7 @@ from fleetintel.domain import TelemetryEvent
 logger = Logger(service="fleetintel-stream")
 tracer = Tracer(service="fleetintel-stream")
 metrics = Metrics(namespace="FleetIntel", service="stream")
+otel = trace.get_tracer("fleetintel.stream")
 
 MAX_QUARANTINE_PER_BATCH = 100
 
@@ -46,9 +48,11 @@ class ShardResult:
     updated: int = 0
 
 
+@otel.start_as_current_span("stream.process_shard")
 def process_shard(
     shard: str, payloads: list[tuple[int | None, bytes]], c: Container
 ) -> ShardResult:
+    trace.get_current_span().set_attribute("messaging.destination.partition.id", shard)
     res = ShardResult(records=len(payloads))
     stored = c.state_store.load(shard)
     detector = StreamDetector.from_state(stored.state, c.detector_config)

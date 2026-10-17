@@ -72,7 +72,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "src/fleetintel/cost/model.py" = ["B008", "PLR0915"]  # Decimal defaults in pydantic fields; one linear formula per line item
-"tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "S311", "DTZ001"]
+"tests/**" = ["S101", "S105", "S106", "PLR2004", "PLC0415", "S311", "DTZ001", "PT018", "E402"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -88,6 +88,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+filterwarnings = ["ignore:Couldn.t determine the remaining time left:UserWarning"]
 markers = ["integration: needs external services (Kafka) - enabled via KAFKA_BOOTSTRAP"]
 
 [tool.coverage.run]

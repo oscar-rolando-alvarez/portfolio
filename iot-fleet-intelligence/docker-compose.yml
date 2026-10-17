@@ -1,0 +1,86 @@
+# Local end-to-end stack. No cloud account or auth token required:
+#   kafka    - Apache Kafka 4.x in KRaft mode (stands in for Amazon MSK Serverless)
+#   moto     - moto-server emulating DynamoDB + SQS (stands in for the managed services)
+#   jaeger   - trace UI, receives OTLP from the platform (http://localhost:16686)
+#   platform - the real Lambda handlers wired to local event sources + API on :8080
+#   simulator- the Go fleet simulator (run on demand: `make demo`)
+name: iot-fleet-intelligence
+
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 6
+    ports: ["29092:29092"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  moto:
+    image: motoserver/moto:5.2.4
+    ports: ["127.0.0.1:5055:5000"] # 5000 is often taken on macOS
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/moto-api/', timeout=2)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318"   # OTLP/HTTP
+
+  platform:
+    build: ./platform
+    depends_on:
+      kafka: {condition: service_healthy}
+      moto: {condition: service_healthy}
+      jaeger: {condition: service_started}
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: us-east-1
+      FLEETINTEL_AWS_ENDPOINT_URL: http://moto:5000
+      FLEETINTEL_TABLE_NAME: fleetintel
+      FLEETINTEL_LLM_PROVIDER: ${FLEETINTEL_LLM_PROVIDER:-fake}
+      FLEETINTEL_LLM_BASE_URL: ${FLEETINTEL_LLM_BASE_URL:-https://api.openai.com/v1}
+      FLEETINTEL_LLM_API_KEY: ${FLEETINTEL_LLM_API_KEY:-}
+      FLEETINTEL_LLM_MODEL: ${FLEETINTEL_LLM_MODEL:-gpt-4o-mini}
+      FLEETINTEL_ENRICHMENT_MODE: ${FLEETINTEL_ENRICHMENT_MODE:-fake}
+      # tenant "acme-utilities" with API key "demo-key-acme" (only the SHA-256 is configured)
+      FLEETINTEL_API_KEYS: acme-utilities:8649cdebee753898fd50e01408a9e438aa5090249bc3e51b65f33dce973b0873
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: fleet.telemetry.v1
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: fleetintel-local
+      POWERTOOLS_LOG_LEVEL: WARNING
+    ports: ["8080:8080"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  simulator:
+    build: ./simulator
+    profiles: ["tools"]
+    depends_on:
+      kafka: {condition: service_healthy}
+    volumes:
+      - ./scenarios:/scenarios:ro
+    read_only: true
+    cap_drop: [ALL]
