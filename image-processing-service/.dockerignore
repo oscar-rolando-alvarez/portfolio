@@ -1,79 +1,15 @@
-# Git
+.venv
 .git
-.gitignore
-
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-pip-log.txt
-pip-delete-this-directory.txt
-.tox
-.coverage
-.coverage.*
-.pytest_cache
+**/__pycache__
 .mypy_cache
-
-# Virtual environments
-venv/
-env/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Docker
-Dockerfile*
-docker-compose*
-.dockerignore
-
-# Documentation
-README.md
-docs/
-*.md
-
-# Tests
-tests/
-test_*
-*_test.py
-
-# Temporary files
-*.tmp
-*.log
-.tmp/
-logs/
-
-# Development
-.env.example
-.env.local
-.env.development
-
-# Kubernetes
-k8s/
-kubernetes/
-*.yaml
-*.yml
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
-# Node.js (if any frontend assets)
-node_modules/
-npm-debug.log*
-
-# Data files
-data/
-uploads/
-temp/
+.ruff_cache
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov
+data
+.env
+tests
+k8s
+docker-compose.yml
+Makefile
