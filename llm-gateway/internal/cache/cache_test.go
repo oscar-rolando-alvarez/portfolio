@@ -145,6 +145,29 @@ func TestSemanticIndexRingBuffer(t *testing.T) {
 	}
 }
 
+func TestSemanticIndexNamespaceCap(t *testing.T) {
+	x := NewSemanticIndex(4, nil)
+	x.SetMaxEntries(3)
+	for i := range 10 {
+		x.Add(fmt.Sprint("conv", i), mock.Vector("hello", 16), "k", 0)
+	}
+	if x.Namespaces() != 3 {
+		t.Fatalf("namespaces=%d want 3", x.Namespaces())
+	}
+	// A single namespace may use the whole budget; it is never evicted by itself.
+	y := NewSemanticIndex(10, nil)
+	y.SetMaxEntries(2)
+	for i := range 5 {
+		y.Add("one", mock.Vector(fmt.Sprint("q", i), 16), fmt.Sprint("k", i), 0)
+	}
+	if y.Len("one") == 0 {
+		t.Fatal("active namespace must not evict itself")
+	}
+	if x.Len("conv0") != 0 || x.Len("conv9") != 1 {
+		t.Fatal("oldest namespaces must be evicted first")
+	}
+}
+
 func randomUnit(r *rand.Rand, dims int) []float32 {
 	v := make([]float32, dims)
 	for i := range v {

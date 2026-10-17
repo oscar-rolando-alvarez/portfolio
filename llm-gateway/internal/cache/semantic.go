@@ -8,15 +8,20 @@ import (
 
 // SemanticIndex is an in-memory, per-namespace vector index using exact
 // (brute-force) cosine similarity over L2-normalised vectors. Each namespace
-// is a bounded ring buffer, so memory is capped at maxPerNS*dims*4 bytes per
-// namespace. Brute force is the right trade-off up to ~10^4 vectors per
-// namespace (see BenchmarkSemanticSearch); beyond that an ANN index such as
+// is a bounded ring buffer and the total number of vectors is capped: when
+// the cap is exceeded the oldest namespaces are evicted first (multi-turn
+// conversations create many small namespaces). Memory is therefore bounded by
+// maxEntries*dims*4 bytes. Brute force is the right trade-off up to ~10^4
+// vectors per namespace (see BenchmarkSemanticSearch); beyond that an ANN index such as
 // HNSW or Redis/Valkey vector search is the documented next step.
 type SemanticIndex struct {
-	mu       sync.RWMutex
-	spaces   map[string]*space
-	maxPerNS int
-	now      func() time.Time
+	mu         sync.RWMutex
+	spaces     map[string]*space
+	order      []string // namespace insertion order, for eviction
+	total      int      // vectors across all namespaces
+	maxPerNS   int
+	maxEntries int
+	now        func() time.Time
 }
 
 type entry struct {
@@ -30,6 +35,19 @@ type space struct {
 	next    int
 }
 
+// defaultMaxEntries caps the vectors held in memory (about 50 MB at 256
+// dimensions, 300 MB at 1536).
+const defaultMaxEntries = 50_000
+
+// SetMaxEntries overrides the global vector cap (tests, tuning).
+func (x *SemanticIndex) SetMaxEntries(n int) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if n > 0 {
+		x.maxEntries = n
+	}
+}
+
 // NewSemanticIndex creates an index holding up to maxPerNS vectors per namespace.
 func NewSemanticIndex(maxPerNS int, now func() time.Time) *SemanticIndex {
 	if maxPerNS <= 0 {
@@ -38,7 +56,7 @@ func NewSemanticIndex(maxPerNS int, now func() time.Time) *SemanticIndex {
 	if now == nil {
 		now = time.Now
 	}
-	return &SemanticIndex{spaces: map[string]*space{}, maxPerNS: maxPerNS, now: now}
+	return &SemanticIndex{spaces: map[string]*space{}, maxPerNS: maxPerNS, maxEntries: defaultMaxEntries, now: now}
 }
 
 // Add inserts a vector pointing at a cache key.
@@ -53,6 +71,7 @@ func (x *SemanticIndex) Add(ns string, vec []float32, key string, ttl time.Durat
 	if !ok {
 		s = &space{}
 		x.spaces[ns] = s
+		x.order = append(x.order, ns)
 	}
 	e := entry{vec: vec, key: key, expires: exp}
 	// Replace an existing entry for the same key (refresh).
@@ -64,10 +83,31 @@ func (x *SemanticIndex) Add(ns string, vec []float32, key string, ttl time.Durat
 	}
 	if len(s.entries) < x.maxPerNS {
 		s.entries = append(s.entries, e)
+		x.total++
+		x.evict(ns)
 		return
 	}
 	s.entries[s.next] = e
 	s.next = (s.next + 1) % x.maxPerNS
+}
+
+// evict drops the oldest namespaces (never keep) until the cap is respected.
+func (x *SemanticIndex) evict(keep string) {
+	for x.total > x.maxEntries && len(x.order) > 0 {
+		victim := x.order[0]
+		x.order = x.order[1:]
+		if victim == keep {
+			x.order = append(x.order, victim)
+			if len(x.order) == 1 {
+				return
+			}
+			continue
+		}
+		if sp, ok := x.spaces[victim]; ok {
+			x.total -= len(sp.entries)
+			delete(x.spaces, victim)
+		}
+	}
 }
 
 // Search returns the most similar live entry with similarity >= threshold.
@@ -93,6 +133,13 @@ func (x *SemanticIndex) Search(ns string, vec []float32, threshold float32) (str
 		return "", best, false
 	}
 	return bestKey, best, true
+}
+
+// Namespaces returns the number of namespaces held.
+func (x *SemanticIndex) Namespaces() int {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return len(x.spaces)
 }
 
 // Len returns the number of vectors in a namespace.
