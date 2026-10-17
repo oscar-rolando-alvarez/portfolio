@@ -1,0 +1,13 @@
+{
+  "name": "brief-storm",
+  "description": "Hard case: a 90-second reconnect storm hitting 60% of a cell.",
+  "faults": [
+    {
+      "type": "reconnect_storm",
+      "target": "auto",
+      "start": "12m",
+      "duration": "90s",
+      "intensity": 0.6
+    }
+  ]
+}

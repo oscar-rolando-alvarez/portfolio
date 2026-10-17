@@ -1,0 +1,27 @@
+{
+  "name": "multi-fault",
+  "description": "Overlapping faults: an outage and a roaming misconfiguration, then an APN error.",
+  "faults": [
+    {
+      "type": "cell_outage",
+      "target": "auto",
+      "start": "11m",
+      "duration": "5m",
+      "intensity": 0.95
+    },
+    {
+      "type": "roaming_misconfig",
+      "target": "auto",
+      "start": "13m",
+      "duration": "6m",
+      "intensity": 0.9
+    },
+    {
+      "type": "apn_error",
+      "target": "auto",
+      "start": "20m",
+      "duration": "4m",
+      "intensity": 0.9
+    }
+  ]
+}

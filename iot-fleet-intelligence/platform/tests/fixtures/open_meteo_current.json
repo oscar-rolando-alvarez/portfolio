@@ -1,0 +1,9 @@
+{
+  "latitude": 40.71,
+  "longitude": -74.01,
+  "generationtime_ms": 0.05,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "current_units": {"time": "iso8601", "interval": "seconds", "temperature_2m": "C", "precipitation": "mm", "wind_speed_10m": "km/h", "wind_gusts_10m": "km/h", "weather_code": "wmo code"},
+  "current": {"time": "2026-10-01T00:15", "interval": 900, "temperature_2m": 14.2, "precipitation": 7.4, "wind_speed_10m": 48.6, "wind_gusts_10m": 92.2, "weather_code": 95}
+}

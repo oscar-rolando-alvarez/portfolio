@@ -1,0 +1,13 @@
+{
+  "name": "congestion",
+  "description": "Radio congestion in one cell: SINR collapses, latency rises, EMM #22 rejects.",
+  "faults": [
+    {
+      "type": "congestion",
+      "target": "auto",
+      "start": "12m",
+      "duration": "8m",
+      "intensity": 0.9
+    }
+  ]
+}

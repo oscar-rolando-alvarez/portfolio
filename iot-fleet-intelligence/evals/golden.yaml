@@ -1,0 +1,41 @@
+# Golden evaluation set: simulated fault scenarios -> expected incidents and
+# expected diagnosis root cause. Telemetry is generated deterministically by the
+# Go simulator (same seed => same bytes), so results are reproducible.
+version: 1
+simulator:
+  devices: 3000
+  duration: 26m
+  seed: 7
+  tenant: acme-utilities
+  shards: 1            # single generator shard => byte-identical output on every machine
+pipeline:
+  kafka_partitions: 3  # events are partitioned by cell id like the real topic
+  batch_size: 2000     # records per simulated Lambda invocation
+thresholds:            # CI gate (fake LLM). Real-model runs report the same metrics.
+  detection_precision: 0.90
+  detection_recall: 0.95
+  per_fault_recall_min: 1.0
+  diagnosis_accuracy: 0.95
+  baseline_false_positives_max: 0
+  guardrail_pass_rate_min: 0.90
+scenarios:
+  - name: baseline
+    file: ../scenarios/baseline.json
+  - name: cell-outage
+    file: ../scenarios/cell-outage.json
+  - name: congestion
+    file: ../scenarios/congestion.json
+  - name: reconnect-storm
+    file: ../scenarios/reconnect-storm.json
+  - name: roaming-misconfig
+    file: ../scenarios/roaming-misconfig.json
+  - name: apn-error
+    file: ../scenarios/apn-error.json
+  - name: firmware-regression
+    file: ../scenarios/firmware-regression.json
+  - name: multi-fault
+    file: ../scenarios/multi-fault.json
+  - name: weak-outage
+    file: ../scenarios/weak-outage.json
+  - name: brief-storm
+    file: ../scenarios/brief-storm.json

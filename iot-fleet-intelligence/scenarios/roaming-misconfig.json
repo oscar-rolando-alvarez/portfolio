@@ -1,0 +1,13 @@
+{
+  "name": "roaming-misconfig",
+  "description": "Roaming devices on one visited network are rejected with EMM #15/#13.",
+  "faults": [
+    {
+      "type": "roaming_misconfig",
+      "target": "auto",
+      "start": "12m",
+      "duration": "6m",
+      "intensity": 0.9
+    }
+  ]
+}

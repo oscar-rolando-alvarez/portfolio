@@ -1,0 +1,23 @@
+{
+  "page": {"id": "fixture", "name": "Operator status (recorded fixture)"},
+  "incidents": [
+    {
+      "id": "fx-001",
+      "name": "Scheduled maintenance: SMS centre software upgrade",
+      "status": "scheduled",
+      "impact": "maintenance",
+      "created_at": "2026-09-30T22:00:00Z",
+      "components": [{"name": "SMS"}],
+      "incident_updates": [{"body": "SMS delivery may be delayed by up to 10 minutes during the window. Data sessions are not affected."}]
+    },
+    {
+      "id": "fx-002",
+      "name": "Degraded portal performance",
+      "status": "monitoring",
+      "impact": "minor",
+      "created_at": "2026-10-01T00:00:00Z",
+      "components": [{"name": "Self-service portal"}],
+      "incident_updates": [{"body": "A fix has been deployed and we are monitoring results."}]
+    }
+  ]
+}

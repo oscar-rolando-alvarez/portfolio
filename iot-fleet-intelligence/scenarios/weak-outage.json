@@ -1,0 +1,13 @@
+{
+  "name": "weak-outage",
+  "description": "Hard case: only 45% of the cell's devices lose service.",
+  "faults": [
+    {
+      "type": "cell_outage",
+      "target": "auto",
+      "start": "12m",
+      "duration": "6m",
+      "intensity": 0.45
+    }
+  ]
+}

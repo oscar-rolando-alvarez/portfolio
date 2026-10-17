@@ -1,0 +1,13 @@
+{
+  "name": "reconnect-storm",
+  "description": "Devices in one cell reconnect 6-25 times per report with healthy radio.",
+  "faults": [
+    {
+      "type": "reconnect_storm",
+      "target": "auto",
+      "start": "12m",
+      "duration": "6m",
+      "intensity": 0.9
+    }
+  ]
+}

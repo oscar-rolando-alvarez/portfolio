@@ -1,0 +1,13 @@
+{
+  "name": "demo",
+  "description": "make demo: a cell outage after the detector has learned its baselines.",
+  "faults": [
+    {
+      "type": "cell_outage",
+      "target": "auto",
+      "start": "8m",
+      "duration": "5m",
+      "intensity": 0.95
+    }
+  ]
+}
