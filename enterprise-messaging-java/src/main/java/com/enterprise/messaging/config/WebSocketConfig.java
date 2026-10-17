@@ -4,7 +4,13 @@ import com.enterprise.messaging.websocket.WebSocketHandshakeInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.config.annotation.*;
+import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
+
+import java.security.Principal;
+import java.util.Map;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -33,12 +39,14 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // Register STOMP endpoint
         registry.addEndpoint("/ws")
+                .setHandshakeHandler(jwtPrincipalHandshakeHandler())
                 .addInterceptors(handshakeInterceptor)
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
 
         // Register WebSocket endpoint without SockJS fallback
         registry.addEndpoint("/websocket")
+                .setHandshakeHandler(jwtPrincipalHandshakeHandler())
                 .addInterceptors(handshakeInterceptor)
                 .setAllowedOriginPatterns("*");
     }
@@ -48,5 +56,20 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registration.setMessageSizeLimit(128 * 1024); // 128KB
         registration.setSendBufferSizeLimit(512 * 1024); // 512KB
         registration.setSendTimeLimit(20 * 1000); // 20 seconds
+    }
+
+    /**
+     * Exposes the username validated by {@link WebSocketHandshakeInterceptor} as the STOMP session
+     * principal, so @MessageMapping methods and /user destinations know who is connected.
+     */
+    private DefaultHandshakeHandler jwtPrincipalHandshakeHandler() {
+        return new DefaultHandshakeHandler() {
+            @Override
+            protected Principal determineUser(
+                    ServerHttpRequest request, WebSocketHandler wsHandler, Map<String, Object> attributes) {
+                Object username = attributes.get("username");
+                return username != null ? username::toString : super.determineUser(request, wsHandler, attributes);
+            }
+        };
     }
 }
