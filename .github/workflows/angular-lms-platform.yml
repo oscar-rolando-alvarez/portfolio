@@ -1,0 +1,121 @@
+name: angular-lms-platform
+
+on:
+  pull_request:
+    paths:
+      - 'angular-lms-platform/**'
+      - '.github/workflows/angular-lms-platform.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'angular-lms-platform/**'
+      - '.github/workflows/angular-lms-platform.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: angular-lms-platform
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  verify:
+    name: Lint, typecheck, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: angular-lms-platform/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (Vitest) with coverage
+        run: npm run test:coverage
+
+      - name: Production build
+        run: npm run build
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v7
+        with:
+          name: angular-lms-platform-dist
+          path: angular-lms-platform/dist/angular-lms-platform/browser
+          retention-days: 7
+
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory: a newly published advisory should not block unrelated changes.
+    # Findings are visible in the job log and as a failed (but non-blocking) step.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: angular-lms-platform/package-lock.json
+
+      - name: npm audit (high and critical)
+        run: npm audit --audit-level=high
+
+  docker:
+    name: Container image build and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: verify
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: angular-lms-platform
+          load: true
+          push: false
+          tags: angular-lms-platform:ci
+          cache-from: type=gha,scope=angular-lms-platform
+          cache-to: type=gha,mode=max,scope=angular-lms-platform
+
+      - name: Smoke test
+        run: |
+          docker run -d --name lms --read-only --tmpfs /tmp -p 8080:8080 angular-lms-platform:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:8080/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/health
+          curl -fsS http://localhost:8080/courses/angular-signals | grep -q '<app-root>'
+          curl -fsS http://localhost:8080/data/courses.json | grep -q 'angular-signals'
+          curl -fsSI http://localhost:8080/ | grep -qi 'content-security-policy'
+          test "$(docker inspect --format '{{.Config.User}}' angular-lms-platform:ci)" = "nginx"
+
+      - name: Container logs
+        if: always()
+        run: docker logs lms || true
