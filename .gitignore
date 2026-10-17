@@ -1,0 +1,12 @@
+# OS / editor noise (project-specific ignores live in each project folder)
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Local environment files — never commit secrets
+.env
+.env.*
+!.env.example
