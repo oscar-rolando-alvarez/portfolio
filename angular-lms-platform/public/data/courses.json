@@ -1,0 +1,205 @@
+[
+  {
+    "id": "angular-signals",
+    "title": "Reactive Angular with Signals",
+    "subtitle": "Model UI state with signal, computed and effect, then go zoneless.",
+    "category": "Frontend",
+    "level": "intermediate",
+    "instructor": "Oscar Alvarez",
+    "tags": ["Angular", "Signals", "Zoneless"],
+    "lessons": [
+      {
+        "id": "as-1",
+        "kind": "video",
+        "title": "Why signals?",
+        "durationMinutes": 10,
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+        "summary": "How fine-grained reactivity replaces zone-based change detection and what that means for performance."
+      },
+      {
+        "id": "as-2",
+        "kind": "reading",
+        "title": "signal, computed and effect",
+        "durationMinutes": 8,
+        "paragraphs": [
+          "A signal is a value container that notifies consumers when it changes. Read it by calling it, update it with set or update.",
+          "computed derives a read-only signal from other signals. It is lazy and memoized: it only recalculates when a dependency changes and someone reads it.",
+          "effect runs side effects when the signals it reads change. Keep effects for synchronising with the outside world, such as storage, logging or imperative DOM APIs, not for deriving state."
+        ]
+      },
+      {
+        "id": "as-3",
+        "kind": "reading",
+        "title": "Going zoneless",
+        "durationMinutes": 7,
+        "paragraphs": [
+          "Since Angular 21, new applications run without zone.js. Change detection is scheduled by signal writes, template events and the async pipe.",
+          "Prefer OnPush components, keep state in signals and avoid mutating objects that templates read directly."
+        ]
+      },
+      {
+        "id": "as-4",
+        "kind": "quiz",
+        "title": "Check your understanding",
+        "durationMinutes": 5,
+        "passingScore": 70,
+        "questions": [
+          {
+            "id": "as-4-q1",
+            "prompt": "Which API should you use to derive a value from other signals?",
+            "options": ["effect", "computed", "toObservable", "linkedSignal with no source"],
+            "answer": 1,
+            "explanation": "computed creates a memoized, read-only derived signal."
+          },
+          {
+            "id": "as-4-q2",
+            "prompt": "What schedules change detection in a zoneless application?",
+            "options": ["Every setTimeout", "Signal writes, template events and the async pipe", "Only manual detectChanges calls", "The service worker"],
+            "answer": 1
+          },
+          {
+            "id": "as-4-q3",
+            "prompt": "Effects are best suited for...",
+            "options": ["Deriving state", "Synchronising with external systems", "Replacing inputs", "Routing"],
+            "answer": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cloud-architecture",
+    "title": "Cloud Architecture Foundations",
+    "subtitle": "Design resilient, cost-aware systems on any major cloud.",
+    "category": "Architecture",
+    "level": "beginner",
+    "instructor": "Oscar Alvarez",
+    "tags": ["Cloud", "Resilience", "Cost"],
+    "lessons": [
+      {
+        "id": "ca-1",
+        "kind": "video",
+        "title": "Well-architected pillars",
+        "durationMinutes": 12,
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+        "summary": "Operational excellence, security, reliability, performance efficiency, cost optimisation and sustainability."
+      },
+      {
+        "id": "ca-2",
+        "kind": "reading",
+        "title": "Designing for failure",
+        "durationMinutes": 9,
+        "paragraphs": [
+          "Assume every dependency will fail. Use timeouts, retries with jitter and circuit breakers at every network boundary.",
+          "Spread workloads across availability zones and make deployments immutable so you can roll back quickly."
+        ]
+      },
+      {
+        "id": "ca-3",
+        "kind": "quiz",
+        "title": "Resilience quiz",
+        "durationMinutes": 5,
+        "passingScore": 50,
+        "questions": [
+          {
+            "id": "ca-3-q1",
+            "prompt": "Why add jitter to retries?",
+            "options": ["To make logs prettier", "To avoid synchronised retry storms", "To reduce latency to zero", "It is required by HTTP"],
+            "answer": 1
+          },
+          {
+            "id": "ca-3-q2",
+            "prompt": "Which pattern stops calling a failing dependency for a while?",
+            "options": ["Circuit breaker", "Sidecar", "Strangler fig", "CQRS"],
+            "answer": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "applied-ml",
+    "title": "Applied Machine Learning",
+    "subtitle": "From a clean dataset to a monitored model in production.",
+    "category": "Data & AI",
+    "level": "intermediate",
+    "instructor": "Oscar Alvarez",
+    "tags": ["Machine Learning", "MLOps"],
+    "lessons": [
+      {
+        "id": "ml-1",
+        "kind": "video",
+        "title": "Framing the problem",
+        "durationMinutes": 11,
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+        "summary": "Turning a business question into a measurable prediction task with a baseline to beat."
+      },
+      {
+        "id": "ml-2",
+        "kind": "reading",
+        "title": "Evaluation that matches reality",
+        "durationMinutes": 10,
+        "paragraphs": [
+          "Split data by time when the model will predict the future; random splits leak information.",
+          "Choose metrics that reflect the cost of mistakes. Precision and recall often matter more than accuracy on imbalanced data."
+        ]
+      },
+      {
+        "id": "ml-3",
+        "kind": "reading",
+        "title": "Monitoring models in production",
+        "durationMinutes": 8,
+        "paragraphs": [
+          "Track input drift, prediction drift and business KPIs. Alert on sustained change, not single spikes.",
+          "Keep a human-reviewed feedback loop so labels keep flowing back into retraining."
+        ]
+      }
+    ]
+  },
+  {
+    "id": "secure-coding",
+    "title": "Secure Coding Essentials",
+    "subtitle": "Prevent the most common web vulnerabilities by design.",
+    "category": "Security",
+    "level": "advanced",
+    "instructor": "Oscar Alvarez",
+    "tags": ["OWASP", "AppSec"],
+    "lessons": [
+      {
+        "id": "sc-1",
+        "kind": "video",
+        "title": "Threat modelling in 15 minutes",
+        "durationMinutes": 15,
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+        "summary": "Use STRIDE on a data-flow diagram to find the risks that matter before writing code."
+      },
+      {
+        "id": "sc-2",
+        "kind": "quiz",
+        "title": "OWASP Top 10 check",
+        "durationMinutes": 6,
+        "passingScore": 70,
+        "questions": [
+          {
+            "id": "sc-2-q1",
+            "prompt": "What is the primary defence against SQL injection?",
+            "options": ["Input length limits", "Parameterised queries", "HTTPS", "Obfuscating table names"],
+            "answer": 1
+          },
+          {
+            "id": "sc-2-q2",
+            "prompt": "Where should secrets such as API keys live?",
+            "options": ["In the front-end bundle", "In source control", "In a secrets manager or environment injected at runtime", "In code comments"],
+            "answer": 2
+          },
+          {
+            "id": "sc-2-q3",
+            "prompt": "Which header mitigates clickjacking?",
+            "options": ["Content-Security-Policy frame-ancestors", "Accept-Language", "ETag", "Cache-Control"],
+            "answer": 0
+          }
+        ]
+      }
+    ]
+  }
+]

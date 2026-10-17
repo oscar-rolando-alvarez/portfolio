@@ -1,0 +1,22 @@
+# Build output
+/dist
+/out-tsc
+/coverage
+/.angular
+
+# Dependencies
+/node_modules
+
+# Logs
+npm-debug.log*
+
+# Editors and OS files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
