@@ -1,63 +1,47 @@
-# Multi-stage build for optimized production image
-FROM rust:1.75-bullseye as builder
+# syntax=docker/dockerfile:1.7
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    cmake \
-    clang \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app directory
+# ---- Build stage --------------------------------------------------------
+FROM rust:1.99.1-slim-trixie AS builder
 WORKDIR /app
 
-# Copy manifests
+# rust-toolchain.toml is intentionally not copied: the base image already
+# provides the pinned toolchain. Storage is redb (pure Rust), so no C++
+# toolchain is required.
 COPY Cargo.toml Cargo.lock ./
-
-# Copy source code
 COPY src ./src
 COPY benches ./benches
 COPY tests ./tests
 
-# Build the application in release mode
-RUN cargo build --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked --bins \
+    && mkdir -p /out \
+    && cp target/release/blockchain-node target/release/blockchain-cli target/release/blockchain-miner /out/
 
-# Runtime stage
-FROM debian:bullseye-slim
+# ---- Runtime stage ------------------------------------------------------
+FROM debian:trixie-slim AS runtime
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl1.1 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 blockchain \
+    && useradd --system --uid 10001 --gid blockchain --home-dir /data --shell /usr/sbin/nologin blockchain \
+    && mkdir -p /data \
+    && chown blockchain:blockchain /data
 
-# Create app user
-RUN groupadd -r blockchain && useradd -r -g blockchain blockchain
+COPY --from=builder /out/ /usr/local/bin/
 
-# Create data directory
-RUN mkdir -p /data && chown blockchain:blockchain /data
-
-# Copy binary from builder stage
-COPY --from=builder /app/target/release/blockchain-node /usr/local/bin/
-COPY --from=builder /app/target/release/blockchain-cli /usr/local/bin/
-COPY --from=builder /app/target/release/blockchain-miner /usr/local/bin/
-
-# Set proper permissions
-RUN chmod +x /usr/local/bin/blockchain-*
-
-# Switch to non-root user
-USER blockchain
-
-# Set working directory
+USER 10001:10001
 WORKDIR /data
+VOLUME ["/data"]
 
-# Expose ports
+ENV RUST_LOG=info
+
+# 8080: HTTP API, 8333: libp2p
 EXPOSE 8080 8333
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/api/v1/health || exit 1
+# Built-in std-only HTTP probe, so the image does not need curl.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["blockchain-cli", "health", "--addr", "127.0.0.1:8080"]
 
-# Default command
-CMD ["blockchain-node", "--data-dir", "/data", "--api-host", "0.0.0.0"]
+CMD ["blockchain-node", "--data-dir", "/data", "--api-host", "0.0.0.0", "--api-port", "8080", "--p2p-port", "8333"]

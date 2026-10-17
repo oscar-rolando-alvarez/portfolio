@@ -102,11 +102,8 @@ path = "src/bin/miner.rs"
 name = "blockchain_bench"
 harness = false
 
+# Thin LTO keeps most of the speed-up while staying within the memory of CI
+# runners and Docker builders (fat LTO across wasmtime + libp2p does not).
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-
-[profile.dev]
-opt-level = 0
-debug = true
+lto = "thin"
+strip = true
