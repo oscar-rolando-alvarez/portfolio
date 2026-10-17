@@ -1,0 +1,28 @@
+{
+  "policyNumber": "POL-100001",
+  "lineOfBusiness": "auto",
+  "lossType": "collision",
+  "lossDate": "2026-10-01",
+  "reportedDate": "2026-10-03",
+  "incidentHour": 14,
+  "description": "Side impact at an intersection; airbags deployed, vehicle towed to body shop.",
+  "claimedAmount": 14500,
+  "policeReportFiled": true,
+  "claimant": {
+    "fullName": "Liam Nguyen",
+    "email": "liam.nguyen@example.com",
+    "phone": "555-910-4432"
+  },
+  "documents": [
+    {
+      "documentId": "doc-s06-est",
+      "kind": "repair_estimate",
+      "content": "Precision Auto Body\nEstimate No: EST-6-EST\nDate: 2026-10-02\nCustomer: Liam Nguyen\nPhone: 555-910-4432\nParts and labor as itemized.\nEstimate Total: $14,500.00"
+    },
+    {
+      "documentId": "doc-s06-pol",
+      "kind": "police_report",
+      "content": "Metro Police Department\nReport No: RPT-06-POL\nDate of loss: 2026-10-01\nInsured: Liam Nguyen\nIncident recorded; case open."
+    }
+  ]
+}
