@@ -144,7 +144,7 @@ export interface RunStore<S> {
   acquireLease(runId: string, owner: string, ttlMs: number): Promise<boolean>;
   releaseLease(runId: string, owner: string): Promise<void>;
   /** Runs stuck in "running" whose lease expired (crashed worker). */
-  listRecoverable(limit: number): Promise<string[]>;
+  listRecoverable(limit: number, graphId?: string): Promise<string[]>;
   listCheckpoints(runId: string): Promise<Checkpoint<S>[]>;
   appendEvents(runId: string, events: AuditEventInput[]): Promise<void>;
   listEvents(runId: string, tenantId?: string): Promise<AuditEvent[]>;

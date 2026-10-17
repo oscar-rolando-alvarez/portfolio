@@ -78,7 +78,9 @@ export class InMemoryVaultStorage implements VaultStorage {
   private readonly data = new Map<string, string>();
 
   put(tenantId: string, token: string, _kind: PiiKind, ciphertext: string): Promise<void> {
-    this.data.set(`${tenantId}|${token}`, ciphertext);
+    // First write wins, matching the PostgreSQL adapter (ON CONFLICT DO NOTHING).
+    const key = `${tenantId}|${token}`;
+    if (!this.data.has(key)) this.data.set(key, ciphertext);
     return Promise.resolve();
   }
 

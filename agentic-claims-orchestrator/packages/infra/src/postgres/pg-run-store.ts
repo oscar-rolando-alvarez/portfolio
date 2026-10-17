@@ -218,13 +218,14 @@ export class PgRunStore<S> implements RunStore<S> {
       .where(and(eq(schema.runs.runId, runId), eq(schema.runs.leaseOwner, owner)));
   }
 
-  async listRecoverable(limit: number): Promise<string[]> {
+  async listRecoverable(limit: number, graphId?: string): Promise<string[]> {
     const rows = await this.db
       .select({ runId: schema.runs.runId })
       .from(schema.runs)
       .where(
         and(
           eq(schema.runs.status, 'running'),
+          graphId === undefined ? undefined : eq(schema.runs.graphId, graphId),
           or(isNull(schema.runs.leaseExpiresAt), lt(schema.runs.leaseExpiresAt, sql`now()`)),
         ),
       )

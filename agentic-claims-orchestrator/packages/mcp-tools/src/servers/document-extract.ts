@@ -12,7 +12,7 @@ const DATE_RE = /\b(?:date(?: of service| of loss| issued)?)\s*[:=]?\s*(\d{4}-\d
 const REF_RE =
   /\b(?:report|invoice|estimate|reference|ref|case)\s*(?:no\.?|number|#)\s*[:=]?\s*([A-Z0-9][A-Z0-9-]{3,})/i;
 const NAME_RE =
-  /\b(?:claimant|insured|patient|customer|name|owner)\s*[:=]\s*([A-Z][a-z]+(?:\s[A-Z][a-z'-]+){1,3})/g;
+  /\b(?:[Cc]laimant|[Ii]nsured|[Pp]atient|[Cc]ustomer|[Nn]ame|[Oo]wner|[Bb]ill to)[ \t]*[:=][ \t]*([A-Z][a-z]+(?:[ \t][A-Z][a-z'-]+){1,3})/g;
 
 /**
  * Deterministic document understanding (stands in for an IDP/OCR service). Returns structured

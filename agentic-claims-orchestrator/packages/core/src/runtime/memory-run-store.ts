@@ -140,10 +140,10 @@ export class InMemoryRunStore<S> implements RunStore<S> {
     return Promise.resolve();
   }
 
-  listRecoverable(limit: number): Promise<string[]> {
+  listRecoverable(limit: number, graphId?: string): Promise<string[]> {
     const now = this.clock.now().getTime();
     const ids = [...this.runs.values()]
-      .filter((r) => r.status === 'running')
+      .filter((r) => r.status === 'running' && (graphId === undefined || r.graphId === graphId))
       .filter((r) => {
         const lease = this.leases.get(r.runId);
         return !lease || lease.expiresAt <= now;

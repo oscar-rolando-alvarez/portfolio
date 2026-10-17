@@ -194,10 +194,16 @@ export class ClaimsService {
       const current = await this.orchestrator.store.getRun(claimId, principal.tenantId);
       const coverage = current?.state.coverage;
       if (!coverage?.covered) {
-        throw new DomainError('VALIDATION_FAILED', 'cannot override to approve a claim without confirmed coverage');
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          'cannot override to approve a claim without confirmed coverage',
+        );
       }
       if ((decision.data.payoutAmount ?? 0) > coverage.coverageLimit) {
-        throw new DomainError('VALIDATION_FAILED', `payoutAmount exceeds coverage limit ${coverage.coverageLimit}`);
+        throw new DomainError(
+          'VALIDATION_FAILED',
+          `payoutAmount exceeds coverage limit ${coverage.coverageLimit}`,
+        );
       }
     }
     const run = this.orchestrator.decide({

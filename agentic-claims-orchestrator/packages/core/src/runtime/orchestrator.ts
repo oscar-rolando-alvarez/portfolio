@@ -596,10 +596,15 @@ export class Orchestrator<S> {
 
   /** Startup/periodic recovery: re-drive runs whose worker died mid-flight. */
   async recover(limit = 50): Promise<string[]> {
-    const ids = await this.d.store.listRecoverable(limit);
+    const ids = await this.d.store.listRecoverable(limit, this.d.graph.id);
     for (const id of ids) {
       this.d.logger.warn({ runId: id }, 'recovering run from last checkpoint');
-      await this.drive(id);
+      try {
+        await this.drive(id);
+      } catch (err) {
+        // One poisoned run must not block recovery of the others; it stays recoverable.
+        this.d.logger.error({ runId: id, err: toErrorInfo(err).message }, 'recovery attempt failed');
+      }
     }
     return ids;
   }
