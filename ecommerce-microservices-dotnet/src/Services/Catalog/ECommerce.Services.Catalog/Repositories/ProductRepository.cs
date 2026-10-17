@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ECommerce.Services.Catalog.Data;
 using ECommerce.Services.Catalog.Models;
+using ECommerce.Services.Catalog.Services;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -65,8 +66,18 @@ public sealed class ProductRepository(CatalogContext context) : IProductReposito
         return (items, totalCount);
     }
 
-    public Task CreateAsync(Product product, CancellationToken cancellationToken = default) =>
-        context.Products.InsertOneAsync(product, cancellationToken: cancellationToken);
+    public async Task CreateAsync(Product product, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await context.Products.InsertOneAsync(product, cancellationToken: cancellationToken);
+        }
+        catch (MongoWriteException ex) when (ex.WriteError?.Category == ServerErrorCategory.DuplicateKey)
+        {
+            // The unique SKU index is the source of truth when two requests race.
+            throw new DuplicateSkuException(product.Sku);
+        }
+    }
 
     public async Task<bool> ReplaceAsync(Product product, CancellationToken cancellationToken = default)
     {

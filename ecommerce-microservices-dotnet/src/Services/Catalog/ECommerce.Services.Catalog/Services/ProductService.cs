@@ -50,9 +50,10 @@ public sealed partial class ProductService(IProductRepository repository, ILogge
 
     public async Task<ProductDto> CreateProductAsync(CreateProductRequest request, CancellationToken cancellationToken = default)
     {
-        if (await repository.GetBySkuAsync(request.Sku, cancellationToken) is not null)
+        var sku = request.Sku.Trim().ToUpperInvariant();
+        if (await repository.GetBySkuAsync(sku, cancellationToken) is not null)
         {
-            throw new DuplicateSkuException(request.Sku);
+            throw new DuplicateSkuException(sku);
         }
 
         var product = new Product
@@ -62,7 +63,7 @@ public sealed partial class ProductService(IProductRepository repository, ILogge
             Price = request.Price,
             Category = request.Category.Trim(),
             ImageUrl = request.ImageUrl,
-            Sku = request.Sku.Trim().ToUpperInvariant(),
+            Sku = sku,
             StockQuantity = request.StockQuantity,
             Tags = NormalizeTags(request.Tags),
         };

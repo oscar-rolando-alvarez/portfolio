@@ -29,6 +29,7 @@
     <Project Path="src/Shared/ECommerce.Shared.Events/ECommerce.Shared.Events.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ECommerce.IntegrationTests/ECommerce.IntegrationTests.csproj" />
     <Project Path="tests/ECommerce.UnitTests/ECommerce.UnitTests.csproj" />
   </Folder>
 </Solution>
