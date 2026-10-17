@@ -1,1 +1,0 @@
-# Image Processing Service Application Package

@@ -1,0 +1,101 @@
+[project]
+name = "image-processing-service"
+version = "2.0.0"
+description = "Async image processing API (Pillow/OpenCV) with optional OCR, object detection and vision-LLM captioning"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Oscar Alvarez", email = "oralvarez@gmail.com" }]
+keywords = ["image-processing", "opencv", "pillow", "fastapi", "vision", "genai"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+]
+dependencies = [
+    "fastapi>=0.143.3",
+    "uvicorn[standard]>=0.54.0",
+    "python-multipart>=0.0.32",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
+    "pillow>=13.0.0",
+    "numpy>=2.5.4",
+    "opencv-python-headless>=5.0.0.93",
+    "openai>=3.33.0",
+    "structlog>=26.1.0",
+    "prometheus-client>=0.26.0",
+]
+
+[project.optional-dependencies]
+# Text extraction; also requires the `tesseract` system binary.
+ocr = ["pytesseract>=0.3.13"]
+# YOLO object detection (pulls in PyTorch, large). Not installed in CI.
+detection = ["ultralytics>=8.4.178"]
+# Optional OpenTelemetry tracing (enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set).
+otel = [
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-instrumentation-fastapi>=0.66b1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "httpx>=0.28.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/image_service"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF", "C4", "PT"]
+ignore = ["B008", "RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+packages = ["image_service"]
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+strict = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["cv2.*", "pytesseract.*", "ultralytics.*", "opentelemetry.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+addopts = "-ra --strict-markers --strict-config --cov=image_service --cov-report=term-missing"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["image_service"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 90
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "class .*\\bProtocol\\):",
+    "\\.\\.\\.$",
+]
