@@ -29,6 +29,7 @@ env:
   TFLINT_VERSION: v0.64.0
   TERRAFORM_VERSION: 1.16.6
   UV_PYTHON: "3.13"
+  NODE_VERSION: "24"
 
 jobs:
   go:
@@ -66,6 +67,105 @@ jobs:
         run: |
           go run ./cmd/fleetsim -devices 1000000 -duration 2m -sink discard -progress 0 2> run.json
           tail -1 run.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+  gateway:
+    name: Live gateway - lint, race tests (Kafka), govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: iot-fleet-intelligence/gateway
+    services:
+      kafka:
+        image: apache/kafka:4.3.1
+        ports: ["9092:9092"]
+        env:
+          KAFKA_NODE_ID: "1"
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: iot-fleet-intelligence/gateway/go.mod
+          cache-dependency-path: iot-fleet-intelligence/gateway/go.sum
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "Unformatted files:"; echo "$unformatted"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: goinstall
+          working-directory: iot-fleet-intelligence/gateway
+      - name: Tests (race detector, coverage, Kafka integration)
+        env:
+          KAFKA_BOOTSTRAP: localhost:9092
+        run: |
+          set -o pipefail
+          go test -race -count=1 -coverprofile=coverage.out -v ./... | tee test.txt | grep -E "^(ok|FAIL|--- )"
+          grep -q "^--- PASS: TestKafkaRoundTrip" test.txt
+          echo "### Gateway coverage: $(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')" >> "$GITHUB_STEP_SUMMARY"
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
+
+  dashboard:
+    name: Dashboard - lint, types, unit tests, build budget, e2e + axe (EN/ES)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: iot-fleet-intelligence/dashboard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: iot-fleet-intelligence/dashboard/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Prettier
+        run: npx prettier --check .
+      - name: ESLint (flat config, jsx-a11y)
+        run: npm run lint
+      - name: TypeScript (strict)
+        run: npm run typecheck
+      - name: Unit tests (reducers, formatters, i18n parity, cost parity, components) + coverage gate
+        run: npm run test:coverage
+      - name: Build (standalone)
+        run: npm run build
+      - name: Bundle-size budget
+        run: |
+          set -o pipefail
+          npm run budget | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: npm audit (runtime dependencies)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright smoke + axe, both locales, demo mode
+        run: npx playwright test --project=smoke --project=tablet
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: iot-fleet-intelligence/dashboard/playwright-report
+          retention-days: 7
 
   python:
     name: Platform - ruff, mypy, pytest (moto + Kafka)
@@ -140,6 +240,10 @@ jobs:
           uv run fleetintel-cost report > ../docs/cost-report.md
           git diff --exit-code -- ../docs/cost-report.md
           cat ../docs/cost-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Dashboard golden fixture matches the Python estimator (TS parity source)
+        run: |
+          uv run fleetintel-cost golden > ../dashboard/src/lib/cost/golden.json
+          git diff --exit-code -- ../dashboard/src/lib/cost/golden.json
 
   evals:
     name: Eval gate (golden fault scenarios, fake LLM)
@@ -238,10 +342,30 @@ jobs:
           tags: iot-fleet-intelligence-platform:latest
           cache-from: type=gha,scope=iot-fleet-intelligence-platform
           cache-to: type=gha,mode=max,scope=iot-fleet-intelligence-platform
+      - name: Build gateway image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: iot-fleet-intelligence/gateway
+          push: false
+          load: true
+          tags: iot-fleet-intelligence-gateway:latest
+          cache-from: type=gha,scope=iot-fleet-intelligence-gateway
+          cache-to: type=gha,mode=max,scope=iot-fleet-intelligence-gateway
+      - name: Build dashboard image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: iot-fleet-intelligence/dashboard
+          push: false
+          load: true
+          tags: iot-fleet-intelligence-dashboard:latest
+          cache-from: type=gha,scope=iot-fleet-intelligence-dashboard
+          cache-to: type=gha,mode=max,scope=iot-fleet-intelligence-dashboard
       - name: Images run as non-root
         run: |
           test "$(docker inspect -f '{{.Config.User}}' iot-fleet-intelligence-simulator:latest)" = "65532:65532"
           test "$(docker inspect -f '{{.Config.User}}' iot-fleet-intelligence-platform:latest)" = "10001:10001"
+          test "$(docker inspect -f '{{.Config.User}}' iot-fleet-intelligence-gateway:latest)" = "65532:65532"
+          test "$(docker inspect -f '{{.Config.User}}' iot-fleet-intelligence-dashboard:latest)" = "10001:10001"
       - name: make demo (Kafka + moto-server + Jaeger, 50k devices, injected cell outage)
         run: |
           set -o pipefail
@@ -255,6 +379,25 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  live:
+    name: Real-time path end to end (make demo-ui + demo-ui-check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: make demo-ui (builds images; Kafka, moto, platform, gateway, dashboard; 20k devices, spreading outage)
+        run: make demo-ui UI_DEVICES=20000
+      - name: make demo-ui-check (aggregates, live anomaly, bilingual incident over SSE, dashboard proxy)
+        run: |
+          set -o pipefail
+          make demo-ui-check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Stack logs
+        if: failure()
+        run: docker compose --profile ui logs --tail 200
+      - name: Tear down
+        if: always()
+        run: make down
 
   terraform:
     name: Terraform fmt, validate, tflint
