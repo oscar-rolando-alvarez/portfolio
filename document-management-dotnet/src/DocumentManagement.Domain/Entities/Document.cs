@@ -5,39 +5,52 @@ using DocumentManagement.Domain.ValueObjects;
 
 namespace DocumentManagement.Domain.Entities;
 
+/// <summary>
+/// Document aggregate: metadata, the current binary (by storage path), its version history,
+/// tags, comments, sharing permissions and review workflow state.
+/// </summary>
 public class Document : AggregateRoot, ITenantAwareEntity
 {
+    private readonly List<DocumentVersion> _versions = [];
+    private readonly List<DocumentTag> _tags = [];
+    private readonly List<DocumentPermission> _permissions = [];
+    private readonly List<DocumentComment> _comments = [];
+
     public Guid TenantId { get; private set; }
+
+    public Guid? FolderId { get; private set; }
+
     public DocumentMetadata Metadata { get; private set; } = null!;
+
     public FileInformation FileInfo { get; private set; } = null!;
+
     public DocumentStatus Status { get; private set; }
+
     public string StoragePath { get; private set; } = string.Empty;
-    public string? ThumbnailPath { get; private set; }
-    public string? PreviewPath { get; private set; }
+
     public string? ExtractedText { get; private set; }
-    public bool IsEncrypted { get; private set; }
-    public string? EncryptionKey { get; private set; }
-    public Guid? ParentDocumentId { get; private set; }
-    public Guid? WorkflowInstanceId { get; private set; }
-    public bool IsTemplate { get; private set; }
+
+    public string? Summary { get; private set; }
+
+    public DateTime? SummaryGeneratedAt { get; private set; }
+
     public DateTime? PublishedAt { get; private set; }
+
     public string? PublishedBy { get; private set; }
 
-    private readonly List<DocumentVersion> _versions = new();
-    private readonly List<DocumentTag> _tags = new();
-    private readonly List<DocumentPermission> _permissions = new();
-    private readonly List<DocumentComment> _comments = new();
-
     public IReadOnlyCollection<DocumentVersion> Versions => _versions.AsReadOnly();
+
     public IReadOnlyCollection<DocumentTag> Tags => _tags.AsReadOnly();
+
     public IReadOnlyCollection<DocumentPermission> Permissions => _permissions.AsReadOnly();
+
     public IReadOnlyCollection<DocumentComment> Comments => _comments.AsReadOnly();
 
-    // Navigation properties
-    public Document? ParentDocument { get; private set; }
-    public virtual ICollection<Document> ChildDocuments { get; private set; } = new List<Document>();
+    public DocumentVersion? CurrentVersion => _versions.FirstOrDefault(v => v.IsCurrent);
 
-    private Document() { } // For EF Core
+    protected Document()
+    {
+    }
 
     public static Document Create(
         Guid tenantId,
@@ -45,213 +58,186 @@ public class Document : AggregateRoot, ITenantAwareEntity
         FileInformation fileInfo,
         string storagePath,
         string createdBy,
-        bool isEncrypted = false,
-        string? encryptionKey = null)
+        Guid? folderId = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storagePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(createdBy);
+
         var document = new Document
         {
             TenantId = tenantId,
+            FolderId = folderId,
             Metadata = metadata,
             FileInfo = fileInfo,
             Status = DocumentStatus.Draft,
             StoragePath = storagePath,
-            IsEncrypted = isEncrypted,
-            EncryptionKey = encryptionKey,
-            CreatedBy = createdBy
+            CreatedBy = createdBy,
         };
 
-        // Create initial version
-        var initialVersion = DocumentVersion.Create(document.Id, 1, 0, "Initial version", createdBy);
-        document._versions.Add(initialVersion);
-
+        document._versions.Add(DocumentVersion.Create(document.Id, 1, 0, "Initial version", createdBy, storagePath, fileInfo.Size, fileInfo.Hash));
         document.AddDomainEvent(new DocumentCreatedEvent(document.Id, tenantId, metadata.Title, createdBy));
-        
         return document;
     }
 
     public void UpdateMetadata(DocumentMetadata newMetadata, string updatedBy)
     {
-        if (Status == DocumentStatus.Archived)
-            throw new InvalidOperationException("Cannot update archived document");
+        EnsureEditable();
 
         var oldTitle = Metadata.Title;
         Metadata = newMetadata;
         MarkAsUpdated(updatedBy);
-        IncrementVersion();
-
         AddDomainEvent(new DocumentUpdatedEvent(Id, TenantId, oldTitle, newMetadata.Title, updatedBy));
     }
 
-    public void ChangeStatus(DocumentStatus newStatus, string changedBy)
+    /// <summary>Uploads new content. A major version resets the minor counter (1.3 -> 2.0).</summary>
+    public DocumentVersion AddVersion(FileInformation fileInfo, string storagePath, string notes, bool isMajor, string createdBy)
     {
-        if (Status == newStatus) return;
+        EnsureEditable();
 
-        var oldStatus = Status;
-        Status = newStatus;
-        MarkAsUpdated(changedBy);
+        var current = CurrentVersion;
+        var (major, minor) = current is null
+            ? (1, 0)
+            : isMajor ? (current.MajorVersion + 1, 0) : (current.MajorVersion, current.MinorVersion + 1);
 
-        if (newStatus == DocumentStatus.Published)
-        {
-            PublishedAt = DateTime.UtcNow;
-            PublishedBy = changedBy;
-        }
+        current?.MarkAsNotCurrent(createdBy);
+        var version = DocumentVersion.Create(Id, major, minor, notes, createdBy, storagePath, fileInfo.Size, fileInfo.Hash);
+        _versions.Add(version);
 
-        AddDomainEvent(new DocumentStatusChangedEvent(Id, TenantId, oldStatus, newStatus, changedBy));
+        FileInfo = fileInfo;
+        StoragePath = storagePath;
+        ExtractedText = null;
+        Summary = null;
+        SummaryGeneratedAt = null;
+        MarkAsUpdated(createdBy);
+        AddDomainEvent(new DocumentVersionCreatedEvent(Id, TenantId, major, minor, createdBy));
+        return version;
     }
 
-    public DocumentVersion CreateVersion(int majorVersion, int minorVersion, string notes, string createdBy)
+    /// <summary>Applies a workflow action; throws when the transition is not allowed from the current status.</summary>
+    public void Apply(DocumentAction action, string actor, string? comment = null)
     {
-        if (Status == DocumentStatus.Archived)
-            throw new InvalidOperationException("Cannot create version for archived document");
+        if (!DocumentLifecycle.TryGetNextStatus(Status, action, out var next))
+        {
+            throw new InvalidOperationException($"Cannot {action.ToString().ToLowerInvariant()} a document that is {Status}.");
+        }
 
-        var version = DocumentVersion.Create(Id, majorVersion, minorVersion, notes, createdBy);
-        _versions.Add(version);
-        
-        MarkAsUpdated(createdBy);
-        IncrementVersion();
+        if (action == DocumentAction.Reject && string.IsNullOrWhiteSpace(comment))
+        {
+            throw new ArgumentException("A reason is required to reject a document.", nameof(comment));
+        }
 
-        AddDomainEvent(new DocumentVersionCreatedEvent(Id, TenantId, majorVersion, minorVersion, createdBy));
-        
-        return version;
+        var previous = Status;
+        Status = next;
+        if (next == DocumentStatus.Published)
+        {
+            PublishedAt = DateTime.UtcNow;
+            PublishedBy = actor;
+        }
+
+        if (!string.IsNullOrWhiteSpace(comment))
+        {
+            AddComment($"[{action}] {comment}", actor);
+        }
+
+        MarkAsUpdated(actor);
+        AddDomainEvent(new DocumentStatusChangedEvent(Id, TenantId, previous, next, actor));
+    }
+
+    public void MoveToFolder(Guid? folderId, string movedBy)
+    {
+        FolderId = folderId;
+        MarkAsUpdated(movedBy);
     }
 
     public void AddTag(string name, string? value, string addedBy)
     {
-        if (_tags.Any(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        if (_tags.Any(t => t.Name.Equals(name.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
             return;
+        }
 
-        var tag = DocumentTag.Create(Id, name, value, addedBy);
-        _tags.Add(tag);
+        _tags.Add(DocumentTag.Create(Id, name.Trim().ToLowerInvariant(), value, addedBy));
         MarkAsUpdated(addedBy);
     }
 
-    public void RemoveTag(string name, string removedBy)
+    public bool RemoveTag(string name, string removedBy)
     {
-        var tag = _tags.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (tag != null)
+        var removed = _tags.RemoveAll(t => t.Name.Equals(name.Trim(), StringComparison.OrdinalIgnoreCase)) > 0;
+        if (removed)
         {
-            _tags.Remove(tag);
             MarkAsUpdated(removedBy);
         }
+
+        return removed;
     }
 
     public void GrantPermission(Permission permission)
     {
-        var existingPermission = _permissions.FirstOrDefault(p => 
-            p.PrincipalId == permission.PrincipalId && 
-            p.PrincipalType == permission.PrincipalType);
-
-        if (existingPermission != null)
+        var existing = _permissions.FirstOrDefault(p => p.PrincipalId == permission.PrincipalId && p.PrincipalType == permission.PrincipalType);
+        if (existing is not null)
         {
-            existingPermission.UpdateAccessLevel(permission.AccessLevel, permission.GrantedBy);
+            existing.UpdateAccessLevel(permission.AccessLevel, permission.GrantedBy);
         }
         else
         {
-            var documentPermission = DocumentPermission.Create(Id, permission);
-            _permissions.Add(documentPermission);
+            _permissions.Add(DocumentPermission.Create(Id, permission));
         }
 
         MarkAsUpdated(permission.GrantedBy);
         AddDomainEvent(new DocumentPermissionGrantedEvent(Id, TenantId, permission.PrincipalId, permission.AccessLevel, permission.GrantedBy));
     }
 
-    public void RevokePermission(string principalId, string principalType, string revokedBy)
-    {
-        var permission = _permissions.FirstOrDefault(p => 
-            p.PrincipalId == principalId && 
-            p.PrincipalType == principalType);
-
-        if (permission != null)
-        {
-            _permissions.Remove(permission);
-            MarkAsUpdated(revokedBy);
-            AddDomainEvent(new DocumentPermissionRevokedEvent(Id, TenantId, principalId, revokedBy));
-        }
-    }
-
-    public void AddComment(string content, string authorId, Guid? parentCommentId = null)
+    public DocumentComment AddComment(string content, string authorId, Guid? parentCommentId = null)
     {
         var comment = DocumentComment.Create(Id, content, authorId, parentCommentId);
         _comments.Add(comment);
         MarkAsUpdated(authorId);
-        
         AddDomainEvent(new DocumentCommentAddedEvent(Id, TenantId, comment.Id, authorId));
+        return comment;
     }
 
-    public void SetExtractedText(string extractedText, string updatedBy)
+    public void SetExtractedText(string? extractedText) => ExtractedText = extractedText;
+
+    public void SetSummary(string summary, string requestedBy)
     {
-        ExtractedText = extractedText;
-        MarkAsUpdated(updatedBy);
+        ArgumentException.ThrowIfNullOrWhiteSpace(summary);
+        Summary = summary.Trim();
+        SummaryGeneratedAt = DateTime.UtcNow;
+        MarkAsUpdated(requestedBy);
     }
 
-    public void SetPreviewPath(string previewPath, string updatedBy)
-    {
-        PreviewPath = previewPath;
-        MarkAsUpdated(updatedBy);
-    }
+    public void SetTenant(Guid tenantId) => TenantId = tenantId;
 
-    public void SetThumbnailPath(string thumbnailPath, string updatedBy)
-    {
-        ThumbnailPath = thumbnailPath;
-        MarkAsUpdated(updatedBy);
-    }
-
-    public void SetWorkflowInstance(Guid workflowInstanceId, string updatedBy)
-    {
-        WorkflowInstanceId = workflowInstanceId;
-        MarkAsUpdated(updatedBy);
-    }
-
-    public void MarkAsTemplate(string updatedBy)
-    {
-        IsTemplate = true;
-        MarkAsUpdated(updatedBy);
-    }
-
-    public void SetTenant(Guid tenantId)
-    {
-        TenantId = tenantId;
-    }
-
+    /// <summary>
+    /// Resolves effective access: owners have full control, published documents are readable tenant-wide,
+    /// otherwise explicit user, role or group grants apply.
+    /// </summary>
     public bool HasPermission(SecurityContext securityContext, AccessLevel requiredAccess)
     {
-        // Check if user is the creator
         if (CreatedBy == securityContext.UserId)
-            return true;
-
-        // Check direct user permissions
-        var userPermission = _permissions.FirstOrDefault(p => 
-            p.PrincipalId == securityContext.UserId && 
-            p.PrincipalType == "User" &&
-            p.IsValid());
-
-        if (userPermission != null && userPermission.HasAccess(requiredAccess))
-            return true;
-
-        // Check role permissions
-        foreach (var role in securityContext.Roles)
         {
-            var rolePermission = _permissions.FirstOrDefault(p => 
-                p.PrincipalId == role && 
-                p.PrincipalType == "Role" &&
-                p.IsValid());
-
-            if (rolePermission != null && rolePermission.HasAccess(requiredAccess))
-                return true;
+            return true;
         }
 
-        // Check group permissions
-        foreach (var group in securityContext.Groups)
+        if (requiredAccess == AccessLevel.Read && Status == DocumentStatus.Published)
         {
-            var groupPermission = _permissions.FirstOrDefault(p => 
-                p.PrincipalId == group && 
-                p.PrincipalType == "Group" &&
-                p.IsValid());
-
-            if (groupPermission != null && groupPermission.HasAccess(requiredAccess))
-                return true;
+            return true;
         }
 
-        return false;
+        return _permissions.Any(p => p.IsValid() && p.HasAccess(requiredAccess) && p.PrincipalType switch
+        {
+            "User" => p.PrincipalId == securityContext.UserId,
+            "Role" => securityContext.Roles.Contains(p.PrincipalId),
+            "Group" => securityContext.Groups.Contains(p.PrincipalId),
+            _ => false,
+        });
+    }
+
+    private void EnsureEditable()
+    {
+        if (!DocumentLifecycle.IsEditable(Status))
+        {
+            throw new InvalidOperationException($"A document that is {Status} cannot be modified. Revise or create a new document instead.");
+        }
     }
 }

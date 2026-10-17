@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+TestResults/
+# local document storage (FileSystem provider)
+/storage/
+/src/DocumentManagement.Api/storage/
+.env

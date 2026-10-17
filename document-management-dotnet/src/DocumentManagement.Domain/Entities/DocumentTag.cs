@@ -9,8 +9,6 @@ public class DocumentTag : BaseEntity
     public string? Value { get; private set; }
     public string TagType { get; private set; } = "Manual"; // Manual, System, Auto
 
-    // Navigation property
-    public Document Document { get; private set; } = null!;
 
     private DocumentTag() { } // For EF Core
 

@@ -14,8 +14,6 @@ public class DocumentVersion : BaseEntity
     public string FileHash { get; private set; } = string.Empty;
     public bool IsCurrent { get; private set; }
 
-    // Navigation property
-    public Document Document { get; private set; } = null!;
 
     private DocumentVersion() { } // For EF Core
 

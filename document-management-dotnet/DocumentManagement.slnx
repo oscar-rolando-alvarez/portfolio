@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DocumentManagement.Api/DocumentManagement.Api.csproj" />
+    <Project Path="src/DocumentManagement.Application/DocumentManagement.Application.csproj" />
+    <Project Path="src/DocumentManagement.Domain/DocumentManagement.Domain.csproj" />
+    <Project Path="src/DocumentManagement.Infrastructure/DocumentManagement.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DocumentManagement.IntegrationTests/DocumentManagement.IntegrationTests.csproj" />
+    <Project Path="tests/DocumentManagement.UnitTests/DocumentManagement.UnitTests.csproj" />
+  </Folder>
+</Solution>

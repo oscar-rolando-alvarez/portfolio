@@ -16,8 +16,6 @@ public class DocumentPermission : BaseEntity
     public bool IsInherited { get; private set; }
     public Guid? InheritedFromId { get; private set; }
 
-    // Navigation property
-    public Document Document { get; private set; } = null!;
 
     private DocumentPermission() { } // For EF Core
 
