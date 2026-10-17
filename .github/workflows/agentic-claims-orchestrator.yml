@@ -105,7 +105,7 @@ jobs:
         working-directory: agentic-claims-orchestrator/ml
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
           cache-dependency-glob: agentic-claims-orchestrator/ml/uv.lock
