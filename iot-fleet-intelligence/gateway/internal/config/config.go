@@ -16,6 +16,7 @@ type Config struct {
 	KafkaBrokers   string
 	KafkaTopic     string
 	KafkaFromStart bool
+	KafkaMSKIAM    bool
 
 	PlatformURL    string
 	PlatformAPIKey string
@@ -76,6 +77,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		KafkaBrokers:   str("KAFKA_BROKERS", "localhost:29092"),
 		KafkaTopic:     str("KAFKA_TOPIC", "fleet.telemetry.v1"),
 		KafkaFromStart: str("FLEETGW_KAFKA_START", "end") == "start",
+		KafkaMSKIAM:    str("FLEETGW_KAFKA_AUTH", "none") == "msk_iam",
 		PlatformURL:    strings.TrimRight(str("FLEETGW_PLATFORM_URL", ""), "/"),
 		PlatformAPIKey: str("FLEETGW_PLATFORM_API_KEY", ""),
 		PollInterval:   dur("FLEETGW_POLL_INTERVAL", 2*time.Second),
@@ -88,6 +90,9 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		ClientBuffer:   num("FLEETGW_CLIENT_BUFFER", 32, 1, 4096),
 		MaxClients:     num("FLEETGW_MAX_CLIENTS", 500, 1, 100_000),
 		APIKeys:        map[string]string{},
+	}
+	if v := str("FLEETGW_KAFKA_AUTH", "none"); v != "none" && v != "msk_iam" {
+		errs = append(errs, errors.New("FLEETGW_KAFKA_AUTH must be none or msk_iam"))
 	}
 	if v := str("FLEETGW_KAFKA_START", "end"); v != "end" && v != "start" {
 		errs = append(errs, errors.New("FLEETGW_KAFKA_START must be end or start"))

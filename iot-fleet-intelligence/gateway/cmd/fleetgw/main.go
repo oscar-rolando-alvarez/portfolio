@@ -142,7 +142,7 @@ func run(logger *slog.Logger) error {
 	errc := make(chan error, 2)
 	wg.Go(func() {
 		if err := ingest.Run(ctx, ingest.Config{
-			Brokers: cfg.KafkaBrokers, Topic: cfg.KafkaTopic, FromStart: cfg.KafkaFromStart, Logger: logger,
+			Brokers: cfg.KafkaBrokers, Topic: cfg.KafkaTopic, FromStart: cfg.KafkaFromStart, MSKIAM: cfg.KafkaMSKIAM, Logger: logger,
 		}, a.reg, a.kafka); err != nil {
 			errc <- fmt.Errorf("kafka: %w", err)
 		}

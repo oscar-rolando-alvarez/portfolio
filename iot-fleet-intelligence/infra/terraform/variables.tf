@@ -92,3 +92,34 @@ variable "alarm_email" {
   type        = string
   default     = ""
 }
+
+# ------------------------------------------------------------------ real-time path (gateway + dashboard)
+variable "image_tag" {
+  description = "Immutable image tag pushed to the gateway and dashboard ECR repositories."
+  type        = string
+  default     = "0.1.0"
+}
+
+variable "gateway_desired_count" {
+  description = "Live gateway tasks. Each replica consumes every partition (fan-out), so 2 is for availability, not throughput."
+  type        = number
+  default     = 2
+}
+
+variable "dashboard_desired_count" {
+  description = "Dashboard tasks behind the ALB."
+  type        = number
+  default     = 2
+}
+
+variable "dashboard_certificate_arn" {
+  description = "ACM certificate for the dashboard ALB. Empty = HTTP only (validation / private demo)."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_ingress_cidrs" {
+  description = "CIDRs allowed to reach the dashboard ALB (restrict to your corporate ranges or put CloudFront/WAF in front)."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}

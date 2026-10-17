@@ -9,6 +9,7 @@ package ingest
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -16,7 +17,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/twmb/franz-go/pkg/kgo"
+	saslaws "github.com/twmb/franz-go/pkg/sasl/aws"
 
 	"github.com/oscar-rolando-alvarez/portfolio/iot-fleet-intelligence/gateway/internal/agg"
 )
@@ -31,7 +34,30 @@ type Config struct {
 	Brokers   string
 	Topic     string
 	FromStart bool
-	Logger    *slog.Logger
+	// MSKIAM enables TLS + SASL/AWS_MSK_IAM (Amazon MSK Serverless). Credentials come
+	// from the default AWS chain (the ECS task role in the reference deployment).
+	MSKIAM bool
+	Logger *slog.Logger
+}
+
+func authOptions(ctx context.Context, cfg Config) ([]kgo.Opt, error) {
+	if !cfg.MSKIAM {
+		return nil, nil
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []kgo.Opt{
+		kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12}),
+		kgo.SASL(saslaws.ManagedStreamingIAM(func(ctx context.Context) (saslaws.Auth, error) {
+			c, err := awsCfg.Credentials.Retrieve(ctx)
+			if err != nil {
+				return saslaws.Auth{}, err
+			}
+			return saslaws.Auth{AccessKey: c.AccessKeyID, SecretKey: c.SecretAccessKey, SessionToken: c.SessionToken, UserAgent: "fleetintel-live-gateway"}, nil
+		})),
+	}, nil
 }
 
 // Stats are consumer counters.
@@ -51,7 +77,11 @@ func Run(ctx context.Context, cfg Config, sink Sink, st *Stats) error {
 	if cfg.FromStart {
 		offset = kgo.NewOffset().AtStart()
 	}
-	cl, err := kgo.NewClient(
+	auth, err := authOptions(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	cl, err := kgo.NewClient(append(auth,
 		kgo.SeedBrokers(strings.Split(cfg.Brokers, ",")...),
 		kgo.ConsumeTopics(cfg.Topic),
 		kgo.ConsumeResetOffset(offset),
@@ -61,7 +91,7 @@ func Run(ctx context.Context, cfg Config, sink Sink, st *Stats) error {
 		kgo.MetadataMinAge(time.Second),
 		kgo.MetadataMaxAge(3*time.Second), // pick up the topic quickly once the simulator creates it
 		kgo.ClientID("fleetintel-live-gateway"),
-	)
+	)...)
 	if err != nil {
 		return err
 	}
