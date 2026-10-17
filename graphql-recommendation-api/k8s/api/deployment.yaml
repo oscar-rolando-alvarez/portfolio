@@ -1,157 +1,79 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-deployment
-  namespace: recommendation-system
+  name: api
   labels:
-    app: graphql-recommendation-api
-    component: api
+    app.kubernetes.io/component: api
 spec:
-  replicas: 3
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 1
+  replicas: 2
+  revisionHistoryLimit: 5
   selector:
     matchLabels:
-      app: graphql-recommendation-api
-      component: api
+      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
-        app: graphql-recommendation-api
-        component: api
+        app.kubernetes.io/component: api
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/path: "/metrics"
         prometheus.io/port: "8000"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: graphql-recommendation-api
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef:
+                name: api-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       containers:
-      - name: api
-        image: graphql-recommendation-api:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 8000
-          name: http
-          protocol: TCP
-        env:
-        # Configuration from ConfigMap
-        - name: APP_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: api-config
-              key: APP_NAME
-        - name: APP_VERSION
-          valueFrom:
-            configMapKeyRef:
-              name: api-config
-              key: APP_VERSION
-        - name: DEBUG
-          valueFrom:
-            configMapKeyRef:
-              name: api-config
-              key: DEBUG
-        - name: SERVICE_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: api-config
-              key: SERVICE_HOST
-        - name: SERVICE_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: api-config
-              key: SERVICE_PORT
-        - name: LOG_LEVEL
-          valueFrom:
-            configMapKeyRef:
-              name: api-config
-              key: LOG_LEVEL
-        # Secrets
-        - name: SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: api-secrets
-              key: SECRET_KEY
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: api-secrets
-              key: DATABASE_URL
-        # Redis configuration
-        - name: REDIS_NODES
-          value: "redis://redis-cluster:6379"
-        # Vector DB configuration
-        - name: QDRANT_URL
-          value: "http://qdrant:6333"
-        # Monitoring configuration
-        - name: JAEGER_ENDPOINT
-          value: "http://jaeger-collector:14268/api/traces"
-        # Health check
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-        # Resource limits
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
-            memory: "1Gi"
-            cpu: "500m"
-        # Security context
-        securityContext:
-          allowPrivilegeEscalation: false
-          runAsNonRoot: true
-          runAsUser: 1000
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
-        # Volume mounts
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: logs
-          mountPath: /app/logs
-      # Volumes
+        - name: api
+          image: graphql-recommendation-api
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: api-config
+            - secretRef:
+                name: api-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
       volumes:
-      - name: tmp
-        emptyDir: {}
-      - name: logs
-        emptyDir: {}
-      # Service account
-      serviceAccountName: api-service-account
-      # Node selection
-      nodeSelector:
-        kubernetes.io/os: linux
-      # Tolerations and affinity for better scheduling
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - graphql-recommendation-api
-                - key: component
-                  operator: In
-                  values:
-                  - api
-              topologyKey: kubernetes.io/hostname
+        - name: tmp
+          emptyDir: {}
