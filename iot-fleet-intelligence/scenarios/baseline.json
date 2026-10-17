@@ -1,0 +1,5 @@
+{
+  "name": "baseline",
+  "description": "No injected faults: every incident is a false positive.",
+  "faults": []
+}

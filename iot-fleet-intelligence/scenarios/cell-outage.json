@@ -1,0 +1,13 @@
+{
+  "name": "cell-outage",
+  "description": "One busy home cell loses service for 6 minutes.",
+  "faults": [
+    {
+      "type": "cell_outage",
+      "target": "auto",
+      "start": "12m",
+      "duration": "6m",
+      "intensity": 0.95
+    }
+  ]
+}

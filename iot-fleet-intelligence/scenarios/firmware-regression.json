@@ -1,0 +1,13 @@
+{
+  "name": "firmware-regression",
+  "description": "Smart-meter build MTR-3.3.1 hits watchdog resets after a staged rollout.",
+  "faults": [
+    {
+      "type": "firmware_regression",
+      "target": "auto",
+      "start": "12m",
+      "duration": "8m",
+      "intensity": 0.95
+    }
+  ]
+}

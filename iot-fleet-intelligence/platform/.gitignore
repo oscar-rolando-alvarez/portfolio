@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.coverage
+coverage.xml
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+evals-report.json
+evals-report.md

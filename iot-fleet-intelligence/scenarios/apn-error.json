@@ -1,0 +1,13 @@
+{
+  "name": "apn-error",
+  "description": "A bad APN push: PDN activation fails with ESM #27 for the tracker APN.",
+  "faults": [
+    {
+      "type": "apn_error",
+      "target": "auto",
+      "start": "12m",
+      "duration": "6m",
+      "intensity": 0.9
+    }
+  ]
+}

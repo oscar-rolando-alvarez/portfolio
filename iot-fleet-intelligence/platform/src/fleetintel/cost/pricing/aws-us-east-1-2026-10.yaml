@@ -1,0 +1,84 @@
+# Pricing assumptions for the fleetintel cost estimator.
+#
+# ASSUMPTIONS, NOT QUOTES. Unit prices below are list prices for us-east-1 as
+# published on the AWS pricing pages and commonly cited at the time of writing,
+# rounded and simplified (no free tier, no Savings Plans / EDP discounts, no
+# tax). Verify against the AWS Pricing Calculator and your own contract before
+# using an estimate for a commercial decision. LLM prices are generic tiers that
+# bracket typical hosted-model list prices; replace them with your provider's.
+version: "2026-10-01"
+region: us-east-1
+currency: USD
+hours_per_month: 730          # AWS convention
+gib_bytes: 1073741824         # AWS bills "GB" as GiB
+sources:
+  iot_core: https://aws.amazon.com/iot-core/pricing/
+  msk_serverless: https://aws.amazon.com/msk/pricing/
+  lambda: https://aws.amazon.com/lambda/pricing/
+  sqs: https://aws.amazon.com/sqs/pricing/
+  dynamodb: https://aws.amazon.com/dynamodb/pricing/on-demand/
+  api_gateway: https://aws.amazon.com/api-gateway/pricing/
+  cloudwatch: https://aws.amazon.com/cloudwatch/pricing/
+  xray: https://aws.amazon.com/xray/pricing/
+  data_transfer: https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer
+  kms: https://aws.amazon.com/kms/pricing/
+
+iot_core:
+  connectivity_per_million_minutes: "0.08"
+  message_increment_bytes: 5120
+  messaging_tiers:              # per million 5 KB message units, monthly volume tiers
+    - up_to_million: 1000
+      price_per_million: "1.00"
+    - up_to_million: 5000
+      price_per_million: "0.80"
+    - up_to_million: null
+      price_per_million: "0.70"
+  rules_per_million: "0.15"
+  actions_per_million: "0.15"
+
+msk_serverless:
+  cluster_hour: "0.75"
+  partition_hour: "0.0015"
+  data_in_per_gb: "0.10"
+  data_out_per_gb: "0.05"
+  storage_per_gb_month: "0.10"
+  ingress_mb_per_s_per_partition: "1.0"   # sizing assumption (headroom below the 5 MB/s cap)
+  min_partitions: 6
+
+lambda_arm:
+  per_million_requests: "0.20"
+  per_gb_second: "0.0000133334"
+
+sqs_standard:
+  per_million_requests: "0.40"
+  request_increment_bytes: 65536
+
+dynamodb_on_demand:
+  per_million_wru: "0.625"
+  per_million_rru: "0.125"
+  storage_per_gb_month: "0.25"
+
+api_gateway_http:
+  per_million_requests: "1.00"
+
+cloudwatch_logs:
+  ingest_per_gb: "0.50"
+  storage_per_gb_month: "0.03"
+
+xray:
+  per_million_traces: "5.00"
+
+data_transfer:
+  internet_out_per_gb: "0.09"
+
+kms:
+  per_key_month: "1.00"
+
+llm_tiers:                      # USD per million tokens (generic placeholders)
+  small:
+    input_per_million: "0.15"
+    output_per_million: "0.60"
+  large:
+    input_per_million: "2.50"
+    output_per_million: "10.00"
+embeddings_per_million_tokens: "0.02"

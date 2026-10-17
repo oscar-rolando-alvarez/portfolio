@@ -1,0 +1,285 @@
+name: iot-fleet-intelligence
+
+on:
+  pull_request:
+    paths:
+      - "iot-fleet-intelligence/**"
+      - ".github/workflows/iot-fleet-intelligence.yml"
+  push:
+    branches: [master]
+    paths:
+      - "iot-fleet-intelligence/**"
+      - ".github/workflows/iot-fleet-intelligence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: iot-fleet-intelligence
+
+env:
+  GOLANGCI_LINT_VERSION: v2.15.0
+  GOVULNCHECK_VERSION: v1.9.0
+  TFLINT_VERSION: v0.64.0
+  TERRAFORM_VERSION: 1.16.6
+  UV_PYTHON: "3.13"
+
+jobs:
+  go:
+    name: Simulator - lint, race tests, bench smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: iot-fleet-intelligence/simulator
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: iot-fleet-intelligence/simulator/go.mod
+          cache-dependency-path: iot-fleet-intelligence/simulator/go.sum
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "Unformatted files:"; echo "$unformatted"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: goinstall
+          working-directory: iot-fleet-intelligence/simulator
+      - name: Unit tests (race detector, coverage)
+        run: |
+          go test -race -count=1 -coverprofile=coverage.out ./...
+          echo "### Simulator coverage: $(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')" >> "$GITHUB_STEP_SUMMARY"
+      - name: Benchmarks (smoke)
+        run: go test -run '^$' -bench . -benchtime=1x ./...
+      - name: 1M-device generation smoke run
+        run: |
+          go run ./cmd/fleetsim -devices 1000000 -duration 2m -sink discard -progress 0 2> run.json
+          tail -1 run.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+  python:
+    name: Platform - ruff, mypy, pytest (moto + Kafka)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: iot-fleet-intelligence/platform
+    services:
+      kafka:
+        image: apache/kafka:4.3.1
+        ports: ["9092:9092"]
+        env:
+          KAFKA_NODE_ID: "1"
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+        with:
+          enable-cache: true
+          cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
+      - run: uv sync --locked
+      - name: ruff format
+        run: uv run ruff format --check src tests
+      - name: ruff lint
+        run: uv run ruff check src tests
+      - name: mypy (strict)
+        run: uv run mypy
+      - name: pytest (unit + moto + Kafka integration, coverage gate 85%)
+        env:
+          KAFKA_BOOTSTRAP: localhost:9092
+        run: |
+          uv run pytest --cov --cov-report=term --cov-report=xml
+          echo "### Platform coverage: $(uv run coverage report --format=total)%" >> "$GITHUB_STEP_SUMMARY"
+      - name: Integration test actually ran
+        env:
+          KAFKA_BOOTSTRAP: localhost:9092
+        run: uv run pytest -m integration -rA | tee it.txt && grep -q "PASSED tests/test_integration_kafka.py" it.txt
+
+  cost:
+    name: Cost estimator - exact tests + report drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: iot-fleet-intelligence/platform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+        with:
+          enable-cache: true
+          cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
+      - run: uv sync --locked
+      - name: Cost model tests (exact expected numbers)
+        run: uv run pytest tests/test_cost.py -q
+      - name: Committed sample report matches the pricing table
+        run: |
+          uv run fleetintel-cost report > ../docs/cost-report.md
+          git diff --exit-code -- ../docs/cost-report.md
+          cat ../docs/cost-report.md >> "$GITHUB_STEP_SUMMARY"
+
+  evals:
+    name: Eval gate (golden fault scenarios, fake LLM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: iot-fleet-intelligence/simulator/go.mod
+          cache-dependency-path: iot-fleet-intelligence/simulator/go.sum
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+        with:
+          enable-cache: true
+          cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
+      - name: Build simulator
+        run: make sim
+      - name: Install platform
+        working-directory: iot-fleet-intelligence/platform
+        run: uv sync --locked
+      - name: Run golden set and enforce thresholds
+        run: make eval
+      - name: Publish report
+        if: always()
+        run: cat platform/evals-report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: evals-report
+          path: iot-fleet-intelligence/platform/evals-report.*
+          if-no-files-found: ignore
+
+  audit:
+    name: Dependency audit (govulncheck, pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: iot-fleet-intelligence/simulator/go.mod
+          cache-dependency-path: iot-fleet-intelligence/simulator/go.sum
+      - name: govulncheck
+        working-directory: iot-fleet-intelligence/simulator
+        run: go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+        with:
+          enable-cache: true
+          cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
+      - name: pip-audit (Lambda runtime + local runner dependencies, hash-pinned)
+        working-directory: iot-fleet-intelligence/platform
+        run: |
+          uv export --frozen --no-dev --group local --no-emit-project --format requirements-txt -o requirements-audit.txt
+          uvx pip-audit@2.10.1 --strict -r requirements-audit.txt --disable-pip --require-hashes --progress-spinner off
+
+  lambda:
+    name: Lambda package (arm64 zip)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+        with:
+          enable-cache: true
+          cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
+      - name: Build package
+        run: make lambda-package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lambda-package
+          path: iot-fleet-intelligence/platform/dist/lambda.zip
+          retention-days: 7
+
+  docker:
+    name: Docker build + end-to-end demo (compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build simulator image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: iot-fleet-intelligence/simulator
+          push: false
+          load: true
+          tags: iot-fleet-intelligence-simulator:latest
+          cache-from: type=gha,scope=iot-fleet-intelligence-simulator
+          cache-to: type=gha,mode=max,scope=iot-fleet-intelligence-simulator
+      - name: Build platform image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: iot-fleet-intelligence/platform
+          push: false
+          load: true
+          tags: iot-fleet-intelligence-platform:latest
+          cache-from: type=gha,scope=iot-fleet-intelligence-platform
+          cache-to: type=gha,mode=max,scope=iot-fleet-intelligence-platform
+      - name: Images run as non-root
+        run: |
+          test "$(docker inspect -f '{{.Config.User}}' iot-fleet-intelligence-simulator:latest)" = "65532:65532"
+          test "$(docker inspect -f '{{.Config.User}}' iot-fleet-intelligence-platform:latest)" = "10001:10001"
+      - name: make demo (Kafka + moto-server + Jaeger, 50k devices, injected cell outage)
+        run: |
+          set -o pipefail
+          make demo DEMO_DEVICES=50000 UP_FLAGS= | tee demo.txt
+          grep -q "root cause : cell_outage" demo.txt
+      - name: Traces reached Jaeger
+        run: curl -fsS "localhost:16686/api/v3/services" | grep -q fleetintel-local
+      - name: Stack logs
+        if: failure()
+        run: docker compose logs --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  terraform:
+    name: Terraform fmt, validate, tflint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: iot-fleet-intelligence/infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+      - name: terraform init (no backend, no credentials)
+        run: terraform init -backend=false -input=false
+      - name: terraform validate
+        run: terraform validate
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - name: tflint (recommended + AWS ruleset)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init
+          tflint --format compact

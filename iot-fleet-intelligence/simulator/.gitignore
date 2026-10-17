@@ -1,0 +1,5 @@
+/fleetsim
+/bin/
+*.jsonl
+coverage.out
+run.json
