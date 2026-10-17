@@ -26,15 +26,15 @@ public interface MessageStatusRepository extends JpaRepository<MessageStatus, UU
     List<MessageStatus> findByStatus(DeliveryStatus status);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.message = :message AND ms.status = :status")
-    List<MessageStatus> findByMessageAndStatus(@Param("message") Message message, 
+    List<MessageStatus> findByMessageAndStatus(@Param("message") Message message,
                                              @Param("status") DeliveryStatus status);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.user = :user AND ms.status = :status")
-    List<MessageStatus> findByUserAndStatus(@Param("user") User user, 
+    List<MessageStatus> findByUserAndStatus(@Param("user") User user,
                                           @Param("status") DeliveryStatus status);
 
     @Query("SELECT COUNT(ms) FROM MessageStatus ms WHERE ms.message = :message AND ms.status = :status")
-    long countByMessageAndStatus(@Param("message") Message message, 
+    long countByMessageAndStatus(@Param("message") Message message,
                                 @Param("status") DeliveryStatus status);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.message = :message AND ms.status = 'READ'")
@@ -49,33 +49,33 @@ public interface MessageStatusRepository extends JpaRepository<MessageStatus, UU
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.message.channel.id = :channelId AND ms.user = :user " +
            "AND ms.status != 'read' ORDER BY ms.createdAt DESC")
-    List<MessageStatus> findUnreadChannelMessagesByUser(@Param("channelId") UUID channelId, 
+    List<MessageStatus> findUnreadChannelMessagesByUser(@Param("channelId") UUID channelId,
                                                        @Param("user") User user);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.message.group.id = :groupId AND ms.user = :user " +
            "AND ms.status != 'read' ORDER BY ms.createdAt DESC")
-    List<MessageStatus> findUnreadGroupMessagesByUser(@Param("groupId") UUID groupId, 
+    List<MessageStatus> findUnreadGroupMessagesByUser(@Param("groupId") UUID groupId,
                                                      @Param("user") User user);
 
     @Query("SELECT COUNT(ms) FROM MessageStatus ms WHERE ms.message.channel.id = :channelId AND ms.user = :user " +
            "AND ms.status != 'read'")
-    long countUnreadChannelMessagesByUser(@Param("channelId") UUID channelId, 
+    long countUnreadChannelMessagesByUser(@Param("channelId") UUID channelId,
                                         @Param("user") User user);
 
     @Query("SELECT COUNT(ms) FROM MessageStatus ms WHERE ms.message.group.id = :groupId AND ms.user = :user " +
            "AND ms.status != 'read'")
-    long countUnreadGroupMessagesByUser(@Param("groupId") UUID groupId, 
+    long countUnreadGroupMessagesByUser(@Param("groupId") UUID groupId,
                                       @Param("user") User user);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.status = 'failed' AND ms.createdAt < :threshold")
     List<MessageStatus> findFailedMessagesOlderThan(@Param("threshold") LocalDateTime threshold);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.readAt BETWEEN :start AND :end")
-    List<MessageStatus> findMessagesReadBetween(@Param("start") LocalDateTime start, 
+    List<MessageStatus> findMessagesReadBetween(@Param("start") LocalDateTime start,
                                               @Param("end") LocalDateTime end);
 
     @Query("SELECT ms FROM MessageStatus ms WHERE ms.deliveredAt BETWEEN :start AND :end")
-    List<MessageStatus> findMessagesDeliveredBetween(@Param("start") LocalDateTime start, 
+    List<MessageStatus> findMessagesDeliveredBetween(@Param("start") LocalDateTime start,
                                                     @Param("end") LocalDateTime end);
 
     boolean existsByMessageAndUser(Message message, User user);

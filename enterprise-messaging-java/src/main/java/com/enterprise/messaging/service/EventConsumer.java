@@ -30,7 +30,7 @@ public class EventConsumer {
     @KafkaListener(topics = "message-events", groupId = "messaging-service")
     public void handleMessageEvent(@Payload MessageEvent event,
                                  @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
-                                 @Header(KafkaHeaders.RECEIVED_PARTITION_ID) int partition,
+                                 @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
                                  @Header(KafkaHeaders.OFFSET) long offset,
                                  Acknowledgment acknowledgment) {
         try {
@@ -70,7 +70,7 @@ public class EventConsumer {
     @KafkaListener(topics = "user-events", groupId = "messaging-service")
     public void handleUserEvent(@Payload UserEvent event,
                               @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
-                              @Header(KafkaHeaders.RECEIVED_PARTITION_ID) int partition,
+                              @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
                               @Header(KafkaHeaders.OFFSET) long offset,
                               Acknowledgment acknowledgment) {
         try {
@@ -107,10 +107,10 @@ public class EventConsumer {
                                       Acknowledgment acknowledgment) {
         try {
             logger.debug("Received notification event from topic: {}", topic);
-            
+
             // Process notification
             notificationService.processNotificationEvent(event);
-            
+
             acknowledgment.acknowledge();
         } catch (Exception e) {
             logger.error("Error processing notification event", e);
@@ -124,10 +124,10 @@ public class EventConsumer {
                                Acknowledgment acknowledgment) {
         try {
             logger.debug("Received audit event from topic: {}", topic);
-            
+
             // Process audit event - could store in audit log, send to SIEM, etc.
             processAuditEvent(event);
-            
+
             acknowledgment.acknowledge();
         } catch (Exception e) {
             logger.error("Error processing audit event", e);

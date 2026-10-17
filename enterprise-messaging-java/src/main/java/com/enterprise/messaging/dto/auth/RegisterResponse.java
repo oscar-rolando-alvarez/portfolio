@@ -12,7 +12,7 @@ public class RegisterResponse {
 
     public RegisterResponse() {}
 
-    public RegisterResponse(UUID userId, String username, String email, 
+    public RegisterResponse(UUID userId, String username, String email,
                            String displayName, String token) {
         this.userId = userId;
         this.username = username;

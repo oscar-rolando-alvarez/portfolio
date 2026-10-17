@@ -13,7 +13,6 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.annotation.SendToUser;
-import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
@@ -46,16 +45,16 @@ public class MessageController {
         try {
             User sender = userService.findByUsername(principal.getName())
                 .orElseThrow(() -> new RuntimeException("User not found"));
-            
+
             Channel channel = channelService.findById(channelId);
-            
+
             Message message = messageService.sendChannelMessage(
-                payload.getContent(), 
-                sender, 
-                channel, 
+                payload.getContent(),
+                sender,
+                channel,
                 payload.getType() != null ? payload.getType() : MessageType.TEXT
             );
-            
+
             return new MessageEvent("message", message);
         } catch (Exception e) {
             return new MessageEvent("error", "Failed to send message: " + e.getMessage());
@@ -69,7 +68,7 @@ public class MessageController {
                                   Principal principal) {
         User user = userService.findByUsername(principal.getName())
             .orElseThrow(() -> new RuntimeException("User not found"));
-        
+
         return new TypingEvent(user.getId(), user.getDisplayName(), payload.isTyping());
     }
 
@@ -81,13 +80,13 @@ public class MessageController {
         try {
             User user = userService.findByUsername(principal.getName())
                 .orElseThrow(() -> new RuntimeException("User not found"));
-            
+
             if (payload.isAdd()) {
                 messageService.addReaction(messageId, payload.getEmoji(), user);
             } else {
                 messageService.removeReaction(messageId, payload.getEmoji(), user);
             }
-            
+
             return new ReactionEvent(messageId, payload.getEmoji(), user.getId(), payload.isAdd());
         } catch (Exception e) {
             return new ReactionEvent(messageId, payload.getEmoji(), null, false, e.getMessage());
@@ -100,9 +99,9 @@ public class MessageController {
         try {
             User user = userService.findByUsername(principal.getName())
                 .orElseThrow(() -> new RuntimeException("User not found"));
-            
+
             messageService.markMessageAsRead(messageId, user);
-            
+
             // Send read receipt to message sender
             Message message = messageService.findById(messageId);
             messagingTemplate.convertAndSendToUser(
@@ -121,12 +120,12 @@ public class MessageController {
         try {
             User user = userService.findByUsername(principal.getName())
                 .orElseThrow(() -> new RuntimeException("User not found"));
-            
+
             userService.updateUserStatus(user.getId(), payload.getStatus());
-            
+
             // Broadcast presence update to relevant channels/groups
             broadcastPresenceUpdate(user);
-            
+
             return new PresenceEvent(user.getId(), payload.getStatus(), payload.getCustomMessage());
         } catch (Exception e) {
             return new PresenceEvent(null, null, null, e.getMessage());
@@ -141,7 +140,7 @@ public class MessageController {
                 new PresenceEvent(user.getId(), user.getStatus(), null)
             );
         });
-        
+
         // Broadcast to all groups the user is a member of
         user.getGroups().forEach(group -> {
             messagingTemplate.convertAndSend(

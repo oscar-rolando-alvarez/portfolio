@@ -16,7 +16,7 @@ public class UserEvent {
 
     public UserEvent() {}
 
-    public UserEvent(UUID userId, String username, String email, 
+    public UserEvent(UUID userId, String username, String email,
                     UserStatus status, EventType eventType) {
         this.userId = userId;
         this.username = username;

@@ -33,13 +33,13 @@ public class EventPublisher {
 
     public void publishMessageEvent(MessageEvent event) {
         try {
-            String key = event.getChannelId() != null ? 
-                "channel:" + event.getChannelId() : 
+            String key = event.getChannelId() != null ?
+                "channel:" + event.getChannelId() :
                 "group:" + event.getGroupId();
-            
-            CompletableFuture<SendResult<String, Object>> future = 
+
+            CompletableFuture<SendResult<String, Object>> future =
                 kafkaTemplate.send(MESSAGE_EVENTS_TOPIC, key, event);
-            
+
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
                     logger.error("Failed to publish message event: {}", event.getMessageId(), ex);
@@ -55,10 +55,10 @@ public class EventPublisher {
     public void publishUserEvent(UserEvent event) {
         try {
             String key = "user:" + event.getUserId();
-            
-            CompletableFuture<SendResult<String, Object>> future = 
+
+            CompletableFuture<SendResult<String, Object>> future =
                 kafkaTemplate.send(USER_EVENTS_TOPIC, key, event);
-            
+
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
                     logger.error("Failed to publish user event: {}", event.getUserId(), ex);
@@ -74,10 +74,10 @@ public class EventPublisher {
     public void publishChannelEvent(Object event, String channelId) {
         try {
             String key = "channel:" + channelId;
-            
-            CompletableFuture<SendResult<String, Object>> future = 
+
+            CompletableFuture<SendResult<String, Object>> future =
                 kafkaTemplate.send(CHANNEL_EVENTS_TOPIC, key, event);
-            
+
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
                     logger.error("Failed to publish channel event for channel: {}", channelId, ex);
@@ -93,10 +93,10 @@ public class EventPublisher {
     public void publishNotificationEvent(Object event, String userId) {
         try {
             String key = "user:" + userId;
-            
-            CompletableFuture<SendResult<String, Object>> future = 
+
+            CompletableFuture<SendResult<String, Object>> future =
                 kafkaTemplate.send(NOTIFICATION_EVENTS_TOPIC, key, event);
-            
+
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
                     logger.error("Failed to publish notification event for user: {}", userId, ex);
@@ -112,10 +112,10 @@ public class EventPublisher {
     public void publishAuditEvent(Object event, String entityId) {
         try {
             String key = "audit:" + entityId;
-            
-            CompletableFuture<SendResult<String, Object>> future = 
+
+            CompletableFuture<SendResult<String, Object>> future =
                 kafkaTemplate.send(AUDIT_EVENTS_TOPIC, key, event);
-            
+
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
                     logger.error("Failed to publish audit event for entity: {}", entityId, ex);
@@ -130,9 +130,9 @@ public class EventPublisher {
 
     public void publishAnalyticsEvent(Object event) {
         try {
-            CompletableFuture<SendResult<String, Object>> future = 
+            CompletableFuture<SendResult<String, Object>> future =
                 kafkaTemplate.send(ANALYTICS_EVENTS_TOPIC, event);
-            
+
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
                     logger.error("Failed to publish analytics event", ex);

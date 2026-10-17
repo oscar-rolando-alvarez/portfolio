@@ -44,7 +44,7 @@ public interface ChannelInviteRepository extends JpaRepository<ChannelInvite, UU
            "ci.isActive = true AND " +
            "(ci.expiresAt IS NULL OR ci.expiresAt > :now) AND " +
            "(ci.maxUses IS NULL OR ci.currentUses < ci.maxUses)")
-    List<ChannelInvite> findValidInvitesByChannel(@Param("channel") Channel channel, 
+    List<ChannelInvite> findValidInvitesByChannel(@Param("channel") Channel channel,
                                                  @Param("now") LocalDateTime now);
 
     @Query("SELECT ci FROM ChannelInvite ci WHERE ci.createdBy = :user")

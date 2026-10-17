@@ -20,22 +20,22 @@ public enum AttachmentType {
 
     public static AttachmentType fromMimeType(String mimeType) {
         if (mimeType == null) return OTHER;
-        
+
         String type = mimeType.toLowerCase();
-        
+
         if (type.startsWith("image/")) return IMAGE;
         if (type.startsWith("video/")) return VIDEO;
         if (type.startsWith("audio/")) return AUDIO;
-        if (type.contains("pdf") || type.contains("document") || 
-            type.contains("text") || type.contains("word") || 
+        if (type.contains("pdf") || type.contains("document") ||
+            type.contains("text") || type.contains("word") ||
             type.contains("excel") || type.contains("powerpoint")) {
             return DOCUMENT;
         }
-        if (type.contains("zip") || type.contains("rar") || 
+        if (type.contains("zip") || type.contains("rar") ||
             type.contains("tar") || type.contains("gzip")) {
             return ARCHIVE;
         }
-        
+
         return OTHER;
     }
 

@@ -1,46 +1,39 @@
-# Build stage
-FROM maven:3.9.5-openjdk-17-slim AS build
+# syntax=docker/dockerfile:1
 
+# ---- Build stage ----
+FROM eclipse-temurin:21.0.12.1_1-jdk-noble AS build
+WORKDIR /workspace
+
+# Resolve dependencies first so they are cached independently of source changes
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q dependency:go-offline
+
+COPY src/ src/
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q package -DskipTests \
+    && java -Djarmode=tools -jar target/messaging-system-*.jar extract --layers --launcher --destination target/extracted
+
+# ---- Runtime stage ----
+FROM eclipse-temurin:21.0.12.1_1-jre-alpine-3.24
 WORKDIR /app
 
-# Copy pom.xml and download dependencies
-COPY pom.xml .
-RUN mvn dependency:go-offline -B
+RUN addgroup -S app && adduser -S -G app -u 10001 app \
+    && mkdir -p /var/lib/messaging/uploads && chown -R app:app /var/lib/messaging
 
-# Copy source code and build
-COPY src ./src
-RUN mvn clean package -DskipTests
+# Copy Spring Boot layers from least to most frequently changing
+COPY --from=build --chown=app:app /workspace/target/extracted/dependencies/ ./
+COPY --from=build --chown=app:app /workspace/target/extracted/spring-boot-loader/ ./
+COPY --from=build --chown=app:app /workspace/target/extracted/snapshot-dependencies/ ./
+COPY --from=build --chown=app:app /workspace/target/extracted/application/ ./
 
-# Runtime stage
-FROM openjdk:17-jre-slim
-
-# Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# Create app user
-RUN groupadd -r messaging && useradd -r -g messaging messaging
-
-# Create app directory
-WORKDIR /app
-
-# Copy the jar file
-COPY --from=build /app/target/*.jar app.jar
-
-# Create uploads directory
-RUN mkdir -p /tmp/messaging-uploads && chown messaging:messaging /tmp/messaging-uploads
-
-# Change ownership
-RUN chown -R messaging:messaging /app
-
-# Switch to app user
-USER messaging
-
-# Expose port
+USER 10001
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8080/actuator/health || exit 1
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError" \
+    LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs \
+    FILE_STORAGE_PATH=/var/lib/messaging/uploads
 
-# Run the application
-ENTRYPOINT ["java", "-jar", "-Dspring.profiles.active=docker", "app.jar"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD wget -qO- http://localhost:8080/actuator/health/liveness || exit 1
+
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

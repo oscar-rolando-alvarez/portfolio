@@ -32,10 +32,10 @@ public class WebSocketService {
     }
 
     public void sendMessageUpdate(Message message) {
-        String destination = message.getChannel() != null ? 
+        String destination = message.getChannel() != null ?
             "/topic/channel/" + message.getChannel().getId() :
             "/topic/group/" + message.getGroup().getId();
-        
+
         messagingTemplate.convertAndSend(destination, new MessageEvent("message_updated", message));
     }
 
@@ -47,10 +47,10 @@ public class WebSocketService {
     }
 
     public void sendMessagePin(Message message) {
-        String destination = message.getChannel() != null ? 
+        String destination = message.getChannel() != null ?
             "/topic/channel/" + message.getChannel().getId() :
             "/topic/group/" + message.getGroup().getId();
-        
+
         messagingTemplate.convertAndSend(destination, new MessageEvent("message_pinned", message));
     }
 
@@ -64,7 +64,7 @@ public class WebSocketService {
     public void sendReactionAdd(MessageReaction reaction) {
         messagingTemplate.convertAndSend(
             "/topic/message/" + reaction.getMessage().getId() + "/reactions",
-            new ReactionEvent(reaction.getMessage().getId(), reaction.getEmoji(), 
+            new ReactionEvent(reaction.getMessage().getId(), reaction.getEmoji(),
                            reaction.getUser().getId(), true)
         );
     }
@@ -93,7 +93,7 @@ public class WebSocketService {
     public void sendUserPresenceUpdate(UserPresence presence) {
         messagingTemplate.convertAndSend(
             "/topic/presence",
-            new PresenceUpdateEvent(presence.getUser().getId(), presence.getStatus(), 
+            new PresenceUpdateEvent(presence.getUser().getId(), presence.getStatus(),
                                   presence.getCustomMessage())
         );
     }
@@ -171,8 +171,8 @@ public class WebSocketService {
         private com.enterprise.messaging.domain.enums.UserStatus status;
         private String customMessage;
 
-        public PresenceUpdateEvent(UUID userId, 
-                                 com.enterprise.messaging.domain.enums.UserStatus status, 
+        public PresenceUpdateEvent(UUID userId,
+                                 com.enterprise.messaging.domain.enums.UserStatus status,
                                  String customMessage) {
             this.userId = userId;
             this.status = status;

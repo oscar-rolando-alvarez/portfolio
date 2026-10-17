@@ -1,7 +1,6 @@
 package com.enterprise.messaging.config;
 
 import com.enterprise.messaging.websocket.WebSocketHandshakeInterceptor;
-import com.enterprise.messaging.websocket.WebSocketHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -22,10 +21,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void configureMessageBroker(MessageBrokerRegistry config) {
         // Enable a simple memory-based message broker
         config.enableSimpleBroker("/topic", "/queue", "/user");
-        
+
         // Set application destination prefix for messages from client
         config.setApplicationDestinationPrefixes("/app");
-        
+
         // Set user destination prefix for user-specific messages
         config.setUserDestinationPrefix("/user");
     }
@@ -37,7 +36,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .addInterceptors(handshakeInterceptor)
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
-        
+
         // Register WebSocket endpoint without SockJS fallback
         registry.addEndpoint("/websocket")
                 .addInterceptors(handshakeInterceptor)

@@ -1,25 +1,39 @@
 package com.enterprise.messaging.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
+import java.util.Base64;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.util.Base64;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
+/**
+ * Encrypts message content at rest using AES-256-GCM (authenticated encryption).
+ * Output format: Base64( 12-byte random IV || ciphertext+tag ).
+ */
 @Service
 public class EncryptionService {
 
-    @Value("${messaging.encryption.enabled:false}")
-    private boolean encryptionEnabled;
+    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final int IV_LENGTH_BYTES = 12;
+    private static final int TAG_LENGTH_BITS = 128;
 
-    @Value("${messaging.encryption.algorithm:AES}")
-    private String algorithm;
+    private final SecureRandom secureRandom = new SecureRandom();
+    private final boolean encryptionEnabled;
+    private final String encryptionKey;
 
-    @Value("${messaging.encryption.key:}")
-    private String encryptionKey;
+    public EncryptionService(
+            @Value("${messaging.encryption.enabled:false}") boolean encryptionEnabled,
+            @Value("${messaging.encryption.key:}") String encryptionKey) {
+        this.encryptionEnabled = encryptionEnabled;
+        this.encryptionKey = encryptionKey;
+    }
 
     public boolean isEncryptionEnabled() {
         return encryptionEnabled;
@@ -29,15 +43,19 @@ public class EncryptionService {
         if (!encryptionEnabled || data == null) {
             return data;
         }
-
         try {
-            SecretKey key = getSecretKey();
-            Cipher cipher = Cipher.getInstance(algorithm);
-            cipher.init(Cipher.ENCRYPT_MODE, key);
-            byte[] encryptedData = cipher.doFinal(data.getBytes());
-            return Base64.getEncoder().encodeToString(encryptedData);
-        } catch (Exception e) {
-            throw new RuntimeException("Error encrypting data", e);
+            byte[] iv = new byte[IV_LENGTH_BYTES];
+            secureRandom.nextBytes(iv);
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.ENCRYPT_MODE, getSecretKey(), new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            byte[] cipherText = cipher.doFinal(data.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder()
+                    .encodeToString(ByteBuffer.allocate(iv.length + cipherText.length)
+                            .put(iv)
+                            .put(cipherText)
+                            .array());
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Error encrypting data", e);
         }
     }
 
@@ -45,36 +63,34 @@ public class EncryptionService {
         if (!encryptionEnabled || encryptedData == null) {
             return encryptedData;
         }
-
         try {
-            SecretKey key = getSecretKey();
-            Cipher cipher = Cipher.getInstance(algorithm);
-            cipher.init(Cipher.DECRYPT_MODE, key);
-            byte[] decodedData = Base64.getDecoder().decode(encryptedData);
-            byte[] decryptedData = cipher.doFinal(decodedData);
-            return new String(decryptedData);
-        } catch (Exception e) {
-            throw new RuntimeException("Error decrypting data", e);
+            ByteBuffer buffer = ByteBuffer.wrap(Base64.getDecoder().decode(encryptedData));
+            byte[] iv = new byte[IV_LENGTH_BYTES];
+            buffer.get(iv);
+            byte[] cipherText = new byte[buffer.remaining()];
+            buffer.get(cipherText);
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            return new String(cipher.doFinal(cipherText), StandardCharsets.UTF_8);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Error decrypting data", e);
         }
     }
 
     private SecretKey getSecretKey() {
         if (encryptionKey == null || encryptionKey.isEmpty()) {
-            throw new IllegalStateException("Encryption key not configured");
+            throw new IllegalStateException("Encryption key not configured (messaging.encryption.key)");
         }
-        
-        byte[] keyBytes = Base64.getDecoder().decode(encryptionKey);
-        return new SecretKeySpec(keyBytes, algorithm);
+        return new SecretKeySpec(Base64.getDecoder().decode(encryptionKey), "AES");
     }
 
     public String generateKey() {
         try {
-            KeyGenerator keyGenerator = KeyGenerator.getInstance(algorithm);
+            KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
             keyGenerator.init(256);
-            SecretKey secretKey = keyGenerator.generateKey();
-            return Base64.getEncoder().encodeToString(secretKey.getEncoded());
-        } catch (Exception e) {
-            throw new RuntimeException("Error generating encryption key", e);
+            return Base64.getEncoder().encodeToString(keyGenerator.generateKey().getEncoded());
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Error generating encryption key", e);
         }
     }
 }

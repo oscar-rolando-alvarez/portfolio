@@ -38,7 +38,7 @@ public class ChannelService {
         this.notificationService = notificationService;
     }
 
-    public Channel createChannel(String name, String description, ChannelType type, 
+    public Channel createChannel(String name, String description, ChannelType type,
                                Boolean isPrivate, User creator) {
         // Check if channel name already exists for public channels
         if (!isPrivate && channelRepository.existsByNameAndIsPrivate(name, false)) {
@@ -52,17 +52,17 @@ public class ChannelService {
         return channelRepository.save(channel);
     }
 
-    public Channel updateChannel(UUID channelId, String name, String description, 
+    public Channel updateChannel(UUID channelId, String name, String description,
                                String topic, User updater) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(updater)) {
             throw new UnauthorizedException("User is not authorized to update this channel");
         }
 
         if (name != null && !name.equals(channel.getName())) {
             // Check if new name is available for public channels
-            if (!channel.getIsPrivate() && 
+            if (!channel.getIsPrivate() &&
                 channelRepository.existsByNameAndIsPrivate(name, false)) {
                 throw new IllegalArgumentException("Channel with this name already exists");
             }
@@ -82,7 +82,7 @@ public class ChannelService {
 
     public void deleteChannel(UUID channelId, User deleter) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.getCreatedBy().equals(deleter) && !deleter.getRole().canAdmin()) {
             throw new UnauthorizedException("User is not authorized to delete this channel");
         }
@@ -92,7 +92,7 @@ public class ChannelService {
 
     public void joinChannel(UUID channelId, User user) {
         Channel channel = findById(channelId);
-        
+
         if (channel.getIsPrivate()) {
             throw new UnauthorizedException("Cannot join private channel without invitation");
         }
@@ -119,14 +119,14 @@ public class ChannelService {
         }
 
         Channel channel = invite.getChannel();
-        
+
         if (channel.isAtCapacity()) {
             throw new IllegalStateException("Channel is at maximum capacity");
         }
 
         channel.addMember(user);
         invite.incrementUses();
-        
+
         channelRepository.save(channel);
         channelInviteRepository.save(invite);
 
@@ -138,7 +138,7 @@ public class ChannelService {
 
     public void leaveChannel(UUID channelId, User user) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isMember(user)) {
             throw new IllegalArgumentException("User is not a member of this channel");
         }
@@ -154,7 +154,7 @@ public class ChannelService {
 
     public void addMember(UUID channelId, UUID userId, User adder) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(adder)) {
             throw new UnauthorizedException("User is not authorized to add members");
         }
@@ -171,7 +171,7 @@ public class ChannelService {
 
     public void removeMember(UUID channelId, UUID userId, User remover) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(remover)) {
             throw new UnauthorizedException("User is not authorized to remove members");
         }
@@ -184,7 +184,7 @@ public class ChannelService {
 
     public void promoteToAdmin(UUID channelId, UUID userId, User promoter) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(promoter)) {
             throw new UnauthorizedException("User is not authorized to promote members");
         }
@@ -197,7 +197,7 @@ public class ChannelService {
 
     public void demoteFromAdmin(UUID channelId, UUID userId, User demoter) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(demoter)) {
             throw new UnauthorizedException("User is not authorized to demote admins");
         }
@@ -208,10 +208,10 @@ public class ChannelService {
         channelRepository.save(channel);
     }
 
-    public ChannelInvite createInvite(UUID channelId, User creator, Integer maxUses, 
+    public ChannelInvite createInvite(UUID channelId, User creator, Integer maxUses,
                                     LocalDateTime expiresAt) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(creator)) {
             throw new UnauthorizedException("User is not authorized to create invites");
         }
@@ -238,7 +238,7 @@ public class ChannelService {
 
     public void archiveChannel(UUID channelId, User archiver) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(archiver)) {
             throw new UnauthorizedException("User is not authorized to archive this channel");
         }
@@ -249,7 +249,7 @@ public class ChannelService {
 
     public void unarchiveChannel(UUID channelId, User unarchiver) {
         Channel channel = findById(channelId);
-        
+
         if (!channel.isAdmin(unarchiver)) {
             throw new UnauthorizedException("User is not authorized to unarchive this channel");
         }

@@ -35,11 +35,11 @@ public class PresenceService {
         setUserOnline(UUID.fromString(userId), sessionId, false, true, false);
     }
 
-    public void setUserOnline(UUID userId, String sessionId, boolean isMobile, 
+    public void setUserOnline(UUID userId, String sessionId, boolean isMobile,
                              boolean isWeb, boolean isDesktop) {
         Optional<UserPresence> presenceOpt = userPresenceRepository.findByUserId(userId);
         UserPresence presence;
-        
+
         if (presenceOpt.isPresent()) {
             presence = presenceOpt.get();
         } else {
@@ -47,16 +47,16 @@ public class PresenceService {
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
             presence = new UserPresence(user);
         }
-        
+
         presence.setOnline(sessionId, isMobile, isWeb, isDesktop);
         userPresenceRepository.save(presence);
-        
+
         // Update user status
         User user = presence.getUser();
         user.setStatus(UserStatus.ONLINE);
         user.setLastSeenAt(LocalDateTime.now());
         userRepository.save(user);
-        
+
         // Broadcast presence update
         webSocketService.sendUserPresenceUpdate(presence);
     }
@@ -71,13 +71,13 @@ public class PresenceService {
             UserPresence presence = presenceOpt.get();
             presence.setOffline();
             userPresenceRepository.save(presence);
-            
+
             // Update user status
             User user = presence.getUser();
             user.setStatus(UserStatus.OFFLINE);
             user.setLastSeenAt(LocalDateTime.now());
             userRepository.save(user);
-            
+
             // Broadcast presence update
             webSocketService.sendUserPresenceUpdate(presence);
         }
@@ -91,13 +91,13 @@ public class PresenceService {
             presence.setCustomMessage(customMessage);
             presence.updateLastSeen();
             userPresenceRepository.save(presence);
-            
+
             // Update user status
             User user = presence.getUser();
             user.setStatus(status);
             user.setLastSeenAt(LocalDateTime.now());
             userRepository.save(user);
-            
+
             // Broadcast presence update
             webSocketService.sendUserPresenceUpdate(presence);
         }
@@ -133,16 +133,16 @@ public class PresenceService {
     public void cleanupStalePresence() {
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(5);
         List<UserPresence> stalePresences = userPresenceRepository.findStalePresence(threshold);
-        
+
         for (UserPresence presence : stalePresences) {
             presence.setOffline();
             userPresenceRepository.save(presence);
-            
+
             // Update user status
             User user = presence.getUser();
             user.setStatus(UserStatus.OFFLINE);
             userRepository.save(user);
-            
+
             // Broadcast presence update
             webSocketService.sendUserPresenceUpdate(presence);
         }
