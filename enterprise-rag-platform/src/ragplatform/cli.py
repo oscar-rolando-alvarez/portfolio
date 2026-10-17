@@ -195,7 +195,7 @@ def create_api_key(
     from ragplatform.container import build_container
 
     settings = get_settings()
-    if settings.database_url is None:
+    if settings.resolved_database_url is None:
         typer.echo("RAG_DATABASE_URL is required", err=True)
         raise typer.Exit(code=2)
 

@@ -113,7 +113,8 @@ def build_rewriter(s: Settings, llm: LLMProvider) -> QueryRewriter:
 
 def build_container(settings: Settings, *, memory_store: InMemoryStore | None = None) -> Container:
     closers: list[object] = []
-    if settings.database_url is not None and memory_store is None:
+    db_url = settings.resolved_database_url
+    if db_url is not None and memory_store is None:
         from ragplatform.adapters.postgres.database import Database
         from ragplatform.adapters.postgres.repositories import (
             PostgresApiKeyStore,
@@ -124,7 +125,7 @@ def build_container(settings: Settings, *, memory_store: InMemoryStore | None = 
             PostgresUsageLedger,
         )
 
-        db = Database(settings.database_url.get_secret_value(), pool_size=settings.db_pool_size)
+        db = Database(db_url, pool_size=settings.db_pool_size)
         closers.append(db)
         documents: DocumentStore = PostgresDocumentStore(db)
         index: SearchIndex = PostgresSearchIndex(db)

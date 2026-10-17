@@ -147,7 +147,7 @@ class EvalRunner:
         failures = check_thresholds(values, thresholds)
         s = self._c.settings
         return EvalReport(
-            backend="postgres" if s.database_url else "memory",
+            backend="postgres" if s.resolved_database_url else "memory",
             llm_model=self._c.llm.model,
             embedding_model=self._c.embedder.model,
             k=self._k,

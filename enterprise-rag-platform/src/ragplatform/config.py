@@ -10,6 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated
+from urllib.parse import quote
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -57,6 +58,14 @@ class Settings(BaseSettings):
         default=None,
         description="postgresql+asyncpg://... ; when unset an in-memory store is used (demo/tests).",
     )
+    # Alternative to database_url for platforms that inject credentials separately
+    # (e.g. ECS secrets from an RDS-managed Secrets Manager secret).
+    db_host: str | None = None
+    db_port: int = 5432
+    db_name: str = "rag"
+    db_user: str | None = None
+    db_password: SecretStr | None = None
+    db_ssl: str | None = Field(default=None, description="asyncpg ssl mode, e.g. 'require'")
     db_pool_size: int = 10
     embedding_dim: int = Field(default=384, ge=8, le=4096)
 
@@ -145,6 +154,18 @@ class Settings(BaseSettings):
         if len(v.get_secret_value()) < 32:
             raise ValueError("RAG_JWT_SECRET must be at least 32 bytes")
         return v
+
+    @property
+    def resolved_database_url(self) -> str | None:
+        """``RAG_DATABASE_URL`` if set, else a URL assembled from the ``RAG_DB_*`` parts."""
+        if self.database_url is not None:
+            return self.database_url.get_secret_value()
+        if not (self.db_host and self.db_user and self.db_password):
+            return None
+        user = quote(self.db_user, safe="")
+        password = quote(self.db_password.get_secret_value(), safe="")
+        url = f"postgresql+asyncpg://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        return f"{url}?ssl={self.db_ssl}" if self.db_ssl else url
 
     def price_for(self, model: str) -> dict[str, float]:
         return self.model_pricing.get(model, {"input": 0.0, "output": 0.0})

@@ -17,10 +17,10 @@ if config.config_file_name is not None:
 
 
 def _url() -> str:
-    url = get_settings().database_url
+    url = get_settings().resolved_database_url
     if url is None:
-        raise RuntimeError("RAG_DATABASE_URL must be set to run migrations")
-    return url.get_secret_value()
+        raise RuntimeError("RAG_DATABASE_URL (or RAG_DB_HOST/USER/PASSWORD) must be set")
+    return url
 
 
 def _run(connection: Connection) -> None:
