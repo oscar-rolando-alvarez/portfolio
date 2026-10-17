@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- Dependencies + build --------------------------------------------------
-FROM node:24.22.0-alpine3.24 AS build
+FROM node:26.11.1-alpine3.24 AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -18,7 +18,7 @@ CMD ["node_modules/.bin/prisma", "migrate", "deploy"]
 
 # ---- Runtime ---------------------------------------------------------------
 # Nitro traces and bundles server dependencies (Prisma client, pg) into .output.
-FROM node:24.22.0-alpine3.24 AS runtime
+FROM node:26.11.1-alpine3.24 AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \

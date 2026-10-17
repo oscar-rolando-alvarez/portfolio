@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage ----
-FROM eclipse-temurin:21.0.12.1_1-jdk-noble AS build
+FROM eclipse-temurin:24.0.2_12-jdk-noble AS build
 WORKDIR /workspace
 
 # Resolve dependencies first so they are cached independently of source changes
@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q package -DskipTests \
     && java -Djarmode=tools -jar target/messaging-system-*.jar extract --layers --launcher --destination target/extracted
 
 # ---- Runtime stage ----
-FROM eclipse-temurin:21.0.12.1_1-jre-alpine-3.24
+FROM eclipse-temurin:24-jre-alpine-3.22
 WORKDIR /app
 
 RUN addgroup -S app && adduser -S -G app -u 10001 app \

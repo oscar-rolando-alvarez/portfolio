@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- Build stage -----------------------------------------------------------
-FROM node:24.22.0-alpine3.24 AS build
+FROM node:26.11.1-alpine3.24 AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -12,7 +12,7 @@ RUN npx nuxt prepare && npm run build
 
 # ---- Runtime stage ---------------------------------------------------------
 # Nitro bundles the server into .output, so the runtime image needs no node_modules.
-FROM node:24.22.0-alpine3.24 AS runtime
+FROM node:26.11.1-alpine3.24 AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \

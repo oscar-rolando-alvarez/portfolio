@@ -3,7 +3,7 @@
 ARG WITH_OCR=false
 
 # ---- builder: resolve and install locked dependencies with uv ----
-FROM python:3.13.16-slim-trixie AS builder
+FROM python:3.14.8-slim-trixie AS builder
 ARG WITH_OCR
 COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /bin/
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable $EXTRAS
 
 # ---- runtime: slim, non-root ----
-FROM python:3.13.16-slim-trixie AS runtime
+FROM python:3.14.8-slim-trixie AS runtime
 ARG WITH_OCR
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH" \
     STORAGE_DIR=/app/data/images
