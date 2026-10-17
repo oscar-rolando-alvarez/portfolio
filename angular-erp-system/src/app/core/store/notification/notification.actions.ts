@@ -5,28 +5,25 @@ export const loadNotifications = createAction('[Notification] Load Notifications
 
 export const loadNotificationsSuccess = createAction(
   '[Notification] Load Notifications Success',
-  props<{ notifications: Notification[] }>()
+  props<{ notifications: Notification[] }>(),
 );
 
 export const loadNotificationsFailure = createAction(
   '[Notification] Load Notifications Failure',
-  props<{ error: string }>()
+  props<{ error: string }>(),
 );
 
 export const addNotification = createAction(
   '[Notification] Add Notification',
-  props<{ notification: Notification }>()
+  props<{ notification: Notification }>(),
 );
 
 export const removeNotification = createAction(
   '[Notification] Remove Notification',
-  props<{ id: string }>()
+  props<{ id: string }>(),
 );
 
-export const markAsRead = createAction(
-  '[Notification] Mark As Read',
-  props<{ id: string }>()
-);
+export const markAsRead = createAction('[Notification] Mark As Read', props<{ id: string }>());
 
 export const markAllAsRead = createAction('[Notification] Mark All As Read');
 
@@ -34,12 +31,12 @@ export const clearAllNotifications = createAction('[Notification] Clear All Noti
 
 export const showNotification = createAction(
   '[Notification] Show Notification',
-  props<{ 
+  props<{
     level: 'info' | 'success' | 'warning' | 'error';
     title: string;
     message: string;
     duration?: number;
     actionUrl?: string;
     actionText?: string;
-  }>()
+  }>(),
 );

@@ -47,7 +47,9 @@ export class NotificationService {
 
   markAllAsRead(): void {
     this.store.dispatch(NotificationActions.markAllAsRead());
-    this.http.patch(apiUrl('notifications/mark-all-read'), {}).subscribe({ error: () => undefined });
+    this.http
+      .patch(apiUrl('notifications/mark-all-read'), {})
+      .subscribe({ error: () => undefined });
   }
 
   showSuccess(message: string, title = 'Success', duration = 4000): void {

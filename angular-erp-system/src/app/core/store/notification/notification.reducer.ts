@@ -11,7 +11,7 @@ export interface NotificationState {
 export const initialState: NotificationState = {
   notifications: [],
   isLoading: false,
-  error: null
+  error: null,
 };
 
 export const notificationReducer = createReducer(
@@ -20,53 +20,51 @@ export const notificationReducer = createReducer(
   on(NotificationActions.loadNotifications, (state) => ({
     ...state,
     isLoading: true,
-    error: null
+    error: null,
   })),
 
   on(NotificationActions.loadNotificationsSuccess, (state, { notifications }) => ({
     ...state,
     notifications,
     isLoading: false,
-    error: null
+    error: null,
   })),
 
   on(NotificationActions.loadNotificationsFailure, (state, { error }) => ({
     ...state,
     isLoading: false,
-    error
+    error,
   })),
 
   on(NotificationActions.addNotification, (state, { notification }) => ({
     ...state,
-    notifications: [notification, ...state.notifications]
+    notifications: [notification, ...state.notifications],
   })),
 
   on(NotificationActions.removeNotification, (state, { id }) => ({
     ...state,
-    notifications: state.notifications.filter(notification => notification.id !== id)
+    notifications: state.notifications.filter((notification) => notification.id !== id),
   })),
 
   on(NotificationActions.markAsRead, (state, { id }) => ({
     ...state,
-    notifications: state.notifications.map(notification =>
-      notification.id === id
-        ? { ...notification, isRead: true }
-        : notification
-    )
+    notifications: state.notifications.map((notification) =>
+      notification.id === id ? { ...notification, isRead: true } : notification,
+    ),
   })),
 
   on(NotificationActions.markAllAsRead, (state) => ({
     ...state,
-    notifications: state.notifications.map(notification => ({
+    notifications: state.notifications.map((notification) => ({
       ...notification,
-      isRead: true
-    }))
+      isRead: true,
+    })),
   })),
 
   on(NotificationActions.clearAllNotifications, (state) => ({
     ...state,
-    notifications: []
-  }))
+    notifications: [],
+  })),
   // Transient toasts (showNotification) are rendered by NotificationEffects and
   // intentionally not persisted in the inbox.
 );

@@ -108,15 +108,30 @@ export class DashboardComponent {
   protected readonly cards = computed(() => {
     const s = this.summary.value();
     return [
-      { title: 'Products', subtitle: 'Active SKUs', icon: 'inventory_2', value: s?.products ?? '-' },
-      { title: 'Needs reorder', subtitle: 'At or below reorder point', icon: 'warning', value: s?.lowStock ?? '-' },
+      {
+        title: 'Products',
+        subtitle: 'Active SKUs',
+        icon: 'inventory_2',
+        value: s?.products ?? '-',
+      },
+      {
+        title: 'Needs reorder',
+        subtitle: 'At or below reorder point',
+        icon: 'warning',
+        value: s?.lowStock ?? '-',
+      },
       {
         title: 'Stock value',
         subtitle: 'At unit cost',
         icon: 'payments',
         value: s ? this.currency.transform(s.inventoryValue, 'USD', 'symbol', '1.0-0') : '-',
       },
-      { title: 'Unread alerts', subtitle: 'Notifications inbox', icon: 'notifications', value: s?.unreadNotifications ?? '-' },
+      {
+        title: 'Unread alerts',
+        subtitle: 'Notifications inbox',
+        icon: 'notifications',
+        value: s?.unreadNotifications ?? '-',
+      },
     ];
   });
 }

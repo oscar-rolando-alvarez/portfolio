@@ -1,5 +1,10 @@
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRouteSnapshot, RouterStateSnapshot, UrlTree, provideRouter } from '@angular/router';
+import {
+  ActivatedRouteSnapshot,
+  RouterStateSnapshot,
+  UrlTree,
+  provideRouter,
+} from '@angular/router';
 import { provideMockStore } from '@ngrx/store/testing';
 
 import { selectIsAuthenticated } from '@core/store/auth/auth.selectors';
@@ -10,7 +15,9 @@ describe('authGuard', () => {
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
-        provideMockStore({ selectors: [{ selector: selectIsAuthenticated, value: isAuthenticated }] }),
+        provideMockStore({
+          selectors: [{ selector: selectIsAuthenticated, value: isAuthenticated }],
+        }),
       ],
     });
     return TestBed.runInInjectionContext(() =>

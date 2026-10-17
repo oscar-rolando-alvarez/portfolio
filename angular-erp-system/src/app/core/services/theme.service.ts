@@ -18,7 +18,8 @@ export class ThemeService {
   private readonly systemPrefersDark = signal(this.media?.matches ?? false);
 
   readonly isDark = computed(
-    () => this.preference() === 'dark' || (this.preference() === 'auto' && this.systemPrefersDark()),
+    () =>
+      this.preference() === 'dark' || (this.preference() === 'auto' && this.systemPrefersDark()),
   );
 
   constructor() {

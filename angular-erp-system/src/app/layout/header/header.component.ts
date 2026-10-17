@@ -34,7 +34,12 @@ import {
   template: `
     <mat-toolbar class="toolbar">
       @if (isHandset()) {
-        <button mat-icon-button type="button" aria-label="Toggle navigation" (click)="menuToggle.emit()">
+        <button
+          mat-icon-button
+          type="button"
+          aria-label="Toggle navigation"
+          (click)="menuToggle.emit()"
+        >
           <mat-icon>menu</mat-icon>
         </button>
       }
@@ -48,7 +53,11 @@ import {
         matTooltip="Notifications"
         aria-label="Notifications"
       >
-        <mat-icon [matBadge]="unreadCount()" [matBadgeHidden]="unreadCount() === 0" matBadgeColor="warn">
+        <mat-icon
+          [matBadge]="unreadCount()"
+          [matBadgeHidden]="unreadCount() === 0"
+          matBadgeColor="warn"
+        >
           notifications
         </mat-icon>
       </button>
@@ -71,7 +80,11 @@ import {
     <mat-menu #notificationMenu="matMenu" xPosition="before">
       <div class="menu-header">
         <strong>Notifications</strong>
-        <button mat-button type="button" (click)="$event.stopPropagation(); notifications.markAllAsRead()">
+        <button
+          mat-button
+          type="button"
+          (click)="$event.stopPropagation(); notifications.markAllAsRead()"
+        >
           Mark all read
         </button>
       </div>

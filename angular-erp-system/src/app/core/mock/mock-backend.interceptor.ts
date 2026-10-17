@@ -1,4 +1,9 @@
-import { HttpErrorResponse, HttpInterceptorFn, HttpRequest, HttpResponse } from '@angular/common/http';
+import {
+  HttpErrorResponse,
+  HttpInterceptorFn,
+  HttpRequest,
+  HttpResponse,
+} from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import { delay } from 'rxjs/operators';
@@ -63,7 +68,11 @@ export const mockBackendInterceptor: HttpInterceptorFn = (req, next) => {
   return handle(db, req, match[1]) ?? next(req);
 };
 
-function handle(db: MockDatabase, req: HttpRequest<unknown>, path: string): Observable<HttpResponse<unknown>> | null {
+function handle(
+  db: MockDatabase,
+  req: HttpRequest<unknown>,
+  path: string,
+): Observable<HttpResponse<unknown>> | null {
   const method = req.method;
   const isPublic = path === 'auth/login' || path === 'auth/refresh';
   const user = db.userFromToken(req.headers.get('Authorization'));
@@ -79,13 +88,22 @@ function handle(db: MockDatabase, req: HttpRequest<unknown>, path: string): Obse
       if (!found || password !== DEMO_PASSWORD) {
         return fail(400, 'Invalid email or password', req.url);
       }
-      return ok({ user: found, token: db.issueToken(found), refreshToken: db.issueToken(found), expiresIn: 3_600_000 });
+      return ok({
+        user: found,
+        token: db.issueToken(found),
+        refreshToken: db.issueToken(found),
+        expiresIn: 3_600_000,
+      });
     }
     case 'POST auth/refresh': {
       const { refreshToken } = (req.body ?? {}) as { refreshToken?: string };
       const owner = db.userFromToken(refreshToken ? `Bearer ${refreshToken}` : null);
       return owner
-        ? ok({ token: db.issueToken(owner), refreshToken: db.issueToken(owner), expiresIn: 3_600_000 })
+        ? ok({
+            token: db.issueToken(owner),
+            refreshToken: db.issueToken(owner),
+            expiresIn: 3_600_000,
+          })
         : fail(401, 'Invalid refresh token', req.url);
     }
     case 'GET auth/validate':
@@ -97,7 +115,14 @@ function handle(db: MockDatabase, req: HttpRequest<unknown>, path: string): Obse
     case 'GET notifications':
       return ok({
         data: db.notifications,
-        pagination: { page: 1, limit: 50, total: db.notifications.length, totalPages: 1, hasNext: false, hasPrev: false },
+        pagination: {
+          page: 1,
+          limit: 50,
+          total: db.notifications.length,
+          totalPages: 1,
+          hasNext: false,
+          hasPrev: false,
+        },
       });
     case 'PATCH notifications/mark-all-read':
       db.notifications = db.notifications.map((n) => ({ ...n, isRead: true }));
@@ -106,7 +131,11 @@ function handle(db: MockDatabase, req: HttpRequest<unknown>, path: string): Obse
       return ok(db.products);
     case 'POST inventory/products': {
       const input = req.body as Omit<Product, 'id' | 'updatedAt'>;
-      const product: Product = { ...input, id: db.nextId('p'), updatedAt: new Date().toISOString().slice(0, 10) };
+      const product: Product = {
+        ...input,
+        id: db.nextId('p'),
+        updatedAt: new Date().toISOString().slice(0, 10),
+      };
       db.products = [...db.products, product];
       return ok(product, 201);
     }

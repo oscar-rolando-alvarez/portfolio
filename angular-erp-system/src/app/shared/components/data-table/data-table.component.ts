@@ -93,7 +93,12 @@ export interface TableActionEvent<T extends object = Row> {
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef><span class="visually-hidden">Actions</span></th>
             <td mat-cell *matCellDef="let row" class="actions-cell">
-              <button mat-icon-button type="button" [matMenuTriggerFor]="menu" aria-label="Row actions">
+              <button
+                mat-icon-button
+                type="button"
+                [matMenuTriggerFor]="menu"
+                aria-label="Row actions"
+              >
                 <mat-icon>more_vert</mat-icon>
               </button>
               <mat-menu #menu="matMenu">

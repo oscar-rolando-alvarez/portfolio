@@ -61,19 +61,25 @@ const STATUS_LABEL: Record<StockStatus, string> = {
       <mat-card appearance="outlined">
         <mat-card-content>
           <span class="kpi-label">Products</span>
-          <span class="kpi-value" data-testid="kpi-products">{{ inventory.products.value().length }}</span>
+          <span class="kpi-value" data-testid="kpi-products">{{
+            inventory.products.value().length
+          }}</span>
         </mat-card-content>
       </mat-card>
       <mat-card appearance="outlined">
         <mat-card-content>
           <span class="kpi-label">Needs reorder</span>
-          <span class="kpi-value warn" data-testid="kpi-low-stock">{{ inventory.lowStockCount() }}</span>
+          <span class="kpi-value warn" data-testid="kpi-low-stock">{{
+            inventory.lowStockCount()
+          }}</span>
         </mat-card-content>
       </mat-card>
       <mat-card appearance="outlined">
         <mat-card-content>
           <span class="kpi-label">Stock value</span>
-          <span class="kpi-value">{{ inventory.inventoryValue() | currency: 'USD' : 'symbol' : '1.0-0' }}</span>
+          <span class="kpi-value">{{
+            inventory.inventoryValue() | currency: 'USD' : 'symbol' : '1.0-0'
+          }}</span>
         </mat-card-content>
       </mat-card>
     </section>
@@ -240,7 +246,13 @@ export class InventoryComponent {
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(NonNullableFormBuilder);
 
-  protected readonly categories: ProductCategory[] = ['Hardware', 'Office', 'Packaging', 'Electronics', 'Furniture'];
+  protected readonly categories: ProductCategory[] = [
+    'Hardware',
+    'Office',
+    'Packaging',
+    'Electronics',
+    'Furniture',
+  ];
 
   protected readonly query = signal('');
   protected readonly category = signal<'all' | ProductCategory>('all');
@@ -251,12 +263,14 @@ export class InventoryComponent {
     const q = this.query().trim().toLowerCase();
     const category = this.category();
     const status = this.status();
-    return this.inventory.products.value().filter(
-      (p) =>
-        (!q || p.sku.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)) &&
-        (category === 'all' || p.category === category) &&
-        (status === 'all' || stockStatus(p) === status),
-    );
+    return this.inventory.products
+      .value()
+      .filter(
+        (p) =>
+          (!q || p.sku.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)) &&
+          (category === 'all' || p.category === category) &&
+          (status === 'all' || stockStatus(p) === status),
+      );
   });
 
   protected readonly columns: TableColumn<Product>[] = [
@@ -292,7 +306,11 @@ export class InventoryComponent {
   protected onAction({ action, row }: TableActionEvent<Product>): void {
     const delta = action === 'receive' ? 10 : -1;
     this.inventory.adjustQuantity(row, delta).subscribe((updated) => {
-      this.notifications.showSuccess(`${updated.sku} quantity is now ${updated.quantity}`, 'Stock updated', 3000);
+      this.notifications.showSuccess(
+        `${updated.sku} quantity is now ${updated.quantity}`,
+        'Stock updated',
+        3000,
+      );
     });
   }
 

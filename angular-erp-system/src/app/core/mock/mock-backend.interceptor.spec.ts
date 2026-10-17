@@ -1,4 +1,9 @@
-import { HttpClient, HttpErrorResponse, provideHttpClient, withInterceptors } from '@angular/common/http';
+import {
+  HttpClient,
+  HttpErrorResponse,
+  provideHttpClient,
+  withInterceptors,
+} from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { firstValueFrom } from 'rxjs';
@@ -18,7 +23,10 @@ describe('mockBackendInterceptor', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(withInterceptors([mockBackendInterceptor])), provideHttpClientTesting()],
+      providers: [
+        provideHttpClient(withInterceptors([mockBackendInterceptor])),
+        provideHttpClientTesting(),
+      ],
     });
     http = TestBed.inject(HttpClient);
   });
@@ -44,20 +52,30 @@ describe('mockBackendInterceptor', () => {
   });
 
   it('requires a token for protected endpoints', async () => {
-    const error = await firstValueFrom(http.get(apiUrl('inventory/products'))).catch((e: unknown) => e);
+    const error = await firstValueFrom(http.get(apiUrl('inventory/products'))).catch(
+      (e: unknown) => e,
+    );
     expect((error as HttpErrorResponse).status).toBe(401);
   });
 
   it('lists products and persists quantity adjustments', async () => {
     const headers = { Authorization: `Bearer ${await login()}` };
-    const list = await firstValueFrom(http.get<Envelope<Product[]>>(apiUrl('inventory/products'), { headers }));
+    const list = await firstValueFrom(
+      http.get<Envelope<Product[]>>(apiUrl('inventory/products'), { headers }),
+    );
     const first = list.data[0];
 
     await firstValueFrom(
-      http.patch(apiUrl(`inventory/products/${first.id}`), { quantity: first.quantity + 5 }, { headers }),
+      http.patch(
+        apiUrl(`inventory/products/${first.id}`),
+        { quantity: first.quantity + 5 },
+        { headers },
+      ),
     );
 
-    const after = await firstValueFrom(http.get<Envelope<Product[]>>(apiUrl('inventory/products'), { headers }));
+    const after = await firstValueFrom(
+      http.get<Envelope<Product[]>>(apiUrl('inventory/products'), { headers }),
+    );
     expect(after.data[0].quantity).toBe(first.quantity + 5);
   });
 

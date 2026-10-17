@@ -67,12 +67,10 @@ export class AuthService {
   }
 
   login(email: string, password: string, rememberMe = false): Observable<LoginResponse> {
-    return this.http
-      .post(apiUrl('auth/login'), { email, password, rememberMe })
-      .pipe(
-        map((raw) => unwrap<LoginResponse>(raw)),
-        tap((data) => this.scheduleRefresh(data.expiresIn)),
-      );
+    return this.http.post(apiUrl('auth/login'), { email, password, rememberMe }).pipe(
+      map((raw) => unwrap<LoginResponse>(raw)),
+      tap((data) => this.scheduleRefresh(data.expiresIn)),
+    );
   }
 
   register(userData: Partial<User>, password: string): Observable<LoginResponse> {
@@ -129,7 +127,9 @@ export class AuthService {
   private scheduleRefresh(expiresIn = environment.security.tokenExpirationTime): void {
     this.clearRefreshTimer();
     const dueIn = Math.max(expiresIn - REFRESH_MARGIN_MS, 30_000);
-    this.refreshTimer = timer(dueIn).subscribe(() => this.store.dispatch(AuthActions.refreshToken()));
+    this.refreshTimer = timer(dueIn).subscribe(() =>
+      this.store.dispatch(AuthActions.refreshToken()),
+    );
   }
 
   private clearRefreshTimer(): void {

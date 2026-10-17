@@ -29,8 +29,12 @@ describe('InventoryComponent', () => {
     const { el } = await setup();
     const lowStock = DEMO_PRODUCTS.filter((p) => p.quantity <= p.reorderPoint).length;
 
-    expect(el.querySelector('[data-testid="kpi-products"]')?.textContent?.trim()).toBe(String(DEMO_PRODUCTS.length));
-    expect(el.querySelector('[data-testid="kpi-low-stock"]')?.textContent?.trim()).toBe(String(lowStock));
+    expect(el.querySelector('[data-testid="kpi-products"]')?.textContent?.trim()).toBe(
+      String(DEMO_PRODUCTS.length),
+    );
+    expect(el.querySelector('[data-testid="kpi-low-stock"]')?.textContent?.trim()).toBe(
+      String(lowStock),
+    );
   });
 
   it('filters rows by the search query', async () => {
@@ -59,6 +63,11 @@ describe('InventoryComponent', () => {
     const req = http.expectOne(apiUrl(`inventory/products/${product.id}`));
     expect(req.request.method).toBe('PATCH');
     expect(req.request.body).toEqual({ quantity: product.quantity + 10 });
-    req.flush({ success: true, data: { ...product, quantity: product.quantity + 10 }, timestamp: new Date(), requestId: 't' });
+    req.flush({
+      success: true,
+      data: { ...product, quantity: product.quantity + 10 },
+      timestamp: new Date(),
+      requestId: 't',
+    });
   });
 });

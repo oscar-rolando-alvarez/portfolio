@@ -75,7 +75,8 @@ import { environment } from '@environments/environment';
 
       @if (demoMode) {
         <p class="hint">
-          Demo mode: sign in as <code>admin&#64;erp.local</code> or <code>warehouse&#64;erp.local</code>
+          Demo mode: sign in as <code>admin&#64;erp.local</code> or
+          <code>warehouse&#64;erp.local</code>
           (see README for the demo password).
         </p>
       }
