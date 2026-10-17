@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "llm-gateway.fullname" . }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "llm-gateway.selectorLabels" . | nindent 4 }}
+{{- if .Values.serviceAccount.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "llm-gateway.serviceAccountName" . }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "llm-gateway.fullname" . }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "llm-gateway.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "llm-gateway.fullname" . }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "llm-gateway.selectorLabels" . | nindent 6 }}
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "llm-gateway.fullname" . }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "llm-gateway.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - port: http
+          protocol: TCP
+      from:
+        {{- if .Values.networkPolicy.ingressNamespaceSelector }}
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.ingressNamespaceSelector | nindent 12 }}
+        {{- else }}
+        - podSelector: {}
+        {{- end }}
+  egress:
+    - ports: # DNS
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - ports: # Redis
+        - { port: {{ .Values.networkPolicy.redisPort }}, protocol: TCP }
+    - ports: # HTTPS / OTLP upstreams
+        - { port: 443, protocol: TCP }
+        - { port: 4318, protocol: TCP }
+      to:
+        {{- range .Values.networkPolicy.extraEgressCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+{{- end }}
+{{- if .Values.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "llm-gateway.fullname" . }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "llm-gateway.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

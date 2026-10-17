@@ -1,0 +1,9 @@
+.git
+bin/
+dist/
+deploy/
+loadtest/
+docs/
+*.md
+.env
+coverage.*

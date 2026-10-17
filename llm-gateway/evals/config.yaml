@@ -1,0 +1,73 @@
+# Gateway configuration used by the offline eval harness (deterministic mocks).
+# Tenant API keys are injected by the harness (key = "eval-<tenant id>").
+
+embeddings:
+  alias: embed
+
+providers:
+  - { name: primary, type: mock }
+  - { name: secondary, type: mock }
+  - { name: down, type: mock, mock: { fail_status: 503 } }
+  - { name: also-down, type: mock, mock: { fail_status: 502 } }
+  - { name: slow, type: mock, mock: { latency: 500ms } }
+  - { name: embedder, type: mock }
+
+models:
+  - alias: chat-priority
+    policy: priority
+    targets:
+      - { provider: primary, model: small, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+      - { provider: secondary, model: large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+  - alias: chat-cost
+    policy: cost
+    targets:
+      - { provider: secondary, model: large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+      - { provider: primary, model: small, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+  - alias: chat-weighted
+    policy: weighted
+    targets:
+      - { provider: primary, model: small, weight: 80 }
+      - { provider: secondary, model: small-v2, weight: 20 }
+  - alias: chat-fallback
+    timeout: 300ms
+    retry: { max_attempts: 2, base_backoff: 1ms, max_backoff: 5ms }
+    circuit_breaker: { failure_threshold: 1000, open_for: 1s }
+    targets:
+      - { provider: down, model: broken }
+      - { provider: secondary, model: large }
+  - alias: chat-timeout
+    timeout: 100ms
+    retry: { max_attempts: 1 }
+    targets:
+      - { provider: slow, model: large }
+      - { provider: secondary, model: large }
+  - alias: chat-all-down
+    retry: { max_attempts: 2, base_backoff: 1ms, max_backoff: 5ms }
+    circuit_breaker: { failure_threshold: 1000, open_for: 1s }
+    targets:
+      - { provider: down, model: a }
+      - { provider: also-down, model: b }
+  - alias: embed
+    kind: embedding
+    targets: [{ provider: embedder, model: e256 }]
+
+tenant_defaults:
+  rate_limit: { requests_per_minute: 100000, tokens_per_minute: 100000000 }
+  budget: { monthly_usd: 100000, mode: soft }
+  cache: { enabled: false }
+
+tenants:
+  # PII redaction + injection blocking, no cache (each case reaches the mock).
+  - id: guarded
+    guardrails: { pii: redact, injection: block, injection_threshold: 0.7 }
+  # Semantic cache evaluation.
+  - id: cached
+    guardrails: { pii: redact, injection: off }
+    cache: { enabled: true, semantic: true, semantic_threshold: 0.92, ttl: 10m }
+  # Governance scenarios.
+  - id: limited
+    rate_limit: { requests_per_minute: 3 }
+    guardrails: { injection: off }
+  - id: budgeted
+    budget: { monthly_tokens: 60, mode: hard }
+    guardrails: { injection: off }

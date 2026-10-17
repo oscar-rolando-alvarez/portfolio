@@ -1,0 +1,13 @@
+llm-gateway {{ .Chart.AppVersion }} deployed as {{ include "llm-gateway.fullname" . }}.
+
+OpenAI-compatible endpoint (in-cluster):
+  http://{{ include "llm-gateway.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/v1
+
+Point existing SDKs at it by setting base_url and using a tenant virtual key:
+  OPENAI_BASE_URL=http://{{ include "llm-gateway.fullname" . }}.{{ .Release.Namespace }}.svc/v1
+
+{{- if and (gt (int .Values.replicaCount) 1) (not (or .Values.redis.existingSecret .Values.redis.url)) }}
+
+WARNING: more than one replica without Redis. Rate limits, budgets and the
+exact cache are per-pod. Set redis.existingSecret for consistent governance.
+{{- end }}

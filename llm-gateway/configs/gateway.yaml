@@ -1,0 +1,149 @@
+# LLM Gateway - demo configuration (fully offline: built-in mock providers).
+#
+# ${VAR} and ${VAR:-default} are expanded from the environment.
+# Virtual API keys are stored as SHA-256 hashes only. Demo keys (DO NOT use in
+# production; generate your own with `gateway -hash-key <key>`):
+#   acme   -> sk-gw-demo-acme-7Qp2
+#   globex -> sk-gw-demo-globex-4Lm9
+#   perf   -> sk-gw-demo-perf-9Zx1
+#   admin  -> sk-gw-demo-admin-3Kd8
+
+server:
+  listen_addr: ${GATEWAY_LISTEN_ADDR:-:8080}
+  request_timeout: 120s
+  max_body_bytes: 4194304
+
+admin:
+  api_key_sha256: ${GATEWAY_ADMIN_KEY_SHA256:-81765cbcb2f2efbbebc7dbd0b7f15fffb0158db14b5047de0bf7e4c239eab299}
+
+redis:
+  url: ${GATEWAY_REDIS_URL:-}
+
+telemetry:
+  service_name: llm-gateway
+  log_level: ${GATEWAY_LOG_LEVEL:-info}
+  log_format: json
+  otlp_endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  sample_ratio: 1.0
+
+audit:
+  enabled: ${GATEWAY_AUDIT_ENABLED:-true}
+  path: ${GATEWAY_AUDIT_PATH:-stdout}
+
+hot_reload:
+  enabled: true
+  interval: 5s
+
+embeddings:
+  alias: embed-default # used by the semantic cache
+
+providers:
+  - name: mock-primary
+    type: mock
+    mock: { latency: 25ms, chunk_delay: 5ms }
+  - name: mock-secondary
+    type: mock
+    mock: { latency: 60ms, chunk_delay: 5ms }
+  - name: mock-slow
+    type: mock
+    mock: { latency: 400ms }
+  - name: mock-down
+    type: mock
+    mock: { fail_status: 503 }
+  - name: mock-embed
+    type: mock
+    mock: { embedding_dims: 256 }
+
+models:
+  - alias: chat-default
+    policy: priority
+    timeout: 30s
+    retry: { max_attempts: 2, base_backoff: 50ms, max_backoff: 500ms }
+    circuit_breaker: { failure_threshold: 5, open_for: 30s }
+    targets:
+      - { provider: mock-primary, model: mock-small, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+      - { provider: mock-secondary, model: mock-large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+
+  # Primary is down: demonstrates retries, circuit breaker and fallback.
+  - alias: chat-resilient
+    policy: priority
+    timeout: 10s
+    retry: { max_attempts: 2, base_backoff: 20ms, max_backoff: 200ms }
+    circuit_breaker: { failure_threshold: 3, open_for: 15s }
+    targets:
+      - { provider: mock-down, model: flaky-model, input_cost_per_mtok: 0.10, output_cost_per_mtok: 0.40 }
+      - { provider: mock-secondary, model: mock-large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+
+  # Cost-aware: the cheapest healthy target wins regardless of list order.
+  - alias: chat-economy
+    policy: cost
+    targets:
+      - { provider: mock-secondary, model: mock-large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+      - { provider: mock-primary, model: mock-small, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+
+  # Latency-aware: the target with the lowest EWMA latency wins.
+  - alias: chat-fast
+    policy: latency
+    targets:
+      - { provider: mock-secondary, model: mock-large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+      - { provider: mock-primary, model: mock-small, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+
+  # Weighted canary: 90/10 traffic split between two models.
+  - alias: chat-canary
+    policy: weighted
+    targets:
+      - { provider: mock-primary, model: mock-small, weight: 90, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+      - { provider: mock-secondary, model: mock-small-v2, weight: 10, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+
+  # Hedged: if the slow primary has not answered after 50ms, race a second target.
+  - alias: chat-hedged
+    policy: priority
+    hedge: { enabled: true, delay: 50ms }
+    targets:
+      - { provider: mock-slow, model: mock-large, input_cost_per_mtok: 2.50, output_cost_per_mtok: 10.00 }
+      - { provider: mock-primary, model: mock-small, input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+
+  - alias: embed-default
+    kind: embedding
+    targets:
+      - { provider: mock-embed, model: mock-embed-256, input_cost_per_mtok: 0.02 }
+
+tenant_defaults:
+  rate_limit: { requests_per_minute: 600, tokens_per_minute: 300000 }
+  budget: { monthly_usd: 100, mode: hard, warn_ratio: 0.8 }
+  guardrails:
+    pii: redact
+    injection: block
+    injection_threshold: 0.7
+  cache: { enabled: true, semantic: true, ttl: 1h, semantic_threshold: 0.92 }
+
+tenants:
+  - id: acme
+    name: Acme Bank (regulated, strict data protection)
+    keys:
+      - { id: acme-prod, sha256: 88cbad70557f9cb1ef1c02f93681da2aa2fd08f4cd4fb3f5be2eca7ac3c9af68 }
+    allowed_models: ["*"]
+    budget: { monthly_usd: 500, mode: hard }
+    guardrails:
+      pii: redact
+      response_redaction: true
+      injection: block
+
+  - id: globex
+    name: Globex Labs (R&D, soft budget)
+    keys:
+      - { id: globex-dev, sha256: e42d0c63f8e2b57efbf676f88bf46d82f2dc37c8018062fd3b2954b35db6c5ae }
+    allowed_models: ["chat-*", "embed-default"]
+    rate_limit: { requests_per_minute: 120, tokens_per_minute: 60000 }
+    budget: { monthly_tokens: 2000000, monthly_usd: 50, mode: soft, warn_ratio: 0.8 }
+    guardrails:
+      pii: block
+      injection: flag
+    cache: { enabled: false }
+
+  - id: perf
+    name: Load testing tenant
+    keys:
+      - { id: perf-k6, sha256: 3b5c0b3dafcbc0d6c1743a3b2284ea287eaf0ea60582420e63c16062230e5cfb }
+    rate_limit: { requests_per_minute: 10000000, tokens_per_minute: 2000000000 }
+    budget: { monthly_usd: 1000000, mode: soft }

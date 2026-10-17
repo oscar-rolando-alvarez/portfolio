@@ -1,0 +1,11 @@
+apiVersion: v2
+name: llm-gateway
+description: Governed, OpenAI-compatible LLM gateway (routing, budgets, guardrails, semantic cache, observability)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"
+keywords: [llm, genai, gateway, finops, guardrails]
+home: https://github.com/oscar-rolando-alvarez/portfolio/tree/master/llm-gateway
+maintainers:
+  - name: Oscar Alvarez

@@ -1,0 +1,86 @@
+# LLM Gateway - reference configuration for real OpenAI-compatible upstreams.
+#
+# Any endpoint that speaks the OpenAI Chat Completions / Embeddings API works:
+# OpenAI, Azure OpenAI (v1 endpoint, api-key header), vLLM, Ollama, LiteLLM, TGI.
+# Everything sensitive comes from the environment (see .env.example).
+
+server:
+  listen_addr: ${GATEWAY_LISTEN_ADDR:-:8080}
+  request_timeout: 180s
+
+admin:
+  api_key_sha256: ${GATEWAY_ADMIN_KEY_SHA256:-}
+
+redis:
+  url: ${GATEWAY_REDIS_URL:-redis://localhost:6379/0}
+
+telemetry:
+  log_level: ${GATEWAY_LOG_LEVEL:-info}
+  otlp_endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  sample_ratio: 0.2
+
+audit:
+  enabled: true
+
+hot_reload:
+  enabled: true
+  interval: 10s
+
+embeddings:
+  alias: embed-default
+
+providers:
+  - name: primary
+    type: openai
+    base_url: ${LLM_BASE_URL:-https://api.openai.com/v1}
+    api_key: ${LLM_API_KEY:-}
+    api_key_header: ${LLM_API_KEY_HEADER:-Authorization}  # "api-key" for Azure OpenAI
+    timeout: 60s
+  - name: secondary
+    type: openai
+    base_url: ${LLM_FALLBACK_BASE_URL:-http://localhost:11434/v1} # e.g. a self-hosted Ollama / vLLM
+    api_key: ${LLM_FALLBACK_API_KEY:-}
+    timeout: 120s
+
+models:
+  - alias: chat-default
+    policy: priority
+    timeout: 60s
+    retry: { max_attempts: 2, base_backoff: 200ms, max_backoff: 2s }
+    circuit_breaker: { failure_threshold: 5, open_for: 30s }
+    targets:
+      - provider: primary
+        model: ${LLM_CHAT_MODEL:-gpt-4o-mini}
+        input_cost_per_mtok: ${LLM_CHAT_INPUT_COST:-0.15}
+        output_cost_per_mtok: ${LLM_CHAT_OUTPUT_COST:-0.60}
+      - provider: secondary
+        model: ${LLM_FALLBACK_CHAT_MODEL:-llama3.1:8b}
+        input_cost_per_mtok: 0
+        output_cost_per_mtok: 0
+
+  - alias: chat-economy
+    policy: cost
+    targets:
+      - { provider: primary, model: "${LLM_CHAT_MODEL:-gpt-4o-mini}", input_cost_per_mtok: 0.15, output_cost_per_mtok: 0.60 }
+      - { provider: secondary, model: "${LLM_FALLBACK_CHAT_MODEL:-llama3.1:8b}", input_cost_per_mtok: 0, output_cost_per_mtok: 0 }
+
+  - alias: embed-default
+    kind: embedding
+    targets:
+      - provider: primary
+        model: ${LLM_EMBED_MODEL:-text-embedding-3-small}
+        input_cost_per_mtok: 0.02
+
+tenant_defaults:
+  rate_limit: { requests_per_minute: 300, tokens_per_minute: 200000 }
+  budget: { monthly_usd: 200, mode: hard, warn_ratio: 0.8 }
+  guardrails: { pii: redact, injection: block, injection_threshold: 0.7 }
+  # Real embedding models score paraphrases lower than the lexical mock;
+  # calibrate with `go run ./cmd/evals -config evals/config.real.yaml -suites cache`.
+  cache: { enabled: true, semantic: true, ttl: 1h, semantic_threshold: 0.95 }
+
+tenants:
+  - id: default
+    name: Default tenant
+    keys:
+      - { id: default, sha256: "${GATEWAY_DEFAULT_KEY_SHA256:-0000000000000000000000000000000000000000000000000000000000000000}" }
