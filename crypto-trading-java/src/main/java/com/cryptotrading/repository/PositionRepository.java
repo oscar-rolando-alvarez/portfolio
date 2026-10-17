@@ -227,6 +227,6 @@ public interface PositionRepository extends JpaRepository<Position, Long> {
      * Find correlated positions (same base asset)
      */
     @Query("SELECT p FROM Position p WHERE p.baseAsset = :baseAsset AND p.isOpen = true AND p.id != :excludePositionId")
-    List<Position> findCorrelatedPositions(@Param("baseAsset") String baseAsset, 
+    List<Position> findCorrelatedPositions(@Param("baseAsset") String baseAsset,
                                          @Param("excludePositionId") Long excludePositionId);
 }

@@ -130,16 +130,12 @@ public interface MarketDataRepository extends JpaRepository<MarketData, Long> {
     List<Object[]> findArbitrageOpportunities(@Param("minPriceDiff") BigDecimal minPriceDiff);
 
     /**
-     * Get OHLCV data for symbol in time range
+     * Get hourly high/low/volume buckets for symbol in time range
      */
-    @Query("SELECT DATE_TRUNC('hour', md.timestamp) as hour, " +
-           "FIRST_VALUE(md.price) OVER (PARTITION BY DATE_TRUNC('hour', md.timestamp) ORDER BY md.timestamp) as open, " +
-           "MAX(md.highPrice) as high, MIN(md.lowPrice) as low, " +
-           "LAST_VALUE(md.price) OVER (PARTITION BY DATE_TRUNC('hour', md.timestamp) ORDER BY md.timestamp " +
-           "RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as close, " +
-           "SUM(md.volume) as volume " +
+    @Query("SELECT TRUNC(md.timestamp, HOUR) as hour, " +
+           "MAX(md.highPrice) as high, MIN(md.lowPrice) as low, SUM(md.volume) as volume " +
            "FROM MarketData md WHERE md.symbol = :symbol AND md.timestamp BETWEEN :startTime AND :endTime " +
-           "GROUP BY DATE_TRUNC('hour', md.timestamp) ORDER BY hour")
+           "GROUP BY TRUNC(md.timestamp, HOUR) ORDER BY hour")
     List<Object[]> getOHLCVData(@Param("symbol") String symbol,
                                @Param("startTime") LocalDateTime startTime,
                                @Param("endTime") LocalDateTime endTime);

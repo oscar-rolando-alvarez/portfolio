@@ -88,7 +88,7 @@ public class PortfolioSnapshot extends BaseEntity {
     }
 
     public boolean isOutperformingBenchmark() {
-        return benchmarkReturn != null && 
+        return benchmarkReturn != null &&
                cumulativeReturn.compareTo(benchmarkReturn) > 0;
     }
 

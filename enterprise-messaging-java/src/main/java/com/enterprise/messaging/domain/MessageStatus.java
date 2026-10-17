@@ -6,7 +6,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "message_statuses", 
+@Table(name = "message_statuses",
        uniqueConstraints = @UniqueConstraint(columnNames = {"message_id", "user_id"}),
        indexes = {
     @Index(name = "idx_message_status_message", columnList = "message_id"),

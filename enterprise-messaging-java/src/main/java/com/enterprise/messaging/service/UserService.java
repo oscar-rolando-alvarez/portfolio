@@ -63,26 +63,26 @@ public class UserService {
 
     public User createUser(User user) {
         validateNewUser(user);
-        
+
         // Hash password
         user.setPasswordHash(passwordEncoder.encode(user.getPasswordHash()));
-        
+
         // Save user
         User savedUser = userRepository.save(user);
-        
+
         // Create initial presence
         UserPresence presence = new UserPresence(savedUser);
         userPresenceRepository.save(presence);
-        
+
         // Send welcome notification
         notificationService.sendWelcomeNotification(savedUser);
-        
+
         return savedUser;
     }
 
     public User updateUser(UUID userId, User userUpdates) {
         User existingUser = findById(userId);
-        
+
         // Update allowed fields
         if (userUpdates.getDisplayName() != null) {
             existingUser.setDisplayName(userUpdates.getDisplayName());
@@ -99,7 +99,7 @@ public class UserService {
         if (userUpdates.getLanguage() != null) {
             existingUser.setLanguage(userUpdates.getLanguage());
         }
-        
+
         return userRepository.save(existingUser);
     }
 
@@ -107,12 +107,12 @@ public class UserService {
         User user = findById(userId);
         user.setStatus(status);
         user.setLastSeenAt(LocalDateTime.now());
-        
+
         User savedUser = userRepository.save(user);
-        
+
         // Update presence
         updateUserPresence(user, status);
-        
+
         return savedUser;
     }
 
@@ -127,7 +127,7 @@ public class UserService {
         user.setIsActive(false);
         user.setStatus(UserStatus.OFFLINE);
         userRepository.save(user);
-        
+
         // Update presence to offline
         updateUserPresence(user, UserStatus.OFFLINE);
     }
@@ -140,27 +140,27 @@ public class UserService {
 
     public void changePassword(UUID userId, String currentPassword, String newPassword) {
         User user = findById(userId);
-        
+
         if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new IllegalArgumentException("Current password is incorrect");
         }
-        
+
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setFailedLoginAttempts(0);
         user.setAccountLockedUntil(null);
-        
+
         userRepository.save(user);
     }
 
     public void resetPassword(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UserNotFoundException("User not found with email: " + email));
-        
+
         // Generate temporary password and send via email
         String tempPassword = generateTemporaryPassword();
         user.setPasswordHash(passwordEncoder.encode(tempPassword));
         userRepository.save(user);
-        
+
         notificationService.sendPasswordResetNotification(user, tempPassword);
     }
 
@@ -169,12 +169,12 @@ public class UserService {
         if (userOpt.isPresent()) {
             User user = userOpt.get();
             user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
-            
+
             // Lock account after 5 failed attempts
             if (user.getFailedLoginAttempts() >= 5) {
                 user.setAccountLockedUntil(LocalDateTime.now().plusHours(1));
             }
-            
+
             userRepository.save(user);
         }
     }
@@ -241,7 +241,7 @@ public class UserService {
         if (userRepository.existsByUsername(user.getUsername())) {
             throw new UserAlreadyExistsException("Username already exists: " + user.getUsername());
         }
-        
+
         if (userRepository.existsByEmail(user.getEmail())) {
             throw new UserAlreadyExistsException("Email already exists: " + user.getEmail());
         }

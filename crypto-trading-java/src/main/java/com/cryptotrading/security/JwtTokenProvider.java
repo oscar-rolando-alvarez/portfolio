@@ -2,7 +2,6 @@ package com.cryptotrading.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
@@ -10,7 +9,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import java.security.Key;
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,13 +23,13 @@ import java.util.function.Function;
 @Component
 public class JwtTokenProvider {
 
-    @Value("${spring.security.jwt.secret}")
+    @Value("${app.security.jwt.secret}")
     private String jwtSecret;
 
-    @Value("${spring.security.jwt.expiration}")
+    @Value("${app.security.jwt.expiration}")
     private long jwtExpirationInMs;
 
-    @Value("${spring.security.jwt.refresh-expiration}")
+    @Value("${app.security.jwt.refresh-expiration}")
     private long refreshExpirationInMs;
 
     public String extractUsername(String token) {
@@ -59,11 +59,11 @@ public class JwtTokenProvider {
             long expiration) {
         return Jwts
                 .builder()
-                .setClaims(extraClaims)
-                .setSubject(userDetails.getUsername())
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + expiration))
-                .signWith(getSignInKey(), SignatureAlgorithm.HS256)
+                .claims(extraClaims)
+                .subject(userDetails.getUsername())
+                .issuedAt(new Date(System.currentTimeMillis()))
+                .expiration(new Date(System.currentTimeMillis() + expiration))
+                .signWith(getSignInKey(), Jwts.SIG.HS256)
                 .compact();
     }
 
@@ -82,15 +82,23 @@ public class JwtTokenProvider {
 
     private Claims extractAllClaims(String token) {
         return Jwts
-                .parserBuilder()
-                .setSigningKey(getSignInKey())
+                .parser()
+                .verifyWith(getSignInKey())
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
-    private Key getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
+    /**
+     * Accepts either a Base64-encoded key or a raw string; HS256 requires at least 256 bits.
+     */
+    private SecretKey getSignInKey() {
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(jwtSecret);
+        } catch (RuntimeException e) {
+            keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        }
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }

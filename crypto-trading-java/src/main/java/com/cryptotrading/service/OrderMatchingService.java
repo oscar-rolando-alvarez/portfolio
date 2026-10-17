@@ -14,9 +14,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.Comparator;
+import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.PriorityQueue;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Order matching engine service for internal order execution
@@ -42,16 +43,25 @@ public class OrderMatchingService {
         log.debug("Submitting order to matching engine: {}", order.getId());
 
         OrderBook orderBook = getOrCreateOrderBook(order.getSymbol());
-        
-        if (order.getType() == OrderType.MARKET) {
-            processMarketOrder(order, orderBook);
-        } else if (order.getType() == OrderType.LIMIT) {
-            processLimitOrder(order, orderBook);
+        order.setSubmittedAt(LocalDateTime.now());
+
+        // Matching for a single symbol is serialized; different symbols match in parallel.
+        // A ReentrantLock (not synchronized) keeps virtual threads from pinning their carrier on Java 21.
+        orderBook.lock.lock();
+        try {
+            if (order.getType() == OrderType.MARKET) {
+                processMarketOrder(order, orderBook);
+            } else if (order.getType() == OrderType.LIMIT) {
+                processLimitOrder(order, orderBook);
+            }
+        } finally {
+            orderBook.lock.unlock();
         }
 
-        // Update order status
-        order.setStatus(OrderStatus.OPEN);
-        order.setSubmittedAt(LocalDateTime.now());
+        // A resting order with no fills is OPEN; filled/partial/rejected states set by matching are kept.
+        if (order.getStatus() == OrderStatus.PENDING || order.getStatus() == OrderStatus.SUBMITTED) {
+            order.setStatus(OrderStatus.OPEN);
+        }
         orderRepository.save(order);
     }
 
@@ -63,7 +73,12 @@ public class OrderMatchingService {
 
         OrderBook orderBook = orderBooks.get(order.getSymbol());
         if (orderBook != null) {
-            orderBook.removeOrder(order);
+            orderBook.lock.lock();
+            try {
+                orderBook.removeOrder(order);
+            } finally {
+                orderBook.lock.unlock();
+            }
         }
     }
 
@@ -77,12 +92,12 @@ public class OrderMatchingService {
         BigDecimal totalExecuted = BigDecimal.ZERO;
         BigDecimal totalValue = BigDecimal.ZERO;
 
-        PriorityQueue<Order> oppositeOrders = order.getSide() == OrderSide.BUY ? 
+        PriorityQueue<Order> oppositeOrders = order.getSide() == OrderSide.BUY ?
                 orderBook.getSellOrders() : orderBook.getBuyOrders();
 
         while (remainingQuantity.compareTo(BigDecimal.ZERO) > 0 && !oppositeOrders.isEmpty()) {
             Order matchingOrder = oppositeOrders.peek();
-            
+
             if (matchingOrder == null) break;
 
             BigDecimal executeQuantity = remainingQuantity.min(matchingOrder.getRemainingQuantity());
@@ -138,13 +153,13 @@ public class OrderMatchingService {
         BigDecimal totalExecuted = BigDecimal.ZERO;
         BigDecimal totalValue = BigDecimal.ZERO;
 
-        PriorityQueue<Order> oppositeOrders = order.getSide() == OrderSide.BUY ? 
+        PriorityQueue<Order> oppositeOrders = order.getSide() == OrderSide.BUY ?
                 orderBook.getSellOrders() : orderBook.getBuyOrders();
 
         // Try to match against existing orders
         while (remainingQuantity.compareTo(BigDecimal.ZERO) > 0 && !oppositeOrders.isEmpty()) {
             Order matchingOrder = oppositeOrders.peek();
-            
+
             if (matchingOrder == null) break;
 
             // Check if price matches
@@ -206,7 +221,7 @@ public class OrderMatchingService {
      * Execute a trade between two orders
      */
     private void executeTrade(Order takerOrder, Order makerOrder, BigDecimal quantity, BigDecimal price) {
-        log.debug("Executing trade: {} qty at {} between taker {} and maker {}", 
+        log.debug("Executing trade: {} qty at {} between taker {} and maker {}",
                  quantity, price, takerOrder.getId(), makerOrder.getId());
 
         // Create trades for both orders
@@ -246,8 +261,8 @@ public class OrderMatchingService {
                 .baseAsset(order.getTradingPair().getBaseAsset())
                 .quoteAsset(order.getTradingPair().getQuoteAsset())
                 .commission(calculateCommission(order, quantity, price, isMaker))
-                .commissionAsset(order.getSide() == OrderSide.BUY ? 
-                               order.getTradingPair().getBaseAsset() : 
+                .commissionAsset(order.getSide() == OrderSide.BUY ?
+                               order.getTradingPair().getBaseAsset() :
                                order.getTradingPair().getQuoteAsset())
                 .build();
     }
@@ -256,12 +271,13 @@ public class OrderMatchingService {
      * Calculate trading commission
      */
     private BigDecimal calculateCommission(Order order, BigDecimal quantity, BigDecimal price, boolean isMaker) {
-        BigDecimal feeRate = isMaker ? 
-                order.getTradingPair().getMakerFee() : 
+        BigDecimal feeRate = isMaker ?
+                order.getTradingPair().getMakerFee() :
                 order.getTradingPair().getTakerFee();
-        
-        BigDecimal notionalValue = quantity.multiply(price);
-        return notionalValue.multiply(feeRate);
+
+        // Commission is charged in the asset the side receives: base asset for buys, quote asset for sells.
+        BigDecimal base = order.getSide() == OrderSide.BUY ? quantity : quantity.multiply(price);
+        return base.multiply(feeRate);
     }
 
     /**
@@ -270,18 +286,18 @@ public class OrderMatchingService {
     private void updateAccountBalancesForTrade(Trade trade) {
         String baseAsset = trade.getBaseAsset();
         String quoteAsset = trade.getQuoteAsset();
-        
+
         if (trade.getSide() == OrderSide.BUY) {
             // Buyer receives base asset, pays quote asset + commission
-            accountService.addBalance(trade.getAccount().getId(), baseAsset, 
+            accountService.addBalance(trade.getAccount().getId(), baseAsset,
                                     trade.getQuantity().subtract(trade.getCommission()));
-            accountService.subtractBalance(trade.getAccount().getId(), quoteAsset, 
+            accountService.subtractBalance(trade.getAccount().getId(), quoteAsset,
                                          trade.getQuoteQuantity());
         } else {
             // Seller receives quote asset - commission, pays base asset
-            accountService.addBalance(trade.getAccount().getId(), quoteAsset, 
+            accountService.addBalance(trade.getAccount().getId(), quoteAsset,
                                     trade.getQuoteQuantity().subtract(trade.getCommission()));
-            accountService.subtractBalance(trade.getAccount().getId(), baseAsset, 
+            accountService.subtractBalance(trade.getAccount().getId(), baseAsset,
                                          trade.getQuantity());
         }
     }
@@ -301,7 +317,12 @@ public class OrderMatchingService {
         if (orderBook == null) {
             return new OrderBookDepth(symbol);
         }
-        return orderBook.getDepth(depth);
+        orderBook.lock.lock();
+        try {
+            return orderBook.getDepth(depth);
+        } finally {
+            orderBook.lock.unlock();
+        }
     }
 
     /**
@@ -309,21 +330,22 @@ public class OrderMatchingService {
      */
     private static class OrderBook {
         private final String symbol;
+        private final ReentrantLock lock = new ReentrantLock();
         private final PriorityQueue<Order> buyOrders;  // Max heap by price
         private final PriorityQueue<Order> sellOrders; // Min heap by price
 
+        // Price-time priority: best price first, then earliest submission.
+        private static final Comparator<Order> TIME_PRIORITY = Comparator.comparing(
+                Order::getSubmittedAt, Comparator.nullsLast(Comparator.naturalOrder()));
+        static final Comparator<Order> BID_PRIORITY =
+                Comparator.comparing(Order::getPrice, Comparator.reverseOrder()).thenComparing(TIME_PRIORITY);
+        static final Comparator<Order> ASK_PRIORITY =
+                Comparator.comparing(Order::getPrice).thenComparing(TIME_PRIORITY);
+
         public OrderBook(String symbol) {
             this.symbol = symbol;
-            this.buyOrders = new PriorityQueue<>((o1, o2) -> {
-                // Higher price first, then earlier time
-                int priceCompare = o2.getPrice().compareTo(o1.getPrice());
-                return priceCompare != 0 ? priceCompare : o1.getCreatedAt().compareTo(o2.getCreatedAt());
-            });
-            this.sellOrders = new PriorityQueue<>((o1, o2) -> {
-                // Lower price first, then earlier time
-                int priceCompare = o1.getPrice().compareTo(o2.getPrice());
-                return priceCompare != 0 ? priceCompare : o1.getCreatedAt().compareTo(o2.getCreatedAt());
-            });
+            this.buyOrders = new PriorityQueue<>(BID_PRIORITY);
+            this.sellOrders = new PriorityQueue<>(ASK_PRIORITY);
         }
 
         public void addOrder(Order order) {
@@ -352,17 +374,20 @@ public class OrderMatchingService {
 
         public OrderBookDepth getDepth(int levels) {
             OrderBookDepth depth = new OrderBookDepth(symbol);
-            
+
             // Add buy levels
+            // PriorityQueue iteration order is not sorted, so sort explicitly for the snapshot.
             buyOrders.stream()
+                    .sorted(BID_PRIORITY)
                     .limit(levels)
                     .forEach(order -> depth.addBid(order.getPrice(), order.getRemainingQuantity()));
-            
+
             // Add sell levels
             sellOrders.stream()
+                    .sorted(ASK_PRIORITY)
                     .limit(levels)
                     .forEach(order -> depth.addAsk(order.getPrice(), order.getRemainingQuantity()));
-            
+
             return depth;
         }
     }

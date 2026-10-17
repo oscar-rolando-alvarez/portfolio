@@ -25,7 +25,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     @Query("SELECT m FROM Message m WHERE m.channel = :channel AND m.isDeleted = false " +
            "AND m.createdAt > :since ORDER BY m.createdAt DESC")
-    List<Message> findChannelMessagesSince(@Param("channel") Channel channel, 
+    List<Message> findChannelMessagesSince(@Param("channel") Channel channel,
                                          @Param("since") LocalDateTime since);
 
     // Group messages
@@ -33,15 +33,15 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     @Query("SELECT m FROM Message m WHERE m.group = :group AND m.isDeleted = false " +
            "AND m.createdAt > :since ORDER BY m.createdAt DESC")
-    List<Message> findGroupMessagesSince(@Param("group") Group group, 
+    List<Message> findGroupMessagesSince(@Param("group") Group group,
                                        @Param("since") LocalDateTime since);
 
     // User messages
     List<Message> findBySenderOrderByCreatedAtDesc(User sender);
 
     @Query("SELECT m FROM Message m WHERE m.sender = :sender AND m.createdAt BETWEEN :start AND :end")
-    List<Message> findUserMessagesBetween(@Param("sender") User sender, 
-                                        @Param("start") LocalDateTime start, 
+    List<Message> findUserMessagesBetween(@Param("sender") User sender,
+                                        @Param("start") LocalDateTime start,
                                         @Param("end") LocalDateTime end);
 
     // Thread messages
@@ -55,9 +55,9 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
            "(m.channel = :channel OR m.group = :group) AND " +
            "m.isDeleted = false AND " +
            "LOWER(m.content) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
-    Page<Message> searchMessages(@Param("channel") Channel channel, 
+    Page<Message> searchMessages(@Param("channel") Channel channel,
                                 @Param("group") Group group,
-                                @Param("searchTerm") String searchTerm, 
+                                @Param("searchTerm") String searchTerm,
                                 Pageable pageable);
 
     @Query("SELECT m FROM Message m WHERE " +
@@ -88,7 +88,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     @Query("SELECT m FROM Message m JOIN m.mentionedUsers u WHERE u = :user AND " +
            "(m.channel = :channel OR m.group = :group) AND m.isDeleted = false " +
            "ORDER BY m.createdAt DESC")
-    List<Message> findMessagesMentioningUserInChannelOrGroup(@Param("user") User user, 
+    List<Message> findMessagesMentioningUserInChannelOrGroup(@Param("user") User user,
                                                            @Param("channel") Channel channel,
                                                            @Param("group") Group group);
 

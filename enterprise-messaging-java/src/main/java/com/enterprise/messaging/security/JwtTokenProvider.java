@@ -1,74 +1,68 @@
 package com.enterprise.messaging.security;
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-
-import javax.crypto.SecretKey;
-import java.util.Date;
 
 @Component
 public class JwtTokenProvider {
 
-    @Value("${messaging.jwt.secret}")
-    private String jwtSecret;
+    private final SecretKey signingKey;
+    private final long jwtExpiration;
 
-    @Value("${messaging.jwt.expiration:86400000}")
-    private Long jwtExpiration;
+    public JwtTokenProvider(
+            @Value("${messaging.jwt.secret}") String jwtSecret,
+            @Value("${messaging.jwt.expiration:86400000}") long jwtExpiration) {
+        this.signingKey = toKey(jwtSecret);
+        this.jwtExpiration = jwtExpiration;
+    }
 
-    private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(jwtSecret.getBytes());
+    /**
+     * Accepts a Base64-encoded key or a raw string; HS256 requires at least 256 bits.
+     */
+    private static SecretKey toKey(String secret) {
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(secret);
+        } catch (RuntimeException e) {
+            keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 
     public String generateToken(String username, String userId) {
-        Date expiryDate = new Date(System.currentTimeMillis() + jwtExpiration);
-
+        Date now = new Date();
         return Jwts.builder()
-                .setSubject(username)
+                .subject(username)
                 .claim("userId", userId)
-                .setIssuedAt(new Date())
-                .setExpiration(expiryDate)
-                .signWith(getSigningKey())
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + jwtExpiration))
+                .signWith(signingKey, Jwts.SIG.HS256)
                 .compact();
     }
 
     public String getUsernameFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        return claims.getSubject();
+        return parse(token).getSubject();
     }
 
     public String getUserIdFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        return claims.get("userId", String.class);
+        return parse(token).get("userId", String.class);
     }
 
     public Date getExpirationDateFromToken(String token) {
-        Claims claims = Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
-
-        return claims.getExpiration();
+        return parse(token).getExpiration();
     }
 
     public boolean validateToken(String token) {
         try {
-            Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token);
+            parse(token);
             return true;
         } catch (JwtException | IllegalArgumentException e) {
             return false;
@@ -76,7 +70,10 @@ public class JwtTokenProvider {
     }
 
     public boolean isTokenExpired(String token) {
-        Date expiration = getExpirationDateFromToken(token);
-        return expiration.before(new Date());
+        return getExpirationDateFromToken(token).before(new Date());
+    }
+
+    private Claims parse(String token) {
+        return Jwts.parser().verifyWith(signingKey).build().parseSignedClaims(token).getPayload();
     }
 }

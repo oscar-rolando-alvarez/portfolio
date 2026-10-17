@@ -8,7 +8,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 @Entity
@@ -81,11 +83,11 @@ public class User extends BaseEntity {
     private String twoFactorSecret;
 
     @ElementCollection
-    @CollectionTable(name = "user_notification_settings", 
+    @CollectionTable(name = "user_notification_settings",
                      joinColumns = @JoinColumn(name = "user_id"))
     @MapKeyColumn(name = "setting_key")
     @Column(name = "setting_value")
-    private Set<String> notificationSettings = new HashSet<>();
+    private Map<String, String> notificationSettings = new HashMap<>();
 
     @ManyToMany(mappedBy = "members", cascade = CascadeType.PERSIST)
     private Set<Channel> channels = new HashSet<>();
@@ -245,11 +247,11 @@ public class User extends BaseEntity {
         this.twoFactorSecret = twoFactorSecret;
     }
 
-    public Set<String> getNotificationSettings() {
+    public Map<String, String> getNotificationSettings() {
         return notificationSettings;
     }
 
-    public void setNotificationSettings(Set<String> notificationSettings) {
+    public void setNotificationSettings(Map<String, String> notificationSettings) {
         this.notificationSettings = notificationSettings;
     }
 

@@ -184,8 +184,8 @@ public class Portfolio extends BaseEntity {
         if (winningTrades == 0) {
             return BigDecimal.ZERO;
         }
-        return realizedPnl.compareTo(BigDecimal.ZERO) > 0 ? 
-                realizedPnl.divide(new BigDecimal(winningTrades), 18, java.math.RoundingMode.HALF_UP) : 
+        return realizedPnl.compareTo(BigDecimal.ZERO) > 0 ?
+                realizedPnl.divide(new BigDecimal(winningTrades), 18, java.math.RoundingMode.HALF_UP) :
                 BigDecimal.ZERO;
     }
 
@@ -193,19 +193,19 @@ public class Portfolio extends BaseEntity {
         if (losingTrades == 0) {
             return BigDecimal.ZERO;
         }
-        return realizedPnl.compareTo(BigDecimal.ZERO) < 0 ? 
-                realizedPnl.abs().divide(new BigDecimal(losingTrades), 18, java.math.RoundingMode.HALF_UP) : 
+        return realizedPnl.compareTo(BigDecimal.ZERO) < 0 ?
+                realizedPnl.abs().divide(new BigDecimal(losingTrades), 18, java.math.RoundingMode.HALF_UP) :
                 BigDecimal.ZERO;
     }
 
     public void updateFromTrade(Trade trade) {
         totalTrades++;
         totalFees = totalFees.add(trade.getCommission());
-        
+
         BigDecimal tradePnl = trade.getRealizedPnl();
         if (tradePnl != null) {
             realizedPnl = realizedPnl.add(tradePnl);
-            
+
             if (tradePnl.compareTo(BigDecimal.ZERO) > 0) {
                 winningTrades++;
                 if (tradePnl.compareTo(largestWin) > 0) {
@@ -218,7 +218,7 @@ public class Portfolio extends BaseEntity {
                 }
             }
         }
-        
+
         lastUpdated = LocalDateTime.now();
     }
 
@@ -227,10 +227,10 @@ public class Portfolio extends BaseEntity {
             initialValue = newValue;
         }
         currentValue = newValue;
-        
+
         // Calculate unrealized PnL
         unrealizedPnl = currentValue.subtract(initialValue).subtract(realizedPnl);
-        
+
         lastUpdated = LocalDateTime.now();
     }
 
@@ -255,7 +255,7 @@ public class Portfolio extends BaseEntity {
         if (currentReturn.compareTo(maxRunup) > 0) {
             maxRunup = currentReturn;
         }
-        
+
         BigDecimal currentDrawdown = getDrawdown();
         if (currentDrawdown.compareTo(maxDrawdown) > 0) {
             maxDrawdown = currentDrawdown;

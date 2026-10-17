@@ -15,7 +15,7 @@ public class LoginResponse {
 
     public LoginResponse() {}
 
-    public LoginResponse(UUID userId, String username, String email, String displayName, 
+    public LoginResponse(UUID userId, String username, String email, String displayName,
                         UserRole role, String token) {
         this.userId = userId;
         this.username = username;

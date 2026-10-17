@@ -37,11 +37,11 @@ public interface MessageAttachmentRepository extends JpaRepository<MessageAttach
     List<MessageAttachment> findByUserId(@Param("userId") UUID userId);
 
     @Query("SELECT ma FROM MessageAttachment ma WHERE ma.type = :type AND ma.message.channel.id = :channelId")
-    List<MessageAttachment> findByTypeAndChannelId(@Param("type") AttachmentType type, 
+    List<MessageAttachment> findByTypeAndChannelId(@Param("type") AttachmentType type,
                                                   @Param("channelId") UUID channelId);
 
     @Query("SELECT ma FROM MessageAttachment ma WHERE ma.type = :type AND ma.message.group.id = :groupId")
-    List<MessageAttachment> findByTypeAndGroupId(@Param("type") AttachmentType type, 
+    List<MessageAttachment> findByTypeAndGroupId(@Param("type") AttachmentType type,
                                                 @Param("groupId") UUID groupId);
 
     @Query("SELECT ma FROM MessageAttachment ma WHERE ma.isVirusScanned = false")

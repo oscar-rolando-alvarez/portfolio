@@ -19,8 +19,8 @@ public class MessageEvent {
 
     public MessageEvent() {}
 
-    public MessageEvent(UUID messageId, UUID senderId, String senderUsername, 
-                       UUID channelId, UUID groupId, String content, 
+    public MessageEvent(UUID messageId, UUID senderId, String senderUsername,
+                       UUID channelId, UUID groupId, String content,
                        MessageType messageType, EventType eventType) {
         this.messageId = messageId;
         this.senderId = senderId;

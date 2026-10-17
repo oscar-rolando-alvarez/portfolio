@@ -1,180 +1,95 @@
+# Reference manifests. The matching engine keeps order books in memory, so the Deployment runs a
+# single replica with a Recreate strategy; scaling out requires partitioning symbols across instances.
+#
+# Create the secret out of band (never commit real values), e.g.:
+#   kubectl create secret generic crypto-trading-secrets \
+#     --from-literal=DB_USERNAME=... --from-literal=DB_PASSWORD=... --from-literal=JWT_SECRET=...
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: crypto-trading-app
   labels:
-    app: crypto-trading-app
-    version: v1
+    app.kubernetes.io/name: crypto-trading-app
 spec:
-  replicas: 3
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: crypto-trading-app
+      app.kubernetes.io/name: crypto-trading-app
   template:
     metadata:
       labels:
-        app: crypto-trading-app
-        version: v1
+        app.kubernetes.io/name: crypto-trading-app
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: crypto-trading-app
-        image: crypto-trading-platform:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: SPRING_PROFILES_ACTIVE
-          value: "prod"
-        - name: DB_URL
-          valueFrom:
-            configMapKeyRef:
-              name: crypto-trading-config
-              key: db.url
-        - name: DB_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: crypto-trading-secrets
-              key: db.username
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: crypto-trading-secrets
-              key: db.password
-        - name: REDIS_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: crypto-trading-config
-              key: redis.host
-        - name: KAFKA_BOOTSTRAP_SERVERS
-          valueFrom:
-            configMapKeyRef:
-              name: crypto-trading-config
-              key: kafka.bootstrap.servers
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: crypto-trading-secrets
-              key: jwt.secret
-        resources:
-          requests:
-            memory: "1Gi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "1000m"
-        livenessProbe:
-          httpGet:
-            path: /api/actuator/health/liveness
-            port: 8080
-          initialDelaySeconds: 60
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /api/actuator/health/readiness
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        volumeMounts:
-        - name: app-logs
-          mountPath: /app/logs
+        - name: app
+          image: ghcr.io/oscar-rolando-alvarez/crypto-trading-platform:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: crypto-trading-config
+            - secretRef:
+                name: crypto-trading-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
       volumes:
-      - name: app-logs
-        emptyDir: {}
-      imagePullSecrets:
-      - name: registry-secret
-
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: crypto-trading-service
-  labels:
-    app: crypto-trading-app
 spec:
   type: ClusterIP
-  ports:
-  - port: 80
-    targetPort: 8080
-    protocol: TCP
   selector:
-    app: crypto-trading-app
-
+    app.kubernetes.io/name: crypto-trading-app
+  ports:
+    - port: 80
+      targetPort: http
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: crypto-trading-config
 data:
-  db.url: "jdbc:postgresql://postgres-service:5432/crypto_trading"
-  redis.host: "redis-service"
-  redis.port: "6379"
-  kafka.bootstrap.servers: "kafka-service:9092"
-  log.level: "INFO"
-
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: crypto-trading-secrets
-type: Opaque
-data:
-  db.username: Y3J5cHRvX3VzZXI= # crypto_user
-  db.password: Y3J5cHRvX3Bhc3N3b3Jk # crypto_password
-  jwt.secret: bXlTZWNyZXRLZXkxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTA= # base64 encoded JWT secret
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: crypto-trading-ingress
-  annotations:
-    kubernetes.io/ingress.class: "nginx"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/rate-limit: "100"
-    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
-spec:
-  tls:
-  - hosts:
-    - api.cryptotrading.com
-    secretName: crypto-trading-tls
-  rules:
-  - host: api.cryptotrading.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: crypto-trading-service
-            port:
-              number: 80
-
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: crypto-trading-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: crypto-trading-app
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
+  DB_URL: "jdbc:postgresql://postgres:5432/crypto_trading"
+  LOG_LEVEL: "INFO"
+  TRACING_SAMPLING_PROBABILITY: "0.1"
+  # MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://otel-collector:4318/v1/traces"

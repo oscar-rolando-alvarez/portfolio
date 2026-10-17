@@ -1,51 +1,37 @@
-# Multi-stage build for crypto trading platform
-FROM openjdk:17-jdk-slim as builder
+# syntax=docker/dockerfile:1
 
-WORKDIR /app
+# ---- Build stage ----
+FROM eclipse-temurin:21.0.12.1_1-jdk-noble AS build
+WORKDIR /workspace
 
-# Copy Maven wrapper and pom.xml
+# Resolve dependencies first so they are cached independently of source changes
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q dependency:go-offline
 
-# Download dependencies
-RUN ./mvnw dependency:go-offline
-
-# Copy source code
 COPY src/ src/
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q package -DskipTests \
+    && java -Djarmode=tools -jar target/crypto-trading-platform-*.jar extract --layers --launcher --destination target/extracted
 
-# Build the application
-RUN ./mvnw clean package -DskipTests
-
-# Runtime stage
-FROM openjdk:17-jre-slim
-
+# ---- Runtime stage ----
+FROM eclipse-temurin:21.0.12.1_1-jre-alpine-3.24
 WORKDIR /app
 
-# Install curl for health checks
-RUN apt-get update && \
-    apt-get install -y curl && \
-    rm -rf /var/lib/apt/lists/*
+RUN addgroup -S app && adduser -S -G app -u 10001 app
 
-# Create application user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Copy Spring Boot layers from least to most frequently changing
+COPY --from=build --chown=app:app /workspace/target/extracted/dependencies/ ./
+COPY --from=build --chown=app:app /workspace/target/extracted/spring-boot-loader/ ./
+COPY --from=build --chown=app:app /workspace/target/extracted/snapshot-dependencies/ ./
+COPY --from=build --chown=app:app /workspace/target/extracted/application/ ./
 
-# Copy the built JAR from builder stage
-COPY --from=builder /app/target/crypto-trading-platform-*.jar app.jar
-
-# Create logs directory
-RUN mkdir logs && chown -R appuser:appuser /app
-
-USER appuser
-
-# Expose port
+USER 10001
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/api/actuator/health || exit 1
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError" \
+    LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs
 
-# JVM optimization flags
-ENV JAVA_OPTS="-Xms512m -Xmx2g -XX:+UseG1GC -XX:+UseStringDeduplication -XX:+OptimizeStringConcat"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD wget -qO- http://localhost:8080/actuator/health/liveness || exit 1
 
-# Run the application
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

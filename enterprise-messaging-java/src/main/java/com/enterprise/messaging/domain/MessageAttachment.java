@@ -219,16 +219,16 @@ public class MessageAttachment extends BaseEntity {
 
     public String getFormattedFileSize() {
         if (fileSize == null) return "Unknown";
-        
+
         double size = fileSize.doubleValue();
         String[] units = {"B", "KB", "MB", "GB", "TB"};
         int unitIndex = 0;
-        
+
         while (size >= 1024 && unitIndex < units.length - 1) {
             size /= 1024;
             unitIndex++;
         }
-        
+
         return String.format("%.1f %s", size, units[unitIndex]);
     }
 }

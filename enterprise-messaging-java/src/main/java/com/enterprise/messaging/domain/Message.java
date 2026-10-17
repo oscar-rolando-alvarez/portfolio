@@ -3,11 +3,12 @@ package com.enterprise.messaging.domain;
 import com.enterprise.messaging.domain.enums.MessageType;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 @Entity
@@ -92,11 +93,11 @@ public class Message extends BaseEntity {
     private Set<User> mentionedUsers = new HashSet<>();
 
     @ElementCollection
-    @CollectionTable(name = "message_metadata", 
+    @CollectionTable(name = "message_metadata",
                      joinColumns = @JoinColumn(name = "message_id"))
     @MapKeyColumn(name = "metadata_key")
     @Column(name = "metadata_value")
-    private Set<String> metadata = new HashSet<>();
+    private Map<String, String> metadata = new HashMap<>();
 
     // Constructors
     public Message() {}
@@ -271,11 +272,11 @@ public class Message extends BaseEntity {
         this.mentionedUsers = mentionedUsers;
     }
 
-    public Set<String> getMetadata() {
+    public Map<String, String> getMetadata() {
         return metadata;
     }
 
-    public void setMetadata(Set<String> metadata) {
+    public void setMetadata(Map<String, String> metadata) {
         this.metadata = metadata;
     }
 

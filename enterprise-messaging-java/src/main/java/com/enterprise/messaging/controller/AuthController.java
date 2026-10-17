@@ -7,11 +7,15 @@ import com.enterprise.messaging.dto.auth.LoginResponse;
 import com.enterprise.messaging.dto.auth.RegisterRequest;
 import com.enterprise.messaging.dto.auth.RegisterResponse;
 import com.enterprise.messaging.exception.UserAlreadyExistsException;
+import com.enterprise.messaging.event.UserEvent;
 import com.enterprise.messaging.security.JwtTokenProvider;
+import com.enterprise.messaging.service.EventPublisher;
 import com.enterprise.messaging.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,17 +30,22 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "Authentication", description = "Authentication and registration endpoints")
 public class AuthController {
 
+    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
+
     private final AuthenticationManager authenticationManager;
     private final UserService userService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final EventPublisher eventPublisher;
 
     @Autowired
     public AuthController(AuthenticationManager authenticationManager,
                          UserService userService,
-                         JwtTokenProvider jwtTokenProvider) {
+                         JwtTokenProvider jwtTokenProvider,
+                         EventPublisher eventPublisher) {
         this.authenticationManager = authenticationManager;
         this.userService = userService;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.eventPublisher = eventPublisher;
     }
 
     @PostMapping("/register")
@@ -48,9 +57,11 @@ public class AuthController {
             user.setRole(UserRole.USER);
 
             User createdUser = userService.createUser(user);
+            eventPublisher.publishUserEvent(new UserEvent(createdUser.getId(), createdUser.getUsername(),
+                    createdUser.getEmail(), createdUser.getStatus(), UserEvent.EventType.USER_REGISTERED));
 
             String token = jwtTokenProvider.generateToken(
-                createdUser.getUsername(), 
+                createdUser.getUsername(),
                 createdUser.getId().toString()
             );
 
@@ -67,6 +78,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new RegisterResponse(e.getMessage()));
         } catch (Exception e) {
+            logger.error("Registration failed for user {}", request.getUsername(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new RegisterResponse("Registration failed"));
         }
@@ -93,6 +105,8 @@ public class AuthController {
 
             // Update last seen and reset failed attempts
             userService.handleSuccessfulLogin(user.getId());
+            eventPublisher.publishUserEvent(new UserEvent(user.getId(), user.getUsername(),
+                    user.getEmail(), user.getStatus(), UserEvent.EventType.USER_LOGIN));
 
             LoginResponse response = new LoginResponse(
                 user.getId(),
@@ -107,10 +121,11 @@ public class AuthController {
         } catch (AuthenticationException e) {
             // Handle failed login attempt
             userService.handleFailedLogin(request.getUsernameOrEmail());
-            
+
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new LoginResponse("Invalid credentials"));
         } catch (Exception e) {
+            logger.error("Login failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new LoginResponse("Login failed"));
         }
@@ -129,16 +144,16 @@ public class AuthController {
     public ResponseEntity<LoginResponse> refreshToken(@RequestHeader("Authorization") String token) {
         try {
             String jwtToken = token.replace("Bearer ", "");
-            
+
             if (jwtTokenProvider.validateToken(jwtToken)) {
                 String username = jwtTokenProvider.getUsernameFromToken(jwtToken);
                 String userId = jwtTokenProvider.getUserIdFromToken(jwtToken);
-                
+
                 String newToken = jwtTokenProvider.generateToken(username, userId);
-                
+
                 User user = userService.findByUsername(username)
                     .orElseThrow(() -> new RuntimeException("User not found"));
-                
+
                 LoginResponse response = new LoginResponse(
                     user.getId(),
                     user.getUsername(),
@@ -147,13 +162,14 @@ public class AuthController {
                     user.getRole(),
                     newToken
                 );
-                
+
                 return ResponseEntity.ok(response);
             } else {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new LoginResponse("Invalid token"));
             }
         } catch (Exception e) {
+            logger.error("Token refresh failed", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new LoginResponse("Token refresh failed"));
         }

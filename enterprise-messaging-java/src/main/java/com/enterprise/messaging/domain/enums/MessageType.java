@@ -26,12 +26,12 @@ public enum MessageType {
     }
 
     public boolean requiresAttachment() {
-        return this == IMAGE || this == VIDEO || this == AUDIO || 
+        return this == IMAGE || this == VIDEO || this == AUDIO ||
                this == FILE || this == VOICE_MESSAGE || this == STICKER || this == GIF;
     }
 
     public boolean isMedia() {
-        return this == IMAGE || this == VIDEO || this == AUDIO || 
+        return this == IMAGE || this == VIDEO || this == AUDIO ||
                this == VOICE_MESSAGE || this == GIF;
     }
 

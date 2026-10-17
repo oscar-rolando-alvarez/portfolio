@@ -3,7 +3,6 @@ package com.cryptotrading.service;
 import com.cryptotrading.domain.entity.Order;
 import com.cryptotrading.domain.entity.Account;
 import com.cryptotrading.domain.entity.TradingPair;
-import com.cryptotrading.domain.entity.User;
 import com.cryptotrading.domain.enums.OrderSide;
 import com.cryptotrading.domain.enums.OrderStatus;
 import com.cryptotrading.domain.enums.OrderType;
@@ -39,7 +38,7 @@ public class OrderService {
      * Create a new order
      */
     public Order createOrder(Order order) {
-        log.info("Creating new order: {} {} {} @ {}", 
+        log.info("Creating new order: {} {} {} @ {}",
                 order.getSide(), order.getQuantity(), order.getSymbol(), order.getPrice());
 
         // Validate order
@@ -72,7 +71,7 @@ public class OrderService {
         log.info("Cancelling order: {} for user: {}", orderId, userId);
 
         Order order = getOrderById(orderId);
-        
+
         // Verify ownership
         if (!order.getUser().getId().equals(userId)) {
             throw new IllegalArgumentException("Order does not belong to user");
@@ -139,13 +138,13 @@ public class OrderService {
     /**
      * Update order execution
      */
-    public Order updateOrderExecution(Long orderId, BigDecimal executedQuantity, 
+    public Order updateOrderExecution(Long orderId, BigDecimal executedQuantity,
                                      BigDecimal avgPrice, OrderStatus status) {
-        log.debug("Updating order execution: {} - qty: {}, price: {}, status: {}", 
+        log.debug("Updating order execution: {} - qty: {}, price: {}, status: {}",
                  orderId, executedQuantity, avgPrice, status);
 
         Order order = getOrderById(orderId);
-        
+
         order.setExecutedQuantity(executedQuantity);
         order.setRemainingQuantity(order.getQuantity().subtract(executedQuantity));
         order.setAvgPrice(avgPrice);
@@ -200,11 +199,11 @@ public class OrderService {
                 try {
                     order.setStatus(OrderStatus.TRIGGERED);
                     orderRepository.save(order);
-                    
+
                     // Convert to market order and resubmit
                     Order marketOrder = convertToMarketOrder(order);
                     orderMatchingService.submitOrder(marketOrder);
-                    
+
                     triggeredCount++;
                 } catch (Exception e) {
                     log.error("Error processing triggered stop order {}: {}", order.getId(), e.getMessage());
@@ -288,7 +287,7 @@ public class OrderService {
 
     private void validateOrder(Order order) {
         TradingPair tradingPair = tradingPairService.getTradingPairBySymbol(order.getSymbol());
-        
+
         if (!tradingPair.isActive()) {
             throw new IllegalArgumentException("Trading pair is not active: " + order.getSymbol());
         }

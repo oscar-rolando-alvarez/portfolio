@@ -203,20 +203,20 @@ public class Order extends BaseEntity {
     }
 
     public boolean isCompleted() {
-        return status == OrderStatus.FILLED || 
-               status == OrderStatus.CANCELLED || 
+        return status == OrderStatus.FILLED ||
+               status == OrderStatus.CANCELLED ||
                status == OrderStatus.REJECTED ||
                status == OrderStatus.EXPIRED;
     }
 
     public boolean canBeCancelled() {
-        return status == OrderStatus.OPEN || 
+        return status == OrderStatus.OPEN ||
                status == OrderStatus.PARTIALLY_FILLED ||
                status == OrderStatus.SUBMITTED;
     }
 
     public boolean isPartiallyFilled() {
-        return executedQuantity.compareTo(BigDecimal.ZERO) > 0 && 
+        return executedQuantity.compareTo(BigDecimal.ZERO) > 0 &&
                executedQuantity.compareTo(quantity) < 0;
     }
 

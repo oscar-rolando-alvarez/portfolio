@@ -29,15 +29,15 @@ public class WebSocketHandshakeInterceptor implements HandshakeInterceptor {
                                  WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
         try {
             String token = extractTokenFromRequest(request);
-            
+
             if (token != null && jwtTokenProvider.validateToken(token)) {
                 String userId = jwtTokenProvider.getUserIdFromToken(token);
                 String username = jwtTokenProvider.getUsernameFromToken(token);
-                
+
                 attributes.put("userId", userId);
                 attributes.put("username", username);
                 attributes.put("token", token);
-                
+
                 logger.info("WebSocket handshake successful for user: {}", username);
                 return true;
             } else {
@@ -71,13 +71,13 @@ public class WebSocketHandshakeInterceptor implements HandshakeInterceptor {
                 }
             }
         }
-        
+
         // Try to get token from Authorization header
         String authHeader = request.getHeaders().getFirst("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             return authHeader.substring(7);
         }
-        
+
         return null;
     }
 }

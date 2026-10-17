@@ -84,7 +84,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * Find users by last login date range
      */
     @Query("SELECT u FROM User u WHERE u.lastLogin BETWEEN :startDate AND :endDate")
-    List<User> findByLastLoginBetween(@Param("startDate") LocalDateTime startDate, 
+    List<User> findByLastLoginBetween(@Param("startDate") LocalDateTime startDate,
                                      @Param("endDate") LocalDateTime endDate);
 
     /**
@@ -148,14 +148,14 @@ public interface UserRepository extends JpaRepository<User, Long> {
      */
     @Modifying
     @Query("UPDATE User u SET u.twoFactorEnabled = :enabled, u.twoFactorSecret = :secret WHERE u.id = :userId")
-    void updateTwoFactorAuth(@Param("userId") Long userId, 
-                            @Param("enabled") boolean enabled, 
+    void updateTwoFactorAuth(@Param("userId") Long userId,
+                            @Param("enabled") boolean enabled,
                             @Param("secret") String secret);
 
     /**
      * Count users by registration date
      */
-    @Query("SELECT COUNT(u) FROM User u WHERE DATE(u.createdAt) = CURRENT_DATE")
+    @Query("SELECT COUNT(u) FROM User u WHERE CAST(u.createdAt AS LocalDate) = LOCAL DATE")
     long countUsersRegisteredToday();
 
     /**

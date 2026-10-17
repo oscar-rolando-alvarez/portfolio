@@ -96,7 +96,7 @@ public class AccountService {
 
         Account account = getAccountById(accountId);
         account.lockBalance(asset, amount);
-        
+
         balanceRepository.save(account.getBalance(asset));
         account.updateBalances();
         accountRepository.save(account);
@@ -112,7 +112,7 @@ public class AccountService {
 
         Account account = getAccountById(accountId);
         account.unlockBalance(asset, amount);
-        
+
         balanceRepository.save(account.getBalance(asset));
         account.updateBalances();
         accountRepository.save(account);
@@ -125,7 +125,7 @@ public class AccountService {
      */
     @Transactional
     public void transferBalance(Long fromAccountId, Long toAccountId, String asset, BigDecimal amount) {
-        log.info("Transferring balance: {} {} from account: {} to account: {}", 
+        log.info("Transferring balance: {} {} from account: {} to account: {}",
                 amount, asset, fromAccountId, toAccountId);
 
         Account fromAccount = getAccountById(fromAccountId);
@@ -137,11 +137,11 @@ public class AccountService {
 
         // Subtract from source account
         subtractBalance(fromAccountId, asset, amount);
-        
+
         // Add to destination account
         addBalance(toAccountId, asset, amount);
 
-        log.info("Balance transferred successfully: {} {} from account: {} to account: {}", 
+        log.info("Balance transferred successfully: {} {} from account: {} to account: {}",
                 amount, asset, fromAccountId, toAccountId);
     }
 
@@ -162,7 +162,7 @@ public class AccountService {
      * Update account PnL
      */
     public void updateAccountPnL(Long accountId, BigDecimal realizedPnl, BigDecimal unrealizedPnl) {
-        log.debug("Updating PnL for account: {} - realized: {}, unrealized: {}", 
+        log.debug("Updating PnL for account: {} - realized: {}, unrealized: {}",
                  accountId, realizedPnl, unrealizedPnl);
 
         Account account = getAccountById(accountId);
@@ -254,7 +254,7 @@ public class AccountService {
 
     private Balance getOrCreateBalance(Account account, String asset) {
         Optional<Balance> existingBalance = balanceRepository.findByAccountIdAndAsset(account.getId(), asset);
-        
+
         if (existingBalance.isPresent()) {
             return existingBalance.get();
         }
@@ -303,7 +303,7 @@ public class AccountService {
         log.warn("Deleting account: {}", accountId);
 
         Account account = getAccountById(accountId);
-        
+
         // Check if account has any balances
         List<Balance> balances = getPositiveBalances(accountId);
         if (!balances.isEmpty()) {

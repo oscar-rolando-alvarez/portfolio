@@ -142,7 +142,7 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
      * Get daily trading statistics
      */
     @Query("SELECT COUNT(t) as tradeCount, SUM(t.quantity) as totalVolume, SUM(t.quoteQuantity) as totalValue, " +
-           "SUM(t.commission) as totalFees FROM Trade t WHERE DATE(t.executedAt) = CURRENT_DATE")
+           "SUM(t.commission) as totalFees FROM Trade t WHERE CAST(t.executedAt AS LocalDate) = LOCAL DATE")
     Object[] getDailyTradingStatistics();
 
     /**
@@ -192,10 +192,10 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
     /**
      * Get hourly trading volume for symbol
      */
-    @Query("SELECT HOUR(t.executedAt) as hour, SUM(t.quantity) as volume, COUNT(t) as tradeCount " +
-           "FROM Trade t WHERE t.symbol = :symbol AND DATE(t.executedAt) = :date " +
-           "GROUP BY HOUR(t.executedAt) ORDER BY hour")
-    List<Object[]> getHourlyTradingVolume(@Param("symbol") String symbol, @Param("date") LocalDateTime date);
+    @Query("SELECT EXTRACT(HOUR FROM t.executedAt) as hour, SUM(t.quantity) as volume, COUNT(t) as tradeCount " +
+           "FROM Trade t WHERE t.symbol = :symbol AND CAST(t.executedAt AS LocalDate) = :date " +
+           "GROUP BY EXTRACT(HOUR FROM t.executedAt) ORDER BY hour")
+    List<Object[]> getHourlyTradingVolume(@Param("symbol") String symbol, @Param("date") java.time.LocalDate date);
 
     /**
      * Find trades with high commission rates

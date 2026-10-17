@@ -28,9 +28,9 @@ public class TradeService {
      * Save a trade
      */
     public Trade saveTrade(Trade trade) {
-        log.debug("Saving trade: {} {} {} @ {}", 
+        log.debug("Saving trade: {} {} {} @ {}",
                  trade.getSide(), trade.getQuantity(), trade.getSymbol(), trade.getPrice());
-        
+
         Trade savedTrade = tradeRepository.save(trade);
         log.debug("Trade saved successfully: {}", savedTrade.getId());
         return savedTrade;

@@ -126,7 +126,7 @@ public class Position extends BaseEntity {
         if (quantity.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
-        
+
         BigDecimal priceDifference = currentPrice.subtract(avgEntryPrice);
         return quantity.multiply(priceDifference);
     }
@@ -140,7 +140,7 @@ public class Position extends BaseEntity {
         if (totalCost.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
-        
+
         BigDecimal totalPnl = realizedPnl.add(unrealizedPnl);
         return totalPnl.divide(totalCost, 6, java.math.RoundingMode.HALF_UP)
                 .multiply(new BigDecimal("100"));
@@ -150,7 +150,7 @@ public class Position extends BaseEntity {
         if (totalCost.compareTo(BigDecimal.ZERO) == 0) {
             return BigDecimal.ZERO;
         }
-        
+
         BigDecimal currentValue = getNotionalValue();
         BigDecimal netReturn = currentValue.subtract(totalCost).subtract(totalFees);
         return netReturn.divide(totalCost, 6, java.math.RoundingMode.HALF_UP);
@@ -169,7 +169,7 @@ public class Position extends BaseEntity {
         // Calculate new average entry price
         BigDecimal currentValue = quantity.multiply(avgEntryPrice);
         BigDecimal newQuantity = quantity.add(tradeQuantity);
-        
+
         if (newQuantity.compareTo(BigDecimal.ZERO) == 0) {
             // Position closed
             realizedPnl = realizedPnl.add(calculateRealizedPnl(trade));
@@ -239,12 +239,12 @@ public class Position extends BaseEntity {
         if (openedAt == null) {
             return BigDecimal.ZERO;
         }
-        
+
         LocalDateTime endTime = isOpen ? LocalDateTime.now() : closedAt;
         if (endTime == null) {
             endTime = LocalDateTime.now();
         }
-        
+
         long durationSeconds = java.time.Duration.between(openedAt, endTime).getSeconds();
         return new BigDecimal(durationSeconds).divide(new BigDecimal("3600"), 2, java.math.RoundingMode.HALF_UP);
     }
