@@ -15,6 +15,7 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24 AS runtime
 
 COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chown=nginx:nginx security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build --chown=nginx:nginx /app/dist/angular-erp-system/browser /usr/share/nginx/html
 
 USER nginx
