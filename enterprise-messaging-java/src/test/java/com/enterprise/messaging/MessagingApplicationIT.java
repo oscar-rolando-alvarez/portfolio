@@ -17,16 +17,30 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.listener.MessageListenerContainer;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Boots the full application against real PostgreSQL and Kafka (Testcontainers): Liquibase
  * migrations, JPA validation, JWT auth and the Kafka publish/consume round trip.
  */
-@SpringBootTest
+@SpringBootTest(
+        properties = {
+            // Unique consumer groups per run and replay from the start of each topic, so the
+            // round-trip assertion never depends on committed offsets or timing of the first poll.
+            "spring.kafka.consumer.group-id=messaging-it-${random.uuid}",
+            "spring.kafka.consumer.auto-offset-reset=earliest"
+        })
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
+// Close the context (and its Kafka consumers) when the class finishes, before the Testcontainers
+// broker is torn down, instead of in a JVM shutdown hook racing the container shutdown.
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class MessagingApplicationIT {
+
+    private static final int USER_EVENTS_PARTITIONS = 3;
 
     @Autowired
     private MockMvc mockMvc;
@@ -80,11 +94,10 @@ class MessagingApplicationIT {
 
     @Test
     void registrationEventIsPublishedToKafkaAndConsumed() throws Exception {
-        // Consumer-group rebalancing can be slow on shared CI runners; wait until every listener
-        // container owns partitions so the assertion below only measures publish-to-consume time.
-        await().atMost(Duration.ofSeconds(90)).untilAsserted(() -> listenerRegistry
-                .getListenerContainers()
-                .forEach(container -> assertThat(container.getAssignedPartitions()).isNotEmpty()));
+        // Wait until the user-events listener owns all partitions of its topic before publishing.
+        MessageListenerContainer userEvents = listenerRegistry.getListenerContainer("userEventsListener");
+        assertThat(userEvents).isNotNull();
+        ContainerTestUtils.waitForAssignment(userEvents, USER_EVENTS_PARTITIONS);
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -93,7 +106,7 @@ class MessagingApplicationIT {
                                 """))
                 .andExpect(status().isCreated());
 
-        await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             Counter counter = meterRegistry
                     .find("messaging.events")
                     .tags("category", "user", "type", "USER_REGISTERED")

@@ -50,6 +50,8 @@ spring:
         # Producer type headers select MessageEvent vs UserEvent; the default type is a fallback.
         spring.json.trusted.packages: com.enterprise.messaging.event
         spring.json.value.default.type: com.enterprise.messaging.event.MessageEvent
+        # Incremental rebalancing: members keep their partitions while others join or leave.
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
     listener:
       ack-mode: manual_immediate
       concurrency: 3
@@ -78,6 +80,12 @@ management:
   tracing:
     sampling:
       probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  otlp:
+    metrics:
+      export:
+        # Metrics are scraped via /actuator/prometheus; OTLP push is opt-in so the app does not
+        # retry a non-existent localhost:4318 collector every minute (and again on shutdown).
+        enabled: ${OTLP_METRICS_EXPORT_ENABLED:false}
   # OTLP trace export is enabled by setting MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
   # (e.g. http://otel-collector:4318/v1/traces); without it no exporter is created.
 
