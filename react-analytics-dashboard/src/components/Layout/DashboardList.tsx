@@ -6,10 +6,8 @@ import { Dashboard } from '@/types';
 import { formatDistanceToNow } from 'date-fns';
 import {
   ChartBarIcon,
-  StarIcon,
   EllipsisHorizontalIcon,
 } from '@heroicons/react/24/outline';
-import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
 
 interface DashboardListProps {
   dashboards: Dashboard[];

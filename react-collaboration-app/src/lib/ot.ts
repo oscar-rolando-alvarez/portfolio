@@ -1,4 +1,4 @@
-import { Operation, OperationResult } from '@/types';
+import { type Operation, type OperationResult } from '@/types';
 
 /**
  * Operational Transformation (OT) for collaborative editing
@@ -90,10 +90,10 @@ export class OperationalTransform {
     const data = op.data;
     if (!data) return null;
 
-    let left = data.left || 0;
-    let top = data.top || 0;
-    let width = data.width || data.radius * 2 || 100;
-    let height = data.height || data.radius * 2 || 100;
+    const left = data.left || 0;
+    const top = data.top || 0;
+    const width = data.width || data.radius * 2 || 100;
+    const height = data.height || data.radius * 2 || 100;
 
     return {
       left,

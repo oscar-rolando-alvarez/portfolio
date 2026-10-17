@@ -109,8 +109,7 @@ export const useThemeStore = create<ThemeState>()(
             }
           }),
 
-        toggleTheme: () =>
-          set((state) => {
+        toggleTheme: () => {
             const { theme } = get();
             let newTheme: 'light' | 'dark' | 'auto';
             
@@ -123,7 +122,7 @@ export const useThemeStore = create<ThemeState>()(
             }
             
             get().setTheme(newTheme);
-          }),
+          },
       })),
       {
         name: 'theme-store',

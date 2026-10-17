@@ -1,75 +1,37 @@
-# Multi-stage Dockerfile for React Collaboration App
+# syntax=docker/dockerfile:1
 
-# Stage 1: Build the application
-FROM node:18-alpine AS builder
+ARG NODE_IMAGE=node:24.22.0-alpine3.24
 
-# Set working directory
+# ---- build: compile the SPA (frontend deps are devDependencies) ----
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-
-# Copy source code
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY . .
-
-# Build the application
 RUN npm run build
 
-# Stage 2: Production server
-FROM node:18-alpine AS production
-
-# Set working directory
+# ---- runtime deps: only what the Node server needs ----
+FROM ${NODE_IMAGE} AS prod-deps
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund
 
-# Install production dependencies for server
-COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
-
-# Copy built application from builder stage
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server ./server
-COPY --from=builder /app/public ./public
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001
-
-# Change ownership of the app directory
-RUN chown -R nextjs:nodejs /app
-USER nextjs
-
-# Expose ports
-EXPOSE 3000 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "http.get('http://localhost:3001/health', (res) => { \
-    if (res.statusCode === 200) process.exit(0); \
-    else process.exit(1); \
-  }).on('error', () => process.exit(1));"
-
-# Start both client and server
-CMD ["npm", "run", "server"]
-
-# Development stage
-FROM node:18-alpine AS development
-
+# ---- runtime: one non-root process serves the SPA, REST API and Socket.IO ----
+FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3001
 
-# Copy package files
-COPY package*.json ./
+COPY --chown=node:node package.json ./
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+# Node 24 runs the TypeScript server directly via native type stripping.
+COPY --chown=node:node server/app.ts server/index.ts server/logger.ts ./server/
 
-# Install all dependencies (including dev dependencies)
-RUN npm install
+USER node
+EXPOSE 3001
 
-# Copy source code
-COPY . .
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-# Expose ports for development
-EXPOSE 3000 3001 5173
-
-# Start development server
-CMD ["npm", "run", "dev"]
+CMD ["node", "server/index.ts"]

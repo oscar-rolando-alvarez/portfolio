@@ -33,20 +33,20 @@ const mockStore = {
 describe('Toolbar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (useCollaborationStore as any).mockReturnValue(mockStore);
+    vi.mocked(useCollaborationStore).mockReturnValue(mockStore);
   });
 
   it('renders all drawing tools', () => {
     render(<Toolbar />);
     
     // Check for tool buttons by their aria-labels or text content
-    expect(screen.getByTitle(/Select/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Rectangle/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Circle/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Line/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Text/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Pen/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Hand/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Select/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Rectangle/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Circle/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Line/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Text/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Pen/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hand/ })).toBeInTheDocument();
   });
 
   it('highlights active tool', () => {
@@ -54,18 +54,18 @@ describe('Toolbar', () => {
       ...mockStore,
       activeTool: 'rectangle',
     };
-    (useCollaborationStore as any).mockReturnValue(storeWithActiveTool);
+    vi.mocked(useCollaborationStore).mockReturnValue(storeWithActiveTool);
     
     render(<Toolbar />);
     
-    const rectangleButton = screen.getByTitle(/Rectangle/);
+    const rectangleButton = screen.getByRole('button', { name: /Rectangle/ });
     expect(rectangleButton).toHaveClass('active');
   });
 
   it('calls setActiveTool when tool is clicked', () => {
     render(<Toolbar />);
     
-    const rectangleButton = screen.getByTitle(/Rectangle/);
+    const rectangleButton = screen.getByRole('button', { name: /Rectangle/ });
     fireEvent.click(rectangleButton);
     
     expect(mockStore.setActiveTool).toHaveBeenCalledWith('rectangle');
@@ -91,7 +91,7 @@ describe('Toolbar', () => {
       ...mockStore,
       activeTool: 'pen',
     };
-    (useCollaborationStore as any).mockReturnValue(storeWithPenTool);
+    vi.mocked(useCollaborationStore).mockReturnValue(storeWithPenTool);
     
     render(<Toolbar />);
     
@@ -101,14 +101,14 @@ describe('Toolbar', () => {
   it('renders undo/redo buttons', () => {
     render(<Toolbar />);
     
-    expect(screen.getByTitle(/Undo/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Redo/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Undo/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Redo/ })).toBeInTheDocument();
   });
 
   it('disables undo button when canUndo is false', () => {
     render(<Toolbar />);
     
-    const undoButton = screen.getByTitle(/Undo/);
+    const undoButton = screen.getByRole('button', { name: /Undo/ });
     expect(undoButton).toBeDisabled();
   });
 
@@ -117,11 +117,11 @@ describe('Toolbar', () => {
       ...mockStore,
       canUndo: true,
     };
-    (useCollaborationStore as any).mockReturnValue(storeWithUndo);
+    vi.mocked(useCollaborationStore).mockReturnValue(storeWithUndo);
     
     render(<Toolbar />);
     
-    const undoButton = screen.getByTitle(/Undo/);
+    const undoButton = screen.getByRole('button', { name: /Undo/ });
     expect(undoButton).not.toBeDisabled();
   });
 
@@ -130,11 +130,11 @@ describe('Toolbar', () => {
       ...mockStore,
       canUndo: true,
     };
-    (useCollaborationStore as any).mockReturnValue(storeWithUndo);
+    vi.mocked(useCollaborationStore).mockReturnValue(storeWithUndo);
     
     render(<Toolbar />);
     
-    const undoButton = screen.getByTitle(/Undo/);
+    const undoButton = screen.getByRole('button', { name: /Undo/ });
     fireEvent.click(undoButton);
     
     expect(mockStore.undo).toHaveBeenCalled();
@@ -143,8 +143,8 @@ describe('Toolbar', () => {
   it('renders media controls', () => {
     render(<Toolbar />);
     
-    expect(screen.getByTitle(/microphone/)).toBeInTheDocument();
-    expect(screen.getByTitle(/camera/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /microphone/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /camera/ })).toBeInTheDocument();
   });
 
   it('shows active state for enabled media', () => {
@@ -156,11 +156,11 @@ describe('Toolbar', () => {
         screen: false,
       },
     };
-    (useCollaborationStore as any).mockReturnValue(storeWithMedia);
+    vi.mocked(useCollaborationStore).mockReturnValue(storeWithMedia);
     
     render(<Toolbar />);
     
-    const audioButton = screen.getByTitle(/Mute microphone/);
+    const audioButton = screen.getByRole('button', { name: /Mute microphone/ });
     expect(audioButton).toHaveClass('active');
   });
 
@@ -172,23 +172,23 @@ describe('Toolbar', () => {
         { id: '2', name: 'User 2' },
       ],
     };
-    (useCollaborationStore as any).mockReturnValue(storeWithUsers);
+    vi.mocked(useCollaborationStore).mockReturnValue(storeWithUsers);
     
     render(<Toolbar />);
     
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByLabelText('2 users online')).toHaveTextContent('2');
   });
 
   it('renders file operation buttons', () => {
     render(<Toolbar />);
     
-    expect(screen.getByTitle(/Import/)).toBeInTheDocument();
-    expect(screen.getByTitle(/Export/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Import/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Export/ })).toBeInTheDocument();
   });
 
   it('renders settings button', () => {
     render(<Toolbar />);
     
-    expect(screen.getByTitle(/Settings/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Settings/ })).toBeInTheDocument();
   });
 });

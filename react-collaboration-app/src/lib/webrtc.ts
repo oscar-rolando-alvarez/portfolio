@@ -1,5 +1,11 @@
 import SimplePeer from 'simple-peer';
-import { RTCMessage, PeerConnection, MediaState } from '@/types';
+
+/** simple-peer keeps these on the instance but does not type them. */
+type PeerInternals = SimplePeer.Instance & {
+  _remoteStream?: MediaStream;
+  _pc: RTCPeerConnection;
+};
+import { type RTCMessage, type MediaState } from '@/types';
 
 export class WebRTCManager {
   private peers: Map<string, SimplePeer.Instance> = new Map();
@@ -270,7 +276,7 @@ export class WebRTCManager {
   // Get peer stream
   public getPeerStream(userId: string): MediaStream | null {
     const peer = this.peers.get(userId);
-    return peer?._remoteStream || null;
+    return (peer as PeerInternals | undefined)?._remoteStream ?? null;
   }
 
   // Remove peer connection
@@ -331,18 +337,24 @@ export class WebRTCManager {
   }
 
   private addStreamToPeers() {
-    if (!this.localStream) return;
+    const stream = this.localStream;
+    if (!stream) return;
 
-    this.peers.forEach((peer) => {
-      if (peer.connected) {
+    this.peers.forEach((instance) => {
+      const peer = instance as PeerInternals;
+      if (!peer.connected) return;
+
+      for (const track of stream.getTracks()) {
         try {
-          peer.replaceTrack(
-            peer._pc.getSenders()[0]?.track,
-            this.localStream!.getTracks()[0],
-            peer._pc.getSenders()[0]?.streams[0] || this.localStream!
-          );
+          // Swap an existing track of the same kind, otherwise negotiate a new one.
+          const sender = peer._pc.getSenders().find((s) => s.track?.kind === track.kind);
+          if (sender?.track) {
+            peer.replaceTrack(sender.track, track, stream);
+          } else {
+            peer.addTrack(track, stream);
+          }
         } catch (error) {
-          console.error('Failed to replace track:', error);
+          console.error('Failed to update peer track:', error);
         }
       }
     });

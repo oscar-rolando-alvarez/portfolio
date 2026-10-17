@@ -1,397 +1,199 @@
 # Collaboration Canvas
 
-A real-time collaborative canvas application similar to Figma/Miro, built with React, TypeScript, and modern web technologies. Multiple users can collaborate simultaneously on the same canvas with live cursors, real-time synchronization, voice/video chat, and advanced drawing tools.
+![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/react-collaboration-app.yml/badge.svg)
 
-![Collaboration Canvas](./screenshot.png)
+A real-time collaborative whiteboard in the style of Figma or Miro. Several people draw on the same Fabric.js canvas, see each other's cursors live, and keep a consistent view through operational transform (OT) over Socket.IO. Peer-to-peer audio and video run over WebRTC.
 
-## 🚀 Features
+## The problem it solves
 
-### Real-time Collaboration
-- **WebRTC** peer-to-peer communication for low-latency interactions
-- **Socket.io** for reliable real-time synchronization
-- **Operational Transformation** for conflict resolution
-- **Live cursors** and user presence indicators
-- **Voice and video chat** integration
-- **Real-time collaborative editing** with conflict resolution
+Distributed teams need a shared visual space for sketching, diagramming and design reviews where every change shows up for everyone at once. This project shows the core building blocks:
 
-### Canvas & Drawing Tools
-- **HTML5 Canvas** with Fabric.js for high-performance rendering
-- **Vector drawing tools**: rectangles, circles, lines, arrows, text
-- **Free-hand drawing** with customizable brush tools
-- **Object manipulation**: move, resize, rotate, layer management
-- **Layers and grouping** support
-- **Zoom and pan** functionality with smooth animations
+- low-latency operation broadcast
+- conflict handling for concurrent edits
+- presence (who is here and where their cursor is)
+- late-joiner state replay
+- a single deployable container
 
-### Advanced Features
-- **Offline support** with service workers and IndexedDB
-- **Undo/redo functionality** with comprehensive history management
-- **Drag-and-drop** interface with react-dnd
-- **Keyboard shortcuts** system for power users
-- **Export functionality**: PNG, SVG, PDF, JSON formats
-- **Comments and annotations** system
-- **Version history** and snapshots
+## Key features
 
-### Architecture
-- **React 18** with TypeScript for type safety
-- **Micro-frontend** architecture with Module Federation
-- **Component-based** design system with Tailwind CSS
-- **Custom hooks** for canvas operations and state management
-- **Performance optimization** with React.memo and useMemo
-- **Zustand** for state management
+- **Drawing tools**: select, rectangle, circle, line, free-hand pen, text and pan. Snap-to-grid, zoom and keyboard shortcuts are included.
+- **Real-time sync**: local add, update and delete operations are broadcast over Socket.IO and applied on peers through an OT layer. The server keeps the canonical history and replays it to late joiners.
+- **Presence**: an online user list, live cursors and an activity feed.
+- **Layers and properties**: drag-to-reorder layers, visibility and lock toggles, and a properties panel for position, size, colour and opacity.
+- **Import and export**: PNG, SVG, JSON and PDF. jsPDF is lazy-loaded so it does not slow the first page load.
+- **Optional WebRTC**: audio, video and screen sharing between peers, with Socket.IO as the signalling channel.
+- **Production server**: one Node 24 process serves the built SPA, the REST API and the Socket.IO endpoint. It logs structured JSON, validates incoming operations and shuts down gracefully.
 
-## 📋 Prerequisites
+## Tech stack
 
-- **Node.js** 18 or higher
-- **npm** 8 or higher
-- **Docker** (optional, for containerized deployment)
+| Area | Technology | Version |
+| --- | --- | --- |
+| Runtime | Node.js (LTS, native TypeScript type stripping) | 24 |
+| UI | React | 19.3 |
+| Canvas | Fabric.js | 7.4 |
+| Bundler / dev server | Vite (Rolldown) | 8.3 |
+| Language | TypeScript (`strict`, project references) | 6.0 |
+| Styling | Tailwind CSS via `@tailwindcss/vite` | 4.3 |
+| State | Zustand + Immer | 5.0 / 11.1 |
+| Real-time | Socket.IO (server and client) | 4.8 |
+| HTTP server | Express | 5.3 |
+| Peer media | simple-peer (WebRTC) | 9.11 |
+| Testing | Vitest + Testing Library + jsdom | 5.0 / 16.3 / 30 |
+| Linting | ESLint flat config, typescript-eslint, React Compiler hook rules | 10.13 / 8.71 |
+| Container | Docker multi-stage, `node:24-alpine` | 24.22 |
 
-## 🛠️ Installation
+## Architecture
 
-### Local Development
+### Container view
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd react-collaboration-app
-   ```
+```mermaid
+flowchart LR
+    alice(["Collaborator A"])
+    bob(["Collaborator B"])
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+    subgraph browserA["Browser A"]
+        spaA["React 19 SPA<br/>Fabric.js canvas, Zustand, OT"]
+    end
+    subgraph browserB["Browser B"]
+        spaB["React 19 SPA<br/>Fabric.js canvas, Zustand, OT"]
+    end
 
-3. **Start the development servers**
-   ```bash
-   # Start both client and server in development mode
-   npm run dev
+    subgraph server["Node 24 container"]
+        http["Express 5<br/>static SPA, REST API, /health"]
+        io["Socket.IO server<br/>rooms per workspace"]
+        state[("In-memory state<br/>workspaces, users, operation log")]
+    end
 
-   # Or start them separately
-   npm run dev        # Client (Vite dev server on port 3000)
-   npm run server     # Server (Socket.io server on port 3001)
-   ```
-
-4. **Open your browser**
-   - Client: http://localhost:3000
-   - Server health check: http://localhost:3001/health
-
-### Docker Development
-
-```bash
-# Start development environment
-docker-compose --profile dev up
-
-# Or build and run manually
-docker build --target development -t collaboration-canvas-dev .
-docker run -p 3000:3000 -p 3001:3001 -v $(pwd):/app collaboration-canvas-dev
+    alice --> spaA
+    bob --> spaB
+    spaA <-- "WebSocket: operations, cursors, presence" --> io
+    spaB <-- "WebSocket: operations, cursors, presence" --> io
+    spaA -. "HTTPS: assets, REST" .-> http
+    io --> state
+    http --> state
+    spaA -. "WebRTC media, signalled via Socket.IO" .- spaB
 ```
 
-## 🚀 Production Deployment
+### Drawing a shape (operation flow)
 
-### Using Docker Compose (Recommended)
+```mermaid
+sequenceDiagram
+    participant A as Browser A (useCanvas)
+    participant S as Socket.IO server
+    participant B as Browser B (OT hook)
 
-```bash
-# Production deployment with all services
-docker-compose --profile prod up -d
-
-# This will start:
-# - Application server (ports 3000, 3001)
-# - Redis for session management
-# - Nginx reverse proxy (ports 80, 443)
-# - MongoDB for persistent storage (optional)
+    A->>A: mouse up completes a rectangle
+    A->>A: stamp id, userId, version and add to local store
+    A->>S: canvas:operation with type add, objectId and data
+    S->>S: validate payload and stamp sender socket id
+    S->>S: append to workspace log, update canvas state
+    S-->>B: canvas:operation (broadcast to the room, sender excluded)
+    B->>B: OT transform against recent local operations
+    B->>B: fabric.util.enlivenObjects(data) then canvas.add
+    Note over S,B: A client joining later receives workspace:state with the full log and replays it
 ```
 
-### Manual Deployment
+## Project structure
+
+```text
+react-collaboration-app/
+├── server/
+│   ├── app.ts            # createCollaborationServer(): Express + Socket.IO
+│   ├── index.ts          # entrypoint: static SPA hosting, listen, graceful shutdown
+│   ├── logger.ts         # JSON-lines structured logger
+│   └── __tests__/        # integration tests with real Socket.IO clients
+├── src/
+│   ├── components/       # Canvas, Toolbar, Panels, Presence, Export, ui/
+│   ├── hooks/            # useCanvas, useSocket, useOperationalTransform, useWebRTC, ...
+│   ├── lib/              # socket manager, OT engine, WebRTC manager, Fabric setup
+│   ├── stores/           # Zustand collaboration store
+│   ├── test/             # Vitest setup and helpers
+│   └── types/
+├── public/               # manifest, service worker, favicon
+├── Dockerfile, docker-compose.yml
+├── vite.config.ts        # build, chunk splitting, Vitest projects (client and server)
+├── eslint.config.js
+└── tsconfig.{app,node,server}.json
+```
+
+## Running locally
+
+Prerequisites: Node.js 24 and npm 11.
 
 ```bash
-# Build for production
+cd react-collaboration-app
+npm ci
+
+# terminal 1: realtime server on http://localhost:3001
+npm run dev:server
+
+# terminal 2: Vite dev server on http://localhost:3000
+npm run dev
+```
+
+To try real-time collaboration, open http://localhost:3000 in two browser windows.
+
+Production mode, with one process serving everything on port 3001:
+
+```bash
 npm run build
-
-# Start production server
-npm run server
+CLIENT_URL=http://localhost:3001 npm start   # http://localhost:3001
 ```
 
-### Environment Variables
-
-Create a `.env` file in the root directory:
-
-```env
-# Client Configuration
-VITE_SERVER_URL=http://localhost:3001
-
-# Server Configuration
-NODE_ENV=production
-PORT=3001
-CLIENT_URL=http://localhost:3000
-
-# Database (Optional)
-MONGODB_URL=mongodb://localhost:27017/collaboration
-REDIS_URL=redis://localhost:6379
-
-# WebRTC Configuration
-STUN_SERVERS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
-```
-
-## 📖 Usage Guide
-
-### Basic Drawing
-
-1. **Select Tools**: Use the toolbar to select drawing tools (rectangle, circle, line, text, pen)
-2. **Draw Objects**: Click and drag on the canvas to create objects
-3. **Select Objects**: Use the select tool to choose and manipulate objects
-4. **Properties Panel**: Adjust object properties like color, size, and position
-
-### Collaboration
-
-1. **Join Session**: Multiple users can join the same workspace URL
-2. **User Presence**: See other users' cursors and activity in real-time
-3. **Live Editing**: Changes appear instantly for all connected users
-4. **Voice/Video**: Enable audio/video communication through the toolbar
-5. **Comments**: Add comments by selecting the comment tool and clicking on the canvas
-
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `V` | Select tool |
-| `R` | Rectangle tool |
-| `O` | Circle tool |
-| `L` | Line tool |
-| `T` | Text tool |
-| `P` | Pen tool |
-| `H` | Hand (pan) tool |
-| `Ctrl+Z` / `Cmd+Z` | Undo |
-| `Ctrl+Y` / `Cmd+Y` | Redo |
-| `Ctrl+A` / `Cmd+A` | Select all |
-| `Ctrl+C` / `Cmd+C` | Copy |
-| `Ctrl+V` / `Cmd+V` | Paste |
-| `Delete` / `Backspace` | Delete selected |
-| `G` | Toggle grid |
-| `Arrow Keys` | Move selection |
-| `Shift + Arrow Keys` | Move selection by 10px |
-
-### Export & Import
-
-1. **Export**: Use the export button in the toolbar to save your work
-   - **PNG**: Raster image format
-   - **SVG**: Vector image format
-   - **PDF**: Document format
-   - **JSON**: Canvas data for re-importing
-
-2. **Import**: Upload JSON files to restore previous work
-
-### Layers Management
-
-1. **Layer Panel**: Access layers through the left sidebar
-2. **Create Layers**: Organize objects into different layers
-3. **Visibility**: Toggle layer visibility
-4. **Lock Layers**: Prevent editing of specific layers
-5. **Reorder**: Drag layers to change drawing order
-
-## 🧪 Testing
+### With Docker
 
 ```bash
-# Run all tests
-npm test
+docker compose up --build    # http://localhost:3001
+# or
+docker build -t collaboration-canvas . && docker run --rm -p 3001:3001 collaboration-canvas
+```
 
-# Run tests with coverage
+## Testing and quality
+
+```bash
+npm run lint           # ESLint 10 flat config
+npm run typecheck      # tsc -b over the app, tooling and server projects
+npm test               # Vitest: client (jsdom) and server (node) projects
 npm run test:coverage
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run tests with UI
-npm run test:ui
 ```
 
-## 🏗️ Architecture
+- **Client tests:** the Zustand store, the export hook and the toolbar. Network and media libraries are replaced with fakes.
+- **Server tests:** a real HTTP server on an ephemeral port with real Socket.IO clients. They check the health endpoint, workspace state on join, operation broadcast, sender-identity stamping and rejection of malformed operations.
 
-### Frontend Architecture
-```
-src/
-├── components/          # Reusable UI components
-│   ├── Canvas/         # Canvas-related components
-│   ├── Toolbar/        # Drawing tools and toolbar
-│   ├── Panels/         # Properties, layers, users panels
-│   ├── Presence/       # User presence and activity
-│   ├── DragDrop/       # Drag and drop functionality
-│   ├── Export/         # Export/import dialogs
-│   ├── Help/           # Help and shortcuts
-│   └── ui/             # Basic UI components
-├── hooks/              # Custom React hooks
-├── stores/             # Zustand state management
-├── lib/                # Utility libraries
-├── types/              # TypeScript type definitions
-└── test/               # Test utilities and setup
-```
+CI (`.github/workflows/react-collaboration-app.yml`) runs these steps:
 
-### Backend Architecture
-```
-server/
-├── index.ts            # Main server file
-├── routes/             # API routes
-├── middleware/         # Express middleware
-├── models/             # Data models
-└── utils/              # Server utilities
-```
+1. Lint, typecheck, tests with coverage and the production build.
+2. `npm audit` for the server's runtime dependencies (blocking).
+3. `npm audit` for all dependencies, as an advisory step.
+4. A Docker image build plus a container health smoke test.
 
-### Key Technologies
+## Configuration
 
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS
-- **Canvas**: Fabric.js for object manipulation
-- **Real-time**: Socket.io for synchronization
-- **P2P**: Simple-peer for WebRTC connections
-- **State**: Zustand for state management
-- **DnD**: react-dnd for drag and drop
-- **Export**: html2canvas, jsPDF for export functionality
-- **Testing**: Vitest, Testing Library
-- **Deployment**: Docker, Nginx
+| Variable | Scope | Default | Description |
+| --- | --- | --- | --- |
+| `PORT` | server | `3001` | HTTP and WebSocket port |
+| `CLIENT_URL` | server | `http://localhost:3000` | Comma-separated origins allowed by CORS and Socket.IO |
+| `LOG_LEVEL` | server | `info` | `debug`, `info`, `warn` or `error` |
+| `NODE_ENV` | server | `development` | Set to `production` in the Docker image |
+| `VITE_SERVER_URL` | client (build time) | dev: `http://localhost:3001`, prod: page origin | Socket.IO endpoint used by the SPA |
 
-## 🔧 Configuration
+See `.env.example`. No secrets are needed to run the project.
 
-### Canvas Settings
+## Design decisions
 
-```typescript
-// Customize canvas behavior
-const canvasConfig = {
-  width: 1920,
-  height: 1080,
-  backgroundColor: '#ffffff',
-  selection: true,
-  preserveObjectStacking: true,
-  enableRetinaScaling: true,
-};
-```
+- **One container, one port.** The Node server hosts the built SPA, the REST API and Socket.IO together. That removes the nginx sidecar, avoids CORS in production and keeps deployment to a single image with one healthcheck.
+- **No server build step.** Node 24 runs `server/*.ts` directly through native type stripping. `erasableSyntaxOnly` in `tsconfig.server.json` keeps the code compatible with that.
+- **Lean runtime image.** Frontend libraries are devDependencies because they are bundled at build time. The runtime stage installs only `express`, `socket.io` and `cors`, which shrinks the image and the audit surface.
+- **The server is authoritative for identity.** Clients cannot spoof `userId` on operations, because the server stamps the socket identity. Malformed payloads are dropped.
+- **Fabric.js 7.** The upgrade brings ESM tree-shaking, promise-based APIs, and typed custom object properties (`id`, `userId`, `version`) that survive serialization.
+- **Scaling path.** State is in memory per instance on purpose, to keep the demo self-contained. To scale out horizontally, replace the maps with Redis or a database and add the Socket.IO Redis adapter. The operation log format already supports replay.
 
-### WebRTC Configuration
+## Known limitations
 
-```typescript
-// Configure STUN/TURN servers
-const rtcConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'turn:your-turn-server.com', username: 'user', credential: 'pass' }
-  ]
-};
-```
+- Redo in the store is not yet implemented. Undo works on local history.
+- `simple-peer` is unmaintained upstream. It works through browser polyfills of Node built-ins, but a migration to native `RTCPeerConnection` is planned.
+- Test coverage focuses on sync, the server and the toolbar. Most panels have no component tests yet.
 
-### Socket.io Configuration
+## License
 
-```typescript
-// Server configuration
-const ioConfig = {
-  cors: {
-    origin: process.env.CLIENT_URL,
-    methods: ["GET", "POST"]
-  },
-  transports: ['websocket', 'polling']
-};
-```
-
-## 🤝 Contributing
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make your changes**
-4. **Add tests** for new functionality
-5. **Ensure tests pass**: `npm test`
-6. **Commit your changes**: `git commit -m 'Add amazing feature'`
-7. **Push to the branch**: `git push origin feature/amazing-feature`
-8. **Open a Pull Request**
-
-### Development Guidelines
-
-- Follow TypeScript best practices
-- Write tests for new features
-- Use semantic commit messages
-- Update documentation for API changes
-- Ensure accessibility compliance
-
-## 📝 API Documentation
-
-### WebSocket Events
-
-#### Client → Server
-- `user:join` - Join collaboration session
-- `canvas:operation` - Send canvas operation
-- `cursor:move` - Update cursor position
-- `webrtc:signal` - WebRTC signaling
-- `comment:add` - Add comment
-
-#### Server → Client
-- `user:joined` - User joined notification
-- `canvas:operation` - Receive canvas operation
-- `cursor:update` - Cursor position update
-- `webrtc:signal` - WebRTC signaling response
-- `comment:added` - Comment added notification
-
-### REST API
-
-#### Workspaces
-- `GET /api/workspaces` - List workspaces
-- `POST /api/workspace` - Create workspace
-- `GET /api/workspace/:id` - Get workspace
-
-#### Health Check
-- `GET /health` - Server health status
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Canvas not loading**
-   - Check browser compatibility (requires modern browser)
-   - Verify JavaScript is enabled
-   - Check console for errors
-
-2. **Real-time sync not working**
-   - Verify WebSocket connection in Network tab
-   - Check server connectivity
-   - Ensure firewall allows WebSocket connections
-
-3. **WebRTC not connecting**
-   - Check STUN server configuration
-   - Verify camera/microphone permissions
-   - Test in different network environments
-
-4. **Performance issues**
-   - Reduce canvas object count
-   - Disable high-quality rendering
-   - Close unnecessary browser tabs
-
-### Debug Mode
-
-Enable debug logging:
-```typescript
-localStorage.setItem('debug', 'collaboration:*');
-```
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Fabric.js](http://fabricjs.com/) for canvas manipulation
-- [Socket.io](https://socket.io/) for real-time communication
-- [Simple-peer](https://github.com/feross/simple-peer) for WebRTC
-- [Zustand](https://github.com/pmndrs/zustand) for state management
-- [Tailwind CSS](https://tailwindcss.com/) for styling
-- [Lucide](https://lucide.dev/) for icons
-
-## 📞 Business Contact
-
-For business inquiries and professional services:
-
-- **Name**: Oscar Alvarez
-- **Email**: oralvarez@gmail.com
-
-## 📞 Support
-
-For technical support and questions:
-- Create an issue on GitHub
-- Check the documentation
-- Review existing issues and discussions
-
----
-
-**Happy Collaborating!** 🎨✨
+MIT

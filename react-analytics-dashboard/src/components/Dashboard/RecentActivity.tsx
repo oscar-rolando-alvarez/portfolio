@@ -9,7 +9,6 @@ import {
   CogIcon,
   EyeIcon,
 } from '@heroicons/react/24/outline';
-import { LoadingSpinner } from '@/components/UI/LoadingSpinner';
 
 interface ActivityItem {
   id: string;

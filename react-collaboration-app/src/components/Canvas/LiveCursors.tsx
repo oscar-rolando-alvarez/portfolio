@@ -1,5 +1,5 @@
 import React from 'react';
-import { User } from '@/types';
+import { type User } from '@/types';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 
 interface LiveCursorsProps {
@@ -16,7 +16,7 @@ export const LiveCursors: React.FC<LiveCursorsProps> = ({ users }) => {
         .map(user => (
           <div
             key={user.id}
-            className="cursor-pointer"
+            className="live-cursor"
             style={{
               left: user.cursor!.x,
               top: user.cursor!.y,

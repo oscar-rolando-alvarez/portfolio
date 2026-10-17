@@ -1,14 +1,14 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
-import { Dashboard, DashboardItem } from '@/types';
+import { Dashboard } from '@/types';
 import { DashboardState } from './types';
 import { generateId } from '@/utils/helpers';
 
 export const useDashboardStore = create<DashboardState>()(
   devtools(
     persist(
-      immer((set, get) => ({
+      immer((set) => ({
         dashboards: [],
         activeDashboard: null,
         isLoading: false,

@@ -20,7 +20,7 @@ const mockStore = {
 describe('useExport', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (useCollaborationStore as any).mockReturnValue(mockStore);
+    vi.mocked(useCollaborationStore).mockReturnValue(mockStore);
   });
 
   describe('exportAsPNG', () => {
@@ -29,13 +29,12 @@ describe('useExport', () => {
       
       const exportResult = await result.current.exportAsPNG();
       
-      expect(exportResult.success).toBe(true);
-      expect(exportResult.filename).toMatch(/canvas-export-\d+\.png/);
+      expect(exportResult?.success).toBe(true);
+      expect(exportResult?.filename).toMatch(/canvas-export-\d+\.png/);
       expect(mockCanvas.toDataURL).toHaveBeenCalledWith({
         format: 'png',
         quality: 1,
         multiplier: 1,
-        withoutTransform: false,
       });
     });
 
@@ -52,7 +51,6 @@ describe('useExport', () => {
         format: 'png',
         quality: 0.8,
         multiplier: 2,
-        withoutTransform: false,
       });
     });
 
@@ -61,7 +59,7 @@ describe('useExport', () => {
         ...mockStore,
         selectedObjects: ['obj1'],
       };
-      (useCollaborationStore as any).mockReturnValue(storeWithSelection);
+      vi.mocked(useCollaborationStore).mockReturnValue(storeWithSelection);
       
       mockCanvas.getActiveObject.mockReturnValue(mockFabricObject);
       
@@ -86,8 +84,8 @@ describe('useExport', () => {
       
       const exportResult = await result.current.exportAsSVG();
       
-      expect(exportResult.success).toBe(true);
-      expect(exportResult.filename).toMatch(/canvas-export-\d+\.svg/);
+      expect(exportResult?.success).toBe(true);
+      expect(exportResult?.filename).toMatch(/canvas-export-\d+\.svg/);
       expect(mockCanvas.toSVG).toHaveBeenCalledWith({
         suppressPreamble: false,
         viewBox: {
@@ -104,7 +102,7 @@ describe('useExport', () => {
         ...mockStore,
         selectedObjects: ['obj1'],
       };
-      (useCollaborationStore as any).mockReturnValue(storeWithSelection);
+      vi.mocked(useCollaborationStore).mockReturnValue(storeWithSelection);
       
       const mockObject = {
         ...mockFabricObject,
@@ -131,11 +129,11 @@ describe('useExport', () => {
       
       const exportResult = await result.current.exportAsJSON();
       
-      expect(exportResult.success).toBe(true);
-      expect(exportResult.filename).toMatch(/canvas-export-\d+\.json/);
-      expect(exportResult.data).toHaveProperty('version', '1.0');
-      expect(exportResult.data).toHaveProperty('canvas');
-      expect(exportResult.data).toHaveProperty('objects');
+      expect(exportResult?.success).toBe(true);
+      expect(exportResult?.filename).toMatch(/canvas-export-\d+\.json/);
+      expect(exportResult?.data).toHaveProperty('version', '1.0');
+      expect(exportResult?.data).toHaveProperty('canvas');
+      expect(exportResult?.data).toHaveProperty('objects');
     });
 
     it('should export selected objects as JSON', async () => {
@@ -143,7 +141,7 @@ describe('useExport', () => {
         ...mockStore,
         selectedObjects: ['obj1'],
       };
-      (useCollaborationStore as any).mockReturnValue(storeWithSelection);
+      vi.mocked(useCollaborationStore).mockReturnValue(storeWithSelection);
       
       mockCanvas.getActiveObject.mockReturnValue(mockFabricObject);
       
@@ -154,8 +152,8 @@ describe('useExport', () => {
         selectedOnly: true,
       });
       
-      expect(exportResult.success).toBe(true);
-      expect(exportResult.data.objects).toHaveLength(1);
+      expect(exportResult?.success).toBe(true);
+      expect(exportResult?.data.objects).toHaveLength(1);
     });
   });
 
@@ -178,8 +176,8 @@ describe('useExport', () => {
       
       const importResult = await result.current.importFromJSON(jsonData);
       
-      expect(importResult.success).toBe(true);
-      expect(importResult.objectCount).toBe(1);
+      expect(importResult?.success).toBe(true);
+      expect(importResult?.objectCount).toBe(1);
       expect(mockCanvas.add).toHaveBeenCalled();
     });
 
@@ -188,8 +186,8 @@ describe('useExport', () => {
       
       const importResult = await result.current.importFromJSON('invalid json');
       
-      expect(importResult.success).toBe(false);
-      expect(importResult.error).toContain('Unexpected token');
+      expect(importResult?.success).toBe(false);
+      expect(importResult?.error).toContain('Unexpected token');
     });
 
     it('should handle missing objects array', async () => {
@@ -197,46 +195,43 @@ describe('useExport', () => {
       
       const importResult = await result.current.importFromJSON({ version: '1.0' });
       
-      expect(importResult.success).toBe(false);
-      expect(importResult.error).toContain('missing objects array');
+      expect(importResult?.success).toBe(false);
+      expect(importResult?.error).toContain('missing objects array');
     });
   });
 
   describe('copyToClipboard', () => {
     it('should copy canvas to clipboard', async () => {
       // Mock clipboard API
-      Object.assign(navigator, {
-        clipboard: {
-          write: vi.fn(() => Promise.resolve()),
-        },
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { write: vi.fn(() => Promise.resolve()) },
       });
-      
-      global.ClipboardItem = vi.fn();
+      vi.stubGlobal('ClipboardItem', vi.fn(function ClipboardItemMock() {}));
       
       const { result } = renderHook(() => useExport());
       
       const copyResult = await result.current.copyToClipboard();
       
-      expect(copyResult.success).toBe(true);
-      expect(copyResult.message).toBe('Copied to clipboard');
+      expect(copyResult?.success).toBe(true);
+      expect(copyResult?.message).toBe('Copied to clipboard');
       expect(mockCanvas.toDataURL).toHaveBeenCalledWith({
         format: 'png',
         quality: 1,
+        multiplier: 1,
       });
     });
 
     it('should handle clipboard API not supported', async () => {
       // Mock clipboard API as undefined
-      Object.assign(navigator, {
-        clipboard: undefined,
-      });
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
       
       const { result } = renderHook(() => useExport());
       
       const copyResult = await result.current.copyToClipboard();
       
-      expect(copyResult.success).toBe(false);
-      expect(copyResult.error).toContain('Clipboard API not supported');
+      expect(copyResult?.success).toBe(false);
+      expect(copyResult?.error).toContain('Clipboard API not supported');
     });
   });
 
@@ -246,8 +241,8 @@ describe('useExport', () => {
       
       const exportResult = await result.current.exportSelection('png');
       
-      expect(exportResult.success).toBe(false);
-      expect(exportResult.error).toBe('No objects selected');
+      expect(exportResult?.success).toBe(false);
+      expect(exportResult?.error).toBe('No objects selected');
     });
 
     it('should export selection when objects are selected', async () => {
@@ -255,7 +250,7 @@ describe('useExport', () => {
         ...mockStore,
         selectedObjects: ['obj1'],
       };
-      (useCollaborationStore as any).mockReturnValue(storeWithSelection);
+      vi.mocked(useCollaborationStore).mockReturnValue(storeWithSelection);
       
       mockCanvas.getActiveObject.mockReturnValue(mockFabricObject);
       
@@ -263,7 +258,7 @@ describe('useExport', () => {
       
       const exportResult = await result.current.exportSelection('png');
       
-      expect(exportResult.success).toBe(true);
+      expect(exportResult?.success).toBe(true);
     });
   });
 
@@ -277,7 +272,6 @@ describe('useExport', () => {
         format: 'png',
         quality: 1,
         multiplier: 2,
-        withoutTransform: false,
       });
     });
   });

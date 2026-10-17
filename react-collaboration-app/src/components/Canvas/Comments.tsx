@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Comment } from '@/types';
+import { type Comment } from '@/types';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import { MessageCircle, X, Reply } from 'lucide-react';
+
+function createReply(text: string, userId: string) {
+  return { id: crypto.randomUUID(), text, userId, timestamp: Date.now() };
+}
 
 interface CommentsProps {
   comments: Comment[];
@@ -26,12 +30,7 @@ export const Comments: React.FC<CommentsProps> = ({ comments }) => {
     const comment = comments.find(c => c.id === commentId);
     if (!comment) return;
 
-    const newReply = {
-      id: Date.now().toString(),
-      text: replyText,
-      userId: currentUser.id,
-      timestamp: Date.now(),
-    };
+    const newReply = createReply(replyText, currentUser.id);
 
     updateComment(commentId, {
       replies: [...comment.replies, newReply],

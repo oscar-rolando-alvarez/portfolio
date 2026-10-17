@@ -6,7 +6,7 @@ import { RealtimeState } from './types';
 
 export const useRealtimeStore = create<RealtimeState>()(
   devtools(
-    immer((set, get) => ({
+    immer((set) => ({
       isConnected: false,
       connectionStatus: 'disconnected',
       lastMessage: null,
@@ -52,7 +52,7 @@ export const useRealtimeStore = create<RealtimeState>()(
           // Limit cache size
           if (state.chartDataCache.size > 100) {
             const firstKey = state.chartDataCache.keys().next().value;
-            state.chartDataCache.delete(firstKey);
+            if (firstKey !== undefined) state.chartDataCache.delete(firstKey);
           }
         }),
 

@@ -50,7 +50,7 @@ export function throttle<T extends (...args: any[]) => any>(
 ): (...args: Parameters<T>) => void {
   let inThrottle: boolean;
   
-  return function(...args: Parameters<T>) {
+  return function (this: unknown, ...args: Parameters<T>) {
     if (!inThrottle) {
       func.apply(this, args);
       inThrottle = true;
@@ -133,6 +133,8 @@ export function deepClone<T>(obj: T): T {
 export function isEmpty(obj: any): boolean {
   if (obj == null) return true;
   if (Array.isArray(obj) || typeof obj === 'string') return obj.length === 0;
+  if (obj instanceof Map || obj instanceof Set) return obj.size === 0;
+  if (typeof obj !== 'object') return false; // numbers, booleans, functions are values
   return Object.keys(obj).length === 0;
 }
 
@@ -330,7 +332,7 @@ export function measurePerformance<T>(fn: () => T, label?: string): T {
   const end = performance.now();
   
   if (label) {
-    console.log(`${label} took ${end - start} milliseconds`);
+    console.warn(`${label} took ${end - start} milliseconds`);
   }
   
   return result;

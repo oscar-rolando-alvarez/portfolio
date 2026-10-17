@@ -8,7 +8,7 @@ import { generateId } from '@/utils/helpers';
 export const useNotificationStore = create<NotificationState>()(
   devtools(
     persist(
-      immer((set, get) => ({
+      immer((set) => ({
         alerts: [],
         unreadCount: 0,
         isOpen: false,

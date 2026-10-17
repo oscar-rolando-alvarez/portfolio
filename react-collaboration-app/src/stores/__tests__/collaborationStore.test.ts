@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useCollaborationStore } from '../collaborationStore';
 import { createMockUser, createMockLayer, createMockComment, createMockOperation, mockCanvas } from '@/test/utils';
 

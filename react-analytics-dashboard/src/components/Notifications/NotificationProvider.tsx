@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect } from 'react';
 import { useNotificationStore } from '@/store/notificationStore';
 import { Alert } from '@/types';
 
@@ -19,16 +19,17 @@ interface NotificationProviderProps {
 export function NotificationProvider({ children }: NotificationProviderProps) {
   const { addAlert, removeAlert, clearAlerts } = useNotificationStore();
 
-  const showNotification = (alert: Alert) => {
-    addAlert(alert);
+  const showNotification = useCallback(
+    (alert: Alert) => {
+      addAlert(alert);
 
-    // Auto-remove success and info notifications after 5 seconds
-    if (alert.type === 'success' || alert.type === 'info') {
-      setTimeout(() => {
-        removeAlert(alert.id);
-      }, 5000);
-    }
-  };
+      // Auto-remove success and info notifications after 5 seconds
+      if (alert.type === 'success' || alert.type === 'info') {
+        setTimeout(() => removeAlert(alert.id), 5000);
+      }
+    },
+    [addAlert, removeAlert]
+  );
 
   const hideNotification = (id: string) => {
     removeAlert(id);
@@ -78,7 +79,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       window.removeEventListener('error', handleError);
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
-  }, []);
+  }, [showNotification]);
 
   const contextValue: NotificationContextType = {
     showNotification,

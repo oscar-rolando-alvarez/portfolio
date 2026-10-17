@@ -1,7 +1,8 @@
 import { useEffect, useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { KeyboardShortcut, ToolType } from '@/types';
+import * as fabric from 'fabric';
+import type { KeyboardShortcut } from '@/types';
 
 export const keyboardShortcuts: KeyboardShortcut[] = [
   // Tools
@@ -142,7 +143,7 @@ export const useKeyboardShortcuts = () => {
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
     if (activeObject) {
-      activeObject.clone((cloned: fabric.Object) => {
+      void activeObject.clone().then((cloned) => {
         localStorage.setItem('canvas-clipboard', JSON.stringify(cloned.toObject()));
       });
     }
@@ -154,7 +155,7 @@ export const useKeyboardShortcuts = () => {
     if (clipboardData) {
       try {
         const objectData = JSON.parse(clipboardData);
-        fabric.util.enlivenObjects([objectData], (objects: fabric.Object[]) => {
+        void fabric.util.enlivenObjects<fabric.FabricObject>([objectData]).then((objects) => {
           objects.forEach(obj => {
             obj.set({
               left: (obj.left || 0) + 10,
@@ -174,7 +175,7 @@ export const useKeyboardShortcuts = () => {
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
     if (activeObject) {
-      activeObject.clone((cloned: fabric.Object) => {
+      void activeObject.clone().then((cloned) => {
         cloned.set({
           left: (cloned.left || 0) + 10,
           top: (cloned.top || 0) + 10,
@@ -195,7 +196,7 @@ export const useKeyboardShortcuts = () => {
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
     if (activeObject) {
-      canvas.bringForward(activeObject);
+      canvas.bringObjectForward(activeObject);
       canvas.renderAll();
     }
   }, [canvas]);
@@ -204,7 +205,7 @@ export const useKeyboardShortcuts = () => {
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
     if (activeObject) {
-      canvas.sendBackwards(activeObject);
+      canvas.sendObjectBackwards(activeObject);
       canvas.renderAll();
     }
   }, [canvas]);
@@ -213,7 +214,7 @@ export const useKeyboardShortcuts = () => {
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
     if (activeObject) {
-      canvas.bringToFront(activeObject);
+      canvas.bringObjectToFront(activeObject);
       canvas.renderAll();
     }
   }, [canvas]);
@@ -222,7 +223,7 @@ export const useKeyboardShortcuts = () => {
     if (!canvas) return;
     const activeObject = canvas.getActiveObject();
     if (activeObject) {
-      canvas.sendToBack(activeObject);
+      canvas.sendObjectToBack(activeObject);
       canvas.renderAll();
     }
   }, [canvas]);

@@ -1,9 +1,8 @@
 import { useCallback } from 'react';
 import { useCollaborationStore } from '@/stores/collaborationStore';
-import { ExportFormat, ExportOptions } from '@/types';
+import * as fabric from 'fabric';
+import type { ExportFormat, ExportOptions } from '@/types';
 import { downloadFile } from '@/lib/utils';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 
 export const useExport = () => {
   const { canvas, selectedObjects } = useCollaborationStore();
@@ -33,7 +32,6 @@ export const useExport = () => {
           format: 'png',
           quality: options.quality || 1,
           multiplier: options.scale || 1,
-          withoutTransform: false,
         });
       }
 
@@ -133,6 +131,8 @@ export const useExport = () => {
       }
 
       // Create PDF
+      // jsPDF is large; load it only when a PDF export is requested.
+      const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF({
         orientation: width > height ? 'landscape' : 'portrait',
         unit: 'px',
@@ -244,23 +244,23 @@ export const useExport = () => {
         canvas.clear();
         
         // Set canvas properties
-        if (data.canvas.width) canvas.setWidth(data.canvas.width);
-        if (data.canvas.height) canvas.setHeight(data.canvas.height);
-        if (data.canvas.backgroundColor) canvas.setBackgroundColor(data.canvas.backgroundColor, () => {});
+        if (data.canvas.width || data.canvas.height) {
+          canvas.setDimensions({
+            width: data.canvas.width ?? canvas.getWidth(),
+            height: data.canvas.height ?? canvas.getHeight(),
+          });
+        }
+        if (data.canvas.backgroundColor) canvas.set('backgroundColor', data.canvas.backgroundColor);
       }
 
       // Import objects
-      const importedObjects = await new Promise<fabric.Object[]>((resolve, reject) => {
-        fabric.util.enlivenObjects(data.objects, (objects: fabric.Object[]) => {
-          resolve(objects);
-        }, '');
-      });
+      const importedObjects = await fabric.util.enlivenObjects<fabric.FabricObject>(data.objects);
 
       // Add objects to canvas
       importedObjects.forEach(obj => {
         // Assign new IDs to prevent conflicts
         obj.set({
-          id: `imported_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: crypto.randomUUID(),
         });
         canvas.add(obj);
       });
@@ -317,12 +317,12 @@ export const useExport = () => {
       if (selectedOnly && selectedObjects.length > 0) {
         const group = canvas.getActiveObject();
         if (group) {
-          dataURL = group.toDataURL({ format: 'png', quality: 1 });
+          dataURL = group.toDataURL({ format: 'png', quality: 1, multiplier: 1 });
         } else {
           throw new Error('No selection found');
         }
       } else {
-        dataURL = canvas.toDataURL({ format: 'png', quality: 1 });
+        dataURL = canvas.toDataURL({ format: 'png', quality: 1, multiplier: 1 });
       }
 
       // Convert to blob

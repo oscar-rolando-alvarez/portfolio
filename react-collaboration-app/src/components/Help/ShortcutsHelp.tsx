@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { HelpCircle, Keyboard, X } from 'lucide-react';
+import { HelpCircle, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { keyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { KeyboardShortcut } from '@/types';
+import { type KeyboardShortcut } from '@/types';
 
 const shortcutCategories = {
   tools: 'Drawing Tools',

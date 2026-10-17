@@ -1,18 +1,18 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { io, type Socket } from 'socket.io-client';
 import { useRealtimeStore } from '@/store/realtimeStore';
 import { useNotificationStore, createAlert } from '@/store/notificationStore';
-import { WebSocketMessage, RealtimeUpdate } from '@/types';
+import type { Alert, ChartData, RealtimeUpdate, WebSocketMessage } from '@/types';
 
 interface WebSocketContextType {
   socket: Socket | null;
   isConnected: boolean;
-  reconnectAttempts: number;
+  enabled: boolean;
   subscribe: (channel: string) => void;
   unsubscribe: (channel: string) => void;
-  emit: (event: string, data: any) => void;
+  emit: (event: string, data: unknown) => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -20,184 +20,103 @@ const WebSocketContext = createContext<WebSocketContextType | null>(null);
 interface WebSocketProviderProps {
   children: React.ReactNode;
   url?: string;
-  options?: any;
+  /** Real-time streaming is opt-in so the dashboard works without a backend. */
+  enabled?: boolean;
 }
 
-export function WebSocketProvider({ 
-  children, 
-  url = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001',
-  options = {}
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+export function WebSocketProvider({
+  children,
+  url = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:3001',
+  enabled = process.env.NEXT_PUBLIC_ENABLE_REALTIME === 'true',
 }: WebSocketProviderProps) {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
-  const maxReconnectAttempts = 5;
-  const reconnectDelay = 1000; // Start with 1 second
-
-  const { 
-    setConnectionStatus, 
-    addMessage, 
-    subscribe: storeSubscribe, 
-    unsubscribe: storeUnsubscribe,
-    updateChartData,
-    isConnected 
-  } = useRealtimeStore();
-  
-  const { addAlert } = useNotificationStore();
-
-  const connect = () => {
-    if (socket?.connected) return;
-
-    setConnectionStatus('connecting');
-    
-    const newSocket = io(url, {
-      transports: ['websocket'],
-      timeout: 10000,
-      ...options,
-    });
-
-    // Connection events
-    newSocket.on('connect', () => {
-      console.log('WebSocket connected');
-      setConnectionStatus('connected');
-      setReconnectAttempts(0);
-      
-      addAlert(createAlert.success(
-        'Connected',
-        'Real-time connection established'
-      ));
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      console.log('WebSocket disconnected:', reason);
-      setConnectionStatus('disconnected');
-      
-      if (reason !== 'io client disconnect') {
-        // Attempt to reconnect if not manually disconnected
-        attemptReconnect();
-      }
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('WebSocket connection error:', error);
-      setConnectionStatus('error');
-      attemptReconnect();
-    });
-
-    // Data events
-    newSocket.on('message', (message: WebSocketMessage) => {
-      addMessage(message);
-      handleMessage(message);
-    });
-
-    newSocket.on('realtime_update', (update: RealtimeUpdate) => {
-      updateChartData(update.chartId, update.data as any);
-    });
-
-    newSocket.on('alert', (alert) => {
-      addAlert(alert);
-    });
-
-    // System events
-    newSocket.on('heartbeat', () => {
-      addMessage({
-        type: 'heartbeat',
-        payload: { timestamp: new Date() },
-        timestamp: new Date(),
-      });
-    });
-
-    setSocket(newSocket);
-  };
-
-  const attemptReconnect = () => {
-    if (reconnectAttempts >= maxReconnectAttempts) {
-      console.log('Max reconnection attempts reached');
-      addAlert(createAlert.error(
-        'Connection Failed',
-        'Unable to establish real-time connection. Please refresh the page.'
-      ));
-      return;
-    }
-
-    const delay = reconnectDelay * Math.pow(2, reconnectAttempts); // Exponential backoff
-    
-    reconnectTimeoutRef.current = setTimeout(() => {
-      console.log(`Attempting to reconnect (${reconnectAttempts + 1}/${maxReconnectAttempts})`);
-      setReconnectAttempts(prev => prev + 1);
-      connect();
-    }, delay);
-  };
-
-  const handleMessage = (message: WebSocketMessage) => {
-    switch (message.type) {
-      case 'data':
-        // Handle real-time data updates
-        if (message.payload.chartId) {
-          updateChartData(message.payload.chartId, message.payload.data);
-        }
-        break;
-      
-      case 'alert':
-        addAlert(message.payload);
-        break;
-      
-      case 'system':
-        console.log('System message:', message.payload);
-        break;
-      
-      default:
-        console.log('Unknown message type:', message.type);
-    }
-  };
-
-  const subscribe = (channel: string) => {
-    if (socket?.connected) {
-      socket.emit('subscribe', channel);
-      storeSubscribe(channel);
-    }
-  };
-
-  const unsubscribe = (channel: string) => {
-    if (socket?.connected) {
-      socket.emit('unsubscribe', channel);
-      storeUnsubscribe(channel);
-    }
-  };
-
-  const emit = (event: string, data: any) => {
-    if (socket?.connected) {
-      socket.emit(event, data);
-    }
-  };
+  const setConnectionStatus = useRealtimeStore((s) => s.setConnectionStatus);
+  const addMessage = useRealtimeStore((s) => s.addMessage);
+  const storeSubscribe = useRealtimeStore((s) => s.subscribe);
+  const storeUnsubscribe = useRealtimeStore((s) => s.unsubscribe);
+  const updateChartData = useRealtimeStore((s) => s.updateChartData);
+  const isConnected = useRealtimeStore((s) => s.isConnected);
+  const addAlert = useNotificationStore((s) => s.addAlert);
 
   useEffect(() => {
-    connect();
+    if (!enabled) return;
+
+    setConnectionStatus('connecting');
+    // socket.io handles reconnection with exponential backoff natively.
+    const client = io(url, {
+      transports: ['websocket'],
+      timeout: 10_000,
+      reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
+    });
+
+    client.on('connect', () => setConnectionStatus('connected'));
+    client.on('disconnect', () => setConnectionStatus('disconnected'));
+    client.on('connect_error', () => setConnectionStatus('error'));
+    client.io.on('reconnect_failed', () =>
+      addAlert(
+        createAlert.error(
+          'Connection failed',
+          'Unable to establish the real-time connection. Data shown may be stale.'
+        )
+      )
+    );
+
+    client.on('message', (message: WebSocketMessage) => {
+      addMessage(message);
+      if (message.type === 'data' && message.payload?.chartId) {
+        updateChartData(message.payload.chartId, message.payload.data as ChartData);
+      } else if (message.type === 'alert') {
+        addAlert(message.payload as Alert);
+      }
+    });
+    client.on('realtime_update', (update: RealtimeUpdate) => {
+      updateChartData(update.chartId, update.data as unknown as ChartData);
+    });
+    client.on('alert', (alert: Alert) => addAlert(alert));
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the socket instance is created by this effect
+    setSocket(client);
 
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (socket) {
-        socket.disconnect();
-      }
+      client.removeAllListeners();
+      client.disconnect();
+      setSocket(null);
     };
-  }, [url]);
+  }, [enabled, url, setConnectionStatus, addMessage, updateChartData, addAlert]);
 
-  const contextValue: WebSocketContextType = {
-    socket,
-    isConnected,
-    reconnectAttempts,
-    subscribe,
-    unsubscribe,
-    emit,
-  };
-
-  return (
-    <WebSocketContext.Provider value={contextValue}>
-      {children}
-    </WebSocketContext.Provider>
+  const subscribe = useCallback(
+    (channel: string) => {
+      if (!socket?.connected) return;
+      socket.emit('subscribe', channel);
+      storeSubscribe(channel);
+    },
+    [socket, storeSubscribe]
   );
+
+  const unsubscribe = useCallback(
+    (channel: string) => {
+      if (!socket?.connected) return;
+      socket.emit('unsubscribe', channel);
+      storeUnsubscribe(channel);
+    },
+    [socket, storeUnsubscribe]
+  );
+
+  const emit = useCallback(
+    (event: string, data: unknown) => {
+      if (socket?.connected) socket.emit(event, data);
+    },
+    [socket]
+  );
+
+  const value = useMemo<WebSocketContextType>(
+    () => ({ socket, isConnected, enabled, subscribe, unsubscribe, emit }),
+    [socket, isConnected, enabled, subscribe, unsubscribe, emit]
+  );
+
+  return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>;
 }
 
 export function useWebSocket() {
@@ -208,32 +127,15 @@ export function useWebSocket() {
   return context;
 }
 
-// Custom hooks for common WebSocket operations
 export function useRealtimeData(chartId: string) {
   const { subscribe, unsubscribe } = useWebSocket();
-  const chartData = useRealtimeStore(state => state.chartDataCache.get(chartId));
+  const chartData = useRealtimeStore((state) => state.chartDataCache.get(chartId));
 
   useEffect(() => {
     const channel = `chart:${chartId}`;
     subscribe(channel);
-
-    return () => {
-      unsubscribe(channel);
-    };
+    return () => unsubscribe(channel);
   }, [chartId, subscribe, unsubscribe]);
 
   return chartData;
-}
-
-export function useRealtimeNotifications() {
-  const { subscribe, unsubscribe } = useWebSocket();
-
-  useEffect(() => {
-    const channel = 'notifications';
-    subscribe(channel);
-
-    return () => {
-      unsubscribe(channel);
-    };
-  }, [subscribe, unsubscribe]);
 }

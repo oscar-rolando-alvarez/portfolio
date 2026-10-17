@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
-import { User, UserPreferences } from '@/types';
+import { UserPreferences } from '@/types';
 import { UserState } from './types';
 
 const defaultPreferences: UserPreferences = {
@@ -20,7 +20,7 @@ const defaultPreferences: UserPreferences = {
 export const useUserStore = create<UserState>()(
   devtools(
     persist(
-      immer((set, get) => ({
+      immer((set) => ({
         user: null,
         isAuthenticated: false,
         preferences: defaultPreferences,
