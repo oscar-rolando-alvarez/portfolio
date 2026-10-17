@@ -23,7 +23,7 @@ ripemd = "0.2"
 secp256k1 = { version = "0.33", features = ["rand", "recovery", "global-context"] }
 hex = "0.4"
 bs58 = "0.5"
-rand = "0.9"
+rand = "0.10"
 
 # Networking
 libp2p = { version = "0.57", features = [
