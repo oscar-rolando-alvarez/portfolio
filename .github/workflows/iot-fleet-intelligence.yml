@@ -197,7 +197,7 @@ jobs:
           --health-retries 30
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag is published
         with:
           enable-cache: true
           cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
@@ -228,7 +228,7 @@ jobs:
         working-directory: iot-fleet-intelligence/platform
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag is published
         with:
           enable-cache: true
           cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
@@ -255,7 +255,7 @@ jobs:
         with:
           go-version-file: iot-fleet-intelligence/simulator/go.mod
           cache-dependency-path: iot-fleet-intelligence/simulator/go.sum
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag is published
         with:
           enable-cache: true
           cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
@@ -289,7 +289,7 @@ jobs:
       - name: govulncheck
         working-directory: iot-fleet-intelligence/simulator
         run: go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag is published
         with:
           enable-cache: true
           cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
@@ -305,7 +305,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0 # no floating major tag is published
+      - uses: astral-sh/setup-uv@v10.3.3 # no floating major tag is published
         with:
           enable-cache: true
           cache-dependency-glob: iot-fleet-intelligence/platform/uv.lock
