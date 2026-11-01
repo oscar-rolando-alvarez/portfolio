@@ -4,7 +4,7 @@
 # src/fleetintel/local/runner.py). In AWS the same code ships as a Lambda zip.
 
 # ---- build stage: resolve the locked dependency set into a virtualenv -------------
-FROM python:3.13.16-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS builder
+FROM python:3.13.18-slim-trixie@sha256:76baad6037690d6e8c4397fbcaef17bca6f19eecef822b708fe8fa3417d30bb5 AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --group local --no-editable
 
 # ---- runtime stage: no build tools, non-root ---------------------------------------
-FROM python:3.13.16-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS runtime
+FROM python:3.13.18-slim-trixie@sha256:76baad6037690d6e8c4397fbcaef17bca6f19eecef822b708fe8fa3417d30bb5 AS runtime
 
 LABEL org.opencontainers.image.title="iot-fleet-intelligence-platform" \
       org.opencontainers.image.source="https://github.com/oscar-rolando-alvarez/portfolio" \
