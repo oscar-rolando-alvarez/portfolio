@@ -1,0 +1,160 @@
+# Level 4: Airflow 3 orchestrating a Delta Lake medallion through the Databricks Jobs API.
+# MEDALLION_TARGET=local (default) sends jobs to `databricks-local` (Spark 4 + Delta 4);
+# MEDALLION_TARGET=databricks sends the very same requests to your workspace.
+name: depath-04-databricks-delta-medallion
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    target: runtime
+  image: depath/04-databricks-delta-medallion:local
+  env_file:
+    - path: .env
+      required: false
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:${POSTGRES_PASSWORD:-airflow}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local-dev-only-not-a-secret}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
+    MEDALLION_TARGET: ${MEDALLION_TARGET:-local}
+    LAKE_ROOT: /lake
+    # Local default points at the emulator with a throw-away token. For a real workspace,
+    # set AIRFLOW_CONN_DATABRICKS_DEFAULT in .env (host + PAT or OAuth service principal).
+    AIRFLOW_CONN_DATABRICKS_DEFAULT: ${AIRFLOW_CONN_DATABRICKS_DEFAULT:-databricks://:local-dev-token@databricks-local:8090/http}
+    DATABRICKS_GIT_URL: ${DATABRICKS_GIT_URL:-}
+    DATABRICKS_GIT_BRANCH: ${DATABRICKS_GIT_BRANCH:-master}
+    DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-main}
+    DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-clickstream}
+    DATABRICKS_CLUSTER_POLICY_ID: ${DATABRICKS_CLUSTER_POLICY_ID:-}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./include:/opt/airflow/include
+    - ./jobs:/opt/airflow/jobs
+    - ./lake:/lake
+    - ./logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on: &airflow-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+
+  # Spark 4.2 + Delta Lake 4.4 behind a minimal Databricks Jobs API 2.2 emulator.
+  databricks-local:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+      target: runtime
+    image: depath/04-databricks-local:local
+    environment:
+      LOCAL_DATABRICKS_TOKEN: local-dev-token
+      PUBLIC_URL: http://localhost:${DATABRICKS_LOCAL_PORT:-8090}
+      SPARK_MASTER: local[2]
+    volumes:
+      - ./jobs:/workspace/jobs
+      - ./lake:/lake
+    ports:
+      - "${DATABRICKS_LOCAL_PORT:-8090}:8090"
+    restart: unless-stopped
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "${AIRFLOW_PORT:-8084}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      databricks-local:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # `docker compose --profile test run --rm tests` / `... tests-spark`: offline test suites.
+  tests:
+    build:
+      context: .
+      target: test
+    image: depath/04-databricks-delta-medallion:test
+    profiles: ["test"]
+    environment:
+      MEDALLION_TARGET: local
+
+  tests-spark:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+      target: test
+    image: depath/04-databricks-local:test
+    profiles: ["test"]
+
+volumes:
+  postgres-data:

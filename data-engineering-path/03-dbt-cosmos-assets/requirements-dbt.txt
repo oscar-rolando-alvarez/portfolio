@@ -1,0 +1,5 @@
+# dbt runs in its own virtualenv (see Dockerfile) so it never conflicts with Airflow.
+dbt-core==1.12.7
+dbt-duckdb==1.11.1
+dbt-snowflake==1.12.5
+duckdb==2.0.0

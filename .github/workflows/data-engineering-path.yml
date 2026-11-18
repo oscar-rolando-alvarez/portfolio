@@ -1,0 +1,67 @@
+name: data-engineering-path
+
+on:
+  pull_request:
+    paths:
+      - "data-engineering-path/**"
+      - ".github/workflows/data-engineering-path.yml"
+  push:
+    branches: [master]
+    paths:
+      - "data-engineering-path/**"
+      - ".github/workflows/data-engineering-path.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: data-engineering-path-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Each level ships a `test` stage in its Dockerfile; CI runs exactly what `make test` runs
+  # locally. No cloud credentials: Snowflake runs as DuckDB, Databricks as local Spark + Delta.
+  levels:
+    name: ${{ matrix.level }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - level: 01-airflow-foundations
+            services: tests
+          - level: 02-snowflake-idempotent-loads
+            services: tests
+          - level: 03-dbt-cosmos-assets
+            services: tests
+          - level: 04-databricks-delta-medallion
+            services: tests tests-spark
+          - level: 05-principal-reference-architecture
+            services: cost lineage-tests
+    defaults:
+      run:
+        working-directory: data-engineering-path/${{ matrix.level }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run test containers
+        run: |
+          for service in ${{ matrix.services }}; do
+            echo "::group::$service"
+            docker compose --profile test run --rm --build "$service"
+            echo "::endgroup::"
+          done
+
+  terraform:
+    name: 05 terraform (fmt, validate, test with mocked providers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: data-engineering-path/05-principal-reference-architecture/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+      - run: ./check.sh

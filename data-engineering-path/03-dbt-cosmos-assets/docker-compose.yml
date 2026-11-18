@@ -1,0 +1,137 @@
+# Level 3: ingestion -> dbt (Cosmos) -> report, chained by Assets.
+# WAREHOUSE_BACKEND=duckdb + DBT_TARGET=local (default) run everything locally.
+name: depath-03-dbt-cosmos-assets
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    target: runtime
+  image: depath/03-dbt-cosmos-assets:local
+  env_file:
+    - path: .env
+      required: false
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:${POSTGRES_PASSWORD:-airflow}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local-dev-only-not-a-secret}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
+    DATA_ROOT: /opt/airflow/data
+    WAREHOUSE_BACKEND: ${WAREHOUSE_BACKEND:-duckdb}
+    DUCKDB_PATH: /opt/airflow/data/warehouse.duckdb
+    # FileSensor base path: the landing zone lives under the data root.
+    AIRFLOW_CONN_FS_DEFAULT: '{"conn_type": "fs", "extra": {"path": "/opt/airflow/data"}}'
+    # Only read when WAREHOUSE_BACKEND=snowflake. Set it in .env, never in this file.
+    AIRFLOW_CONN_SNOWFLAKE_DEFAULT: ${AIRFLOW_CONN_SNOWFLAKE_DEFAULT:-}
+    # dbt target: local (DuckDB) or snowflake (reads SNOWFLAKE_* from .env)
+    DBT_TARGET: ${DBT_TARGET:-local}
+    SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+    SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
+    SNOWFLAKE_PRIVATE_KEY_PATH: ${SNOWFLAKE_PRIVATE_KEY_PATH:-}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./include:/opt/airflow/include
+    - ./data:/opt/airflow/data
+    - ./logs:/opt/airflow/logs
+    - ./scripts:/opt/airflow/scripts
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on: &airflow-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    # The pool caps concurrent warehouse loads. DuckDB allows one writer, so 1 locally;
+    # with Snowflake, size it to the warehouse (e.g. 4-8 for an X-Small/Small).
+    command: >-
+      bash -c "airflow pools set warehouse $${WAREHOUSE_POOL_SLOTS} 'Concurrent loads into the warehouse'"
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+      WAREHOUSE_POOL_SLOTS: ${WAREHOUSE_POOL_SLOTS:-1}
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "${AIRFLOW_PORT:-8083}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # `docker compose run --rm tests` — lint + unit + DAG tests, fully offline.
+  tests:
+    build:
+      context: .
+      target: test
+    image: depath/03-dbt-cosmos-assets:test
+    profiles: ["test"]
+    environment:
+      WAREHOUSE_BACKEND: duckdb
+
+volumes:
+  postgres-data:

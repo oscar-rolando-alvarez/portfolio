@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: Tables loaded idempotently by the shop_raw_ingest DAG (see Level 2).
+    tables:
+      - name: customers
+        columns:
+          - name: customer_id
+            data_tests: [not_null, unique]
+      - name: orders
+        columns:
+          - name: order_id
+            data_tests: [not_null, unique]
+      - name: payments
+        columns:
+          - name: payment_id
+            data_tests: [not_null, unique]

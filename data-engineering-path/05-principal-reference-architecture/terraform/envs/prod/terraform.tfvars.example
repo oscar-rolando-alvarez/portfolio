@@ -1,0 +1,8 @@
+# Example values only. Real values live in CI variables or a private tfvars file.
+name_prefix            = "acme-data-prod"
+vpc_id                 = "vpc-0123456789abcdef0"
+private_subnet_ids     = ["subnet-0aaaaaaaaaaaaaaaa", "subnet-0bbbbbbbbbbbbbbbb"]
+openlineage_url        = "https://lineage.internal.example.com"
+alert_emails           = ["data-oncall@example.com"]
+monthly_budget_usd     = 5000
+databricks_uc_role_arn = "arn:aws:iam::123456789012:role/acme-data-prod-uc"

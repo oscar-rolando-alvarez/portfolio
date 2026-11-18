@@ -1,0 +1,180 @@
+# Level 5: the runnable parts of the reference architecture.
+#   default profile: Airflow 3 + PostgreSQL "warehouse" + Marquez (OpenLineage backend + UI)
+#   test profile:    Terraform guardrail tests (mocked providers), cost model, lineage DAG tests
+name: depath-05-principal-reference-architecture
+
+x-airflow-common: &airflow-common
+  build:
+    context: ./lineage
+    target: runtime
+  image: depath/05-lineage-airflow:local
+  env_file:
+    - path: .env
+      required: false
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:${POSTGRES_PASSWORD:-airflow}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local-dev-only-not-a-secret}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # OpenLineage: every task start/complete is sent to Marquez, with SQL-derived lineage.
+    AIRFLOW__OPENLINEAGE__TRANSPORT: '{"type": "http", "url": "http://marquez:5000", "endpoint": "api/v1/lineage"}'
+    AIRFLOW__OPENLINEAGE__NAMESPACE: depath-level5
+    AIRFLOW_CONN_WAREHOUSE: postgresql://shop:${WAREHOUSE_PASSWORD:-shop}@warehouse-db:5432/shop
+  volumes:
+    - ./lineage/dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on: &airflow-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  warehouse-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: ${WAREHOUSE_PASSWORD:-shop}
+      POSTGRES_DB: shop
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "shop"]
+      interval: 5s
+      retries: 10
+
+  marquez-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez # fixed by Marquez's bundled dev config; local only
+      POSTGRES_DB: marquez
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "marquez"]
+      interval: 5s
+      retries: 10
+
+  marquez:
+    image: marquezproject/marquez:0.51.1
+    platform: linux/amd64 # upstream publishes amd64 only; emulated on Apple silicon
+    environment:
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+      POSTGRES_HOST: marquez-db
+      POSTGRES_PORT: 5432
+      SEARCH_ENABLED: "false"
+    ports:
+      - "${MARQUEZ_API_PORT:-5002}:5000"
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5001/healthcheck || exit 1"]
+      interval: 10s
+      retries: 30
+      start_period: 30s
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.51.1
+    platform: linux/amd64
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: 5000
+      WEB_PORT: 3000
+    ports:
+      - "${MARQUEZ_WEB_PORT:-3002}:3000"
+    depends_on:
+      marquez:
+        condition: service_healthy
+
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "${AIRFLOW_PORT:-8085}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+      warehouse-db:
+        condition: service_healthy
+      marquez:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    depends_on:
+      <<: *airflow-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---- test profile -----------------------------------------------------------
+  terraform:
+    image: hashicorp/terraform:1.17.1
+    profiles: ["test"]
+    working_dir: /tf
+    volumes:
+      - ./terraform:/tf
+    entrypoint: ["sh", "./check.sh"]
+
+  cost:
+    build: ./cost
+    image: depath/05-cost:test
+    profiles: ["test"]
+
+  lineage-tests:
+    build:
+      context: ./lineage
+      target: test
+    image: depath/05-lineage-airflow:test
+    profiles: ["test"]
+
+volumes:
+  postgres-data:
+  airflow-logs:

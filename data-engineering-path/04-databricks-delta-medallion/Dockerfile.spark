@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+# "databricks-local": Spark 4.2 + Delta Lake 4.4 + a minimal Jobs API 2.2 emulator.
+FROM python:3.12-slim-bookworm AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps curl \
+    && rm -rf /var/lib/apt/lists/*
+# Same UID as the Airflow image so both containers can write the shared ./lake bind mount.
+RUN useradd --uid 50000 --gid 0 --create-home spark
+COPY requirements-spark.txt /tmp/requirements-spark.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-spark.txt
+USER spark
+WORKDIR /workspace
+COPY --chown=spark:root jobs /workspace/jobs
+# Resolve the Delta jars at build time so runs (and CI) never need Maven Central.
+RUN cd /workspace/jobs && LOCAL_DELTA=1 python -c \
+    "from lib.session import get_spark; s = get_spark('warmup'); s.range(1).count(); s.stop()"
+COPY --chown=spark:root databricks_local /workspace/databricks_local
+ENV PYTHONPATH=/workspace \
+    WORKSPACE_ROOT=/workspace \
+    LOCAL_DELTA=1
+EXPOSE 8090
+HEALTHCHECK --interval=10s --timeout=5s --retries=10 CMD curl -fsS http://localhost:8090/health || exit 1
+CMD ["uvicorn", "databricks_local.app:app", "--host", "0.0.0.0", "--port", "8090"]
+
+FROM runtime AS test
+USER root
+COPY requirements-dev.txt /tmp/requirements-dev.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-dev.txt
+USER spark
+COPY --chown=spark:root pyproject.toml /workspace/pyproject.toml
+COPY --chown=spark:root tests_spark /workspace/tests_spark
+CMD ["bash", "-c", "ruff check jobs databricks_local tests_spark && ruff format --check jobs databricks_local tests_spark && pytest tests_spark"]
