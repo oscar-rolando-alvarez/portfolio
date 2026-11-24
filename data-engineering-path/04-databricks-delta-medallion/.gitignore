@@ -1,0 +1,5 @@
+lake/
+logs/
+data/
+__pycache__/
+.ruff_cache/

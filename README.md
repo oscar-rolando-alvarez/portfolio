@@ -3,7 +3,7 @@
 **Principal AI Architect** · GenAI platforms, agentic systems and cloud-native architecture
 [oralvarez@gmail.com](mailto:oralvarez@gmail.com) · [github.com/oscar-rolando-alvarez](https://github.com/oscar-rolando-alvarez)
 
-This monorepo holds 22 independent, runnable reference systems. Each one builds, tests and ships in its own GitHub Actions pipeline, and comes with a README explaining the problem it solves, its architecture (Mermaid C4, sequence and data diagrams), how to run it, and the trade-offs behind it.
+This monorepo holds 22 independent, runnable reference systems, plus a five-level [data engineering learning path](data-engineering-path/) (Airflow 3, Snowflake, Databricks). Each one builds, tests and ships in its own GitHub Actions pipeline, and comes with a README explaining the problem it solves, its architecture (Mermaid C4, sequence and data diagrams), how to run it, and the trade-offs behind it.
 
 The four **flagship GenAI systems** below are the best starting point. They show how I approach production AI: governance and evaluation first, provider-agnostic by design, observable end to end, and deployable through infrastructure as code.
 
@@ -29,6 +29,18 @@ flowchart LR
 ```
 
 The systems are independent, but they are designed to compose as shown: the gateway is the single governed path to models, and the RAG platform, the agent orchestrator and the IoT diagnosis pipeline are workloads behind it.
+
+## 🛠️ Data engineering learning path: Airflow 3, Snowflake, Databricks
+
+Five projects that build on each other, from a first Airflow DAG to a Principal-level AWS platform design. Each one runs with `docker compose`, and every test suite passes without a Snowflake or Databricks account: DuckDB and local Spark + Delta Lake stand in behind the same interfaces. One path-filtered pipeline tests all five: [![CI](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/data-engineering-path.yml/badge.svg)](https://github.com/oscar-rolando-alvarez/portfolio/actions/workflows/data-engineering-path.yml)
+
+| Level | Project | What it demonstrates |
+|---|---|---|
+| 1 · Basic | [01-airflow-foundations](data-engineering-path/01-airflow-foundations/) | Airflow 3 components in Compose, TaskFlow, data intervals (and the Airflow 3 timetable change), atomic partitioned writes, quality gate, DagBag and `dag.test()` |
+| 2 · Intermediate | [02-snowflake-idempotent-loads](data-engineering-path/02-snowflake-idempotent-loads/) | `COPY INTO … FORCE` + `MERGE` / `DELETE`+`INSERT` with in-transaction reconciliation, dynamic task mapping, pools, deferrable sensors |
+| 3 · Advanced | [03-dbt-cosmos-assets](data-engineering-path/03-dbt-cosmos-assets/) | dbt via Astronomer Cosmos (manifest parsing, per-model `build`), incremental idempotent models, late-arriving dimensions, Asset-driven scheduling, CI |
+| 4 · Lakehouse | [04-databricks-delta-medallion](data-engineering-path/04-databricks-delta-medallion/) | PySpark bronze/silver/gold on Delta Lake, quarantine and late data, Databricks Jobs API with idempotency tokens and deferrable operators, contract-tested local stand-in |
+| 5 · Principal | [05-principal-reference-architecture](data-engineering-path/05-principal-reference-architecture/) | Terraform for S3, MWAA, Snowflake and Databricks tested with mocked providers, OpenLineage + Marquez, cost model, 8 ADRs |
 
 ## Portfolio map
 
@@ -57,6 +69,9 @@ flowchart TB
         docs["document-management-dotnet"]
         shop["ecommerce-microservices-dotnet"]
         rws["rust-web-server"]
+    end
+    subgraph data["Data engineering path"]
+        l1["01 Airflow foundations"] --> l2["02 Snowflake loads"] --> l3["03 dbt + Cosmos + Assets"] --> l4["04 Databricks + Delta"] --> l5["05 Principal architecture"]
     end
     subgraph chain["Blockchain and Web3"]
         rbc["rust-blockchain"]
@@ -123,6 +138,7 @@ portfolio/
 │   ├── workflows/        # one pipeline per project, path-filtered
 │   └── dependabot.yml    # grouped monthly updates for every ecosystem
 ├── <project>/            # 22 self-contained projects, each with its own README
+├── data-engineering-path/# 5 progressive Airflow / Snowflake / Databricks projects
 ├── SECURITY.md
 └── README.md
 ```

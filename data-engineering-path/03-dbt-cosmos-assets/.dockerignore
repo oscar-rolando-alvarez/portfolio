@@ -1,0 +1,7 @@
+data
+logs
+.env
+**/__pycache__
+.ruff_cache
+dbt/shop/target
+dbt/shop/logs

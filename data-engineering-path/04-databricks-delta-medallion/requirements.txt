@@ -1,0 +1,2 @@
+# Added on top of apache/airflow.
+apache-airflow-providers-databricks==7.24.0

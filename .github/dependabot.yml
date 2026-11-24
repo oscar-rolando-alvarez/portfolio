@@ -132,6 +132,12 @@ updates:
       - /rust-web-server
       - /social-media-platform
       - /vue-project-management
+      - /data-engineering-path/01-airflow-foundations
+      - /data-engineering-path/02-snowflake-idempotent-loads
+      - /data-engineering-path/03-dbt-cosmos-assets
+      - /data-engineering-path/04-databricks-delta-medallion
+      - /data-engineering-path/05-principal-reference-architecture/lineage
+      - /data-engineering-path/05-principal-reference-architecture/cost
     schedule: { interval: monthly }
     groups:
       base-images: { patterns: ["*"] }
@@ -145,4 +151,5 @@ updates:
       - /enterprise-rag-platform/infra/terraform/envs/reference
       - /enterprise-rag-platform/infra/terraform/modules/rag_platform
       - /iot-fleet-intelligence/infra/terraform
+      - /data-engineering-path/05-principal-reference-architecture/terraform/envs/prod
     schedule: { interval: monthly }
